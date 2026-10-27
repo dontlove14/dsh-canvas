@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["vite/client", "react", "react-dom"] },
+  "include": ["src/shared/**/*.ts", "src/client/**/*.ts", "src/client/**/*.tsx", "src/dev/main.tsx"]
+}

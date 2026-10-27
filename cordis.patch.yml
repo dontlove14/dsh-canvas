@@ -1,0 +1,9 @@
+- insert:
+    - id: canvas
+      name: dsh-canvas
+      config:
+        maxConcurrentTasks: 2
+        pollIntervalMs: 3000
+        requestTimeoutMs: 120000
+        maxMediaBytes: 209715200
+        maxReferenceBytes: 20971520

@@ -1,0 +1,39 @@
+import { useEffect, useState } from 'react'
+import { TtsSettingsInputSchema, type PublicTtsSettings } from '../shared/contracts'
+import { CanvasApi } from './api'
+import { TtsIcon } from './TtsIcon'
+import { UiButton, UiCheckbox, UiInput } from './ui'
+
+export function TtsSettings({ api }: { api: CanvasApi }) {
+  const [settings, setSettings] = useState<PublicTtsSettings | null>(null)
+  const [address, setAddress] = useState('')
+  const [key, setKey] = useState('')
+  const [clear, setClear] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  useEffect(() => {
+    let live = true
+    void api.ttsSettings().then((value) => { if (live) { setSettings(value); setAddress(value.endpoint) } }).catch((e) => { if (live) setError(e.message) })
+    return () => { live = false }
+  }, [api])
+  const save = async () => {
+    if (!settings || busy) return
+    setBusy(true); setError(''); setMessage('')
+    try {
+      const input = TtsSettingsInputSchema.parse({ endpoint: address, revision: settings.revision, api_key: clear ? '' : key.trim() || (settings.configured ? undefined : '') })
+      setSettings(await api.saveTtsSettings(input)); setKey(''); setClear(false); setMessage('FishTTS 服务已保存在本机')
+    } catch (e) { setError(e instanceof Error ? e.message : '保存失败') } finally { setBusy(false) }
+  }
+  return <form className="dc-tts-settings dc-model-form" aria-label="FishTTS 服务设置" onSubmit={(event) => { event.preventDefault(); void save() }}>
+    <h3><TtsIcon size={24} /> FishTTS 语音服务</h3>
+    <p className="dc-muted">所有语音生成节点共用此服务，节点内无需选择模型。</p>
+    <label>接口地址<UiInput type="url" aria-label="FishTTS 接口地址" value={address} required disabled={!settings || busy} onChange={(event) => setAddress(event.target.value)} /></label>
+    <label>API Key<UiInput type="password" aria-label="FishTTS API Key" value={key} autoComplete="new-password" disabled={!settings || clear || busy}
+      placeholder={settings?.has_api_key ? `${settings.api_key_mask} · 留空保留原密钥` : '输入 ModelLink API Key'}
+      onChange={(event) => setKey(event.target.value)} /></label>
+    {settings?.has_api_key && <UiCheckbox label="清除 FishTTS 已有密钥" checked={clear} onChange={setClear} />}
+    <div className="dc-form-actions"><UiButton variant="primary" type="submit" disabled={!settings || busy}>{busy ? '保存中…' : '保存语音服务'}</UiButton></div>
+    {error && <p className="dc-error" role="alert">{error}</p>}{message && <p className="dc-success" role="status">{message}</p>}
+  </form>
+}

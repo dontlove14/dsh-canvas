@@ -1,0 +1,130 @@
+# 验证记录与已知边界
+
+文档类型：参考；负责人：项目维护者；最近核对：2026-10-27。每次交付 / 实测后更新。
+
+## 本次自动化
+
+2026-10-27，0.2.29：用户反馈0.2.28的蓝色亮段静止；原CSS终点calc求值为无单位number，新增位移回归在旧样式下失败。修正为明确px长度的固定起终点，尾迹0→-33.333333px、亮芯-1.6→-34.933333px；两层按2.3秒线性循环推进一个dash周期，方向 / 相位不变。2项新检查读取实际CSS，验证终点长度类型、正向流动对应的负offset、周期连续性；原6项关系与全部交互回归保持。51份Markdown / 36条ADR、TypeScript、193项测试及构建通过。仅样式修正，不新增逐帧更新 / 依赖 / API / 持久字段。双构建、编译Host、包 / 本机安装和实际preload身份以 `dsh-canvas-0.2.29.manifest.json`为准。未操作浏览器，实际连续运动与顺滑度由用户按[清单](manual-tests.md)145验收，CSS值检查不等于浏览器动画测量。
+
+2026-10-27，0.2.28：新增单选直接入出边蓝色流光，使用source-to-target的Bezier路径、归一化CSS亮段与最后绘制的EdgeText；原BaseEdge选择 / 删除热区、标签和标记保留，选中连线样式只作用主路径。无逐帧React更新、滤镜或持久字段。新增6项回归覆盖直接关系 / 不相关对象复用 / 原图不变、左右两种几何与标签 / 标记 / 热区、单选切换 / 多选 / 清空、侧栏 / 页面隐藏恢复及真实框选取消；原音频 / 播放 / 缩放 / 框选回归保持。51份Markdown / 36条ADR、TypeScript、191项测试、PostCSS解析及构建通过。17路由、Host、依赖、DDL与数据格式不变；双构建 / 编译Host / 包 / 本机安装与实际preload身份以 `dsh-canvas-0.2.28.manifest.json`为准。未操作浏览器，用户按[手动清单](manual-tests.md)142–144验收真实流光、方向、缩放和减少动态效果。
+
+2026-10-27，0.2.27：修正整个AudioPlayer的nodrag和底部整行pointerdown拦截，时间与留白恢复节点拖动 / 点击选择，只在波形及播放按钮隔离节点拖动；整个播放器保留nopan，以原生XYFlow过滤器隔离鼠标画布平移 / 双击缩放，专用wheel处理不变。新增2项实际XYFlow / D3拖拽回归覆盖普通音频和TTS结果、1 / 2倍率、波形加载前后的时间 / 空白位移、播放进度不变、按钮 / 波形不移节点、播放及普通点击边界；扩展原轮滚回归，直接验证原生D3双击后viewport不变。最终50份Markdown / 35条ADR、TypeScript、185项测试、PostCSS解析及构建通过；初始未安装候选因新增原生双击回归失败撤回并存于受限临时目录，修正后重新全量验证，未操作原安装。17路由、Host、依赖、DDL及存储身份保持；双构建 / 编译Host / 包 / 安装与实际preload身份按 `dsh-canvas-0.2.27.manifest.json`记录。未操作浏览器，用户按[手动清单](manual-tests.md)141验收真实拖动 / 播放 / 定位。
+
+2026-10-27，0.2.26：按用户真实宿主截图定位原生Input内层width=100%叠加padding导致越界，修正UiInput原生两层border-box；搜索、分页与表格列设定固定基准尺寸，窄窗换行 / 表格内横向滚动；任务ID前16位省略显示并增加左侧完整ID复制。50份Markdown / 35条ADR、TypeScript、183项测试、PostCSS解析及构建通过；新增3项覆盖完整ID复制 / 成功反馈 / 不触发查询详情、剪贴板拒绝时Modal内选择复制 / 清理 / 恢复焦点及草稿、两条路径失败的真实错误反馈。原180项回归保持，未新增镜像CSS断言。Host、17路由、依赖、DDL与存储格式不变；双构建 / 编译Host / 包 / 实际安装和preload身份按 `dsh-canvas-0.2.26.manifest.json`记录。未操作浏览器，真实间距、列宽、缩略和剪贴板权限由用户按[手动清单](manual-tests.md)139–140验收。
+
+2026-10-27，0.2.25：任务弹窗新增owner范围只读task-search、八列目录表格、全条件AND查询、双月日期时间范围与通用分页、可返回详情。50份Markdown / 35条ADR、TypeScript、180项测试及构建通过；新增11项涵盖SQL联合筛选 / 字面模糊 / owner与删除范围 / 时间端点 / 页码钳制 / 插入上限、日期有效性 / 单侧 / 草稿 / Escape / 键盘、显式查询 / 过期响应 / 跨画布详情返回。SQLite DDL、旧图和旧task接口不变，目录不返回私有快照 / Key。双构建、编译Host的17路由冒烟、包 / 安装 / 实际preload身份按 `dsh-canvas-0.2.25.manifest.json`记录；安装核验为独立门槛。未操作浏览器，实际主题 / 时间层 / 表格 / 返回与分页由用户按[手动清单](manual-tests.md)134–138验收。
+
+2026-10-27，0.2.24：底部“添加节点”菜单按钮间距从4px调为14px，上移约10px。通过公开 `Menu.getAnchorRect` 供宿主跟随定位并保留视口限制，独立开发菜单使用同一gap；其他操作菜单默认不变。49份Markdown / 34条ADR、TypeScript、169项现有测试、CSS解析与构建通过，未增加镜像样式测试。双构建 / 编译Host / 包 / 安装及实际preload身份按 `dsh-canvas-0.2.24.manifest.json`记录；独立Terminal驻留启动，未操作浏览器，真实菜单间距与关闭 / 添加交互由用户按[手动清单](manual-tests.md)133验收。
+
+2026-10-27，0.2.23：接入对话右侧画布标签，见[ADR-0034](adr/0034-conversation-sidebar-canvas.md)。49份Markdown / 34条ADR、TypeScript、169项测试、CSS解析与构建通过。新增5项回归覆盖公开两阶段注册 / 延迟插槽 / 清理 / 共享API、真实CanvasApp项目与目录保留、隐藏轮询暂停 / 草稿自动保存，以及音频资源和TTS结果隐藏停止 / DOM保留 / 返回不重载或重播 / 对话键盘隔离。Host、API、SQLite与既有图数据无变化；双构建 / 编译Host / 包 / 实际安装和client preload以 `dsh-canvas-0.2.23.manifest.json`核验记录为准。未操作浏览器；真实侧栏开启、切换 / 停靠、窄宽布局及多入口保存冲突由用户按[手动清单](manual-tests.md)129–132验收。
+
+2026-10-27，0.2.22：左侧缩放 / 定位按钮组下移，与中间悬浮工具栏共用27px底部间距；覆盖原生面板margin-bottom，保留横向位置与事件。仅[样式](../src/client/styles.css)变化，不新增镜像样式测试。48份Markdown / 33条ADR、TypeScript、164项测试、CSS解析和构建通过。双构建 / 编译Host / 包 / 本机加载身份使用 `dsh-canvas-0.2.22.manifest.json`；未操作浏览器，实际底边对齐与按钮交互由用户按[手动清单](manual-tests.md)128验收。
+
+2026-10-27，0.2.21：透明框选与严格几何选择见[ADR-0033](adr/0033-strict-marquee-selection.md)。48份Markdown / 33条ADR、TypeScript、164项测试、CSS解析和构建通过。新增8项[实际Pane回归](../tests/marqueeSelection.test.tsx)，真实ReactFlow与库getNodesInside直接复现未测量 / 屏幕外节点旁路，再覆盖缩小 / 空选择 / 无图保存、完整包含与最终松手位置、非零容器偏移 / 小数缩放 / 反向拖动、旧选择替换 / Shift基线、取消 / 失焦恢复、资源 / 音频Portal / 结果操作DOM / 编辑器以及过程框与分组透明样式。仅布局 / 媒体浏览器设施替代，选择算法未mock。原156项回归保持；不改变Host、数据库、媒体与任务。双构建 / 编译Host / 包 / 本机加载身份使用 `dsh-canvas-0.2.21.manifest.json`；未操作浏览器，实际鼠标 / 触控板与视觉由用户按[手动清单](manual-tests.md)124–127验收。
+
+2026-10-27，0.2.20：针对放大后文字 / 矢量发虚的截图，撤销永久视口will-change / 3D提示，改为仅硬件允许的固定倍率平移短暂合成；缩放及静止释放，TTS改为灰色内联SVG，见[ADR-0032](adr/0032-scale-aware-viewport-compositing.md)。47份Markdown / 32条ADR、TypeScript、156项测试、CSS解析和构建通过。新增5项[合成状态回归](../tests/viewportCompositing.test.tsx)验证倍率首帧撤销、混合手势 / 小数缩放 / 200ms、隐藏 / 失焦 / 回退 / 销毁、CSS状态映射、实际React Flow Store订阅且不逐帧React渲染、不重挂媒体或覆盖inline transform；原GPU探测、TTS徽章 / 仅输出、音频与原151项回归保持。Host / 图 / 数据不变。双构建 / 编译Host / 包 / 真实加载身份使用 `dsh-canvas-0.2.20.manifest.json`；未操作浏览器，缓存为截图与代码支持的原因假设，实际清晰度 / 图层 / 性能由用户按[手动清单](manual-tests.md)122–123对比。
+
+2026-10-27，0.2.19：TTS情绪文字徽章与单色极简空态见[ADR-0031](adr/0031-tts-emotion-badges-and-monochrome-nodes.md)。46份Markdown / 31条ADR、TypeScript、151项测试、CSS解析和构建通过。[TTS编辑](../tests/ttsUi.test.tsx)新增3项并更新原测试，覆盖已保存原值自动中文徽章、不触发改写、未知括号 / 原子删除 / 撤销、纯文本复制 / 剪切 / 安全粘贴、portal光标与后文保留、仅单色图标 / 320×180 / 仅输出；原[素材编辑](../tests/promptEditor.test.ts)、[受控@组件](../tests/mentionPromptEditor.test.tsx)及TTS生成结果播放回归保持。数据与请求仍为(calm)等原值，无迁移 / 新请求；双构建 / 编译Host / 包 / 本机加载身份记录使用 `dsh-canvas-0.2.19.manifest.json`。实际徽章基线、图标颜色和输入法由用户按[手动清单](manual-tests.md)120–121验收，未操作浏览器。
+
+2026-10-27，0.2.18：新增FishTTS节点、情绪原始标签、计数器和全局服务凭据，见[ADR-0030](adr/0030-fish-tts-nodes-and-streamed-audio.md)。45份Markdown / 30条ADR、TypeScript、148项测试、CSS解析和构建通过。新增14项[服务](../tests/tts.test.ts)、[控件 / 设置](../tests/ttsUi.test.tsx)和[实际画布播放](../tests/audioCanvasPlayback.test.tsx)回归，覆盖完整payload / 音频流 / 原字节 / 波形、入边拒绝、缺配置 / 空文字 / 错路由、hash增量 / 保留音色草稿 / 提交trim、DDL不变 / 重开、Key轮换 / 原地址恢复、401 / 503脱敏与不重提、同结果保存、大小 / 类型拒绝 / 临时字节清理、中文 / 英文 / IME / 光标 / 键盘、计数器、无模型 / 仅输出 / 生成结果持续播放。原134项回归保持。双构建、编译Host、包 / 实际安装与加载身份由 `dsh-canvas-0.2.18.manifest.json`记录；真实账户 / 音色 / 情绪效果与浏览器视觉未验收，用户按[手动清单](manual-tests.md)115–119核对。未自动发起真实生成。
+
+2026-10-27，0.2.17：通用生成参数滑块与音频滚动透传见[ADR-0029](adr/0029-generation-sliders-and-audio-wheel.md)。44份Markdown / 29条ADR、TypeScript、134项测试、CSS语法与构建通过。新增11项[滑块](../tests/sliders.test.tsx)、[Mock流水线](../tests/mockGeneration.test.ts)和[真实DOM滚动](../tests/audioWheel.test.tsx)回归，覆盖1–10数量、非等距固定时长 / 区间 / 步长 / 键盘 / ARIA / 禁用，10个独立图片 / 视频有序保存、第10个主图 / 重开、0秒草稿和提交拒绝，以及音频加载 / 波形 / 按钮 / 时间上的XYFlow双轴平移；[生成组](../tests/generationGroup.test.tsx)扩展10结果，原播放 / 游标回归保持。n校验上限放宽、secondsRange只派生能力，不改变图 / 快照字段、21表DDL或原媒体。交付身份记录使用 `dsh-canvas-0.2.17.manifest.json`；人工滑块与触控板验收见[手动清单](manual-tests.md)113–114。
+
+2026-10-27，0.2.16：音频游标从低频timeupdate改为帧同步实际currentTime，仅直接更新当前SVG游标和新跨过的条，不每帧更新React / 画布。43份Markdown / 28条ADR、TypeScript、123项测试与构建通过。新增5项[帧回归](../tests/audioPlayhead.test.tsx)：无timeupdate仍前进、时钟停顿不假移动、单帧循环、暂停 / seek / 缓冲 / 结束、隐藏 / 错误 / 销毁、倒退 / 归一化边界，以及无逐帧React重绘和旧时间属性不回拉游标；原持续播放 / 切换回归保留。依赖、Host、图 / 任务 / 原媒体不变。双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.16.manifest.json`；实际顺滑度由用户按[手动清单](manual-tests.md)112验收。
+
+2026-10-26，0.2.15：修复音频播放按钮未同步选中节点，导致画布选择规则立即暂停的问题；同一更新选中节点、清除边选择并设置播放身份，数据 / 波形 / Host不变。43份Markdown / 28条ADR、TypeScript、118项测试与构建通过。新增2项[画布播放回归](../tests/audioCanvasPlayback.test.tsx)，先在修复前复现立即暂停，再核对实际Workspace → AudioNode → AudioPlayer的持续播放 / 时间推进、暂停、两音频切换、空白停止和结束重播；只替换画布布局与原生媒体方法，不复写选择策略。双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.15.manifest.json`；浏览器听感由用户按[手动清单](manual-tests.md)111验收。
+
+2026-10-26，0.2.14：真实音频波形卡片、自定义定位播放与紧凑提示词 / 等高徽章 / 末行控制见[ADR-0028](adr/0028-audio-waveforms-and-compact-prompts.md)。43份Markdown / 28条ADR、TypeScript、116项测试、CSS解析与构建通过。新增12项[波形测试](../tests/waveforms.test.ts)和[音频 / 编辑器交互](../tests/audioUi.test.tsx)：真实反相立体声WAV、强弱 / 静音 / 时长、PCM分片 / 压缩、并发 / HEAD / 权限 / 原字节 / DTO / DDL、格式 / 版本 / 归属 / 路径 / 停止；高亮游标、拖动 / 键盘、卸载后迟到结果、仅输出端点 / 固定尺寸，以及两类生成卡片以控制行收尾。波形复用现有ffmpeg，运行依赖 / 21表DDL不变；恢复声明既有jsdom开发测试依赖。双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.14.manifest.json`；未操作浏览器，用户按[手动清单](manual-tests.md)107–110验收。
+
+2026-10-26，0.2.13：生图 / 生视频共享@提示词编辑器，合法候选自动连线、具体素材UUID标签与任务编号解析见[ADR-0027](adr/0027-prompt-asset-mentions.md)。42份Markdown / 27条ADR、TypeScript、104项测试、CSS解析与构建通过。新增18项领域 / DOM / 受控React / Mock链路测试，覆盖光标、多行 / emoji、中文组合、纯文本剪贴板、原子删除 / 撤销、失效引用 / 环 / 能力 / 主图、parent echo与body portal、候选滚动；真实协议替身检查附件与编号提示词一致。运行依赖与21表DDL / DTO不变，仅增加jsdom开发测试依赖。继续本地Mock，无真实生成请求；双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.13.manifest.json`。未操作浏览器，用户按[手动清单](manual-tests.md)102–106验收。
+
+2026-10-26，0.2.12：生成编辑卡片首排上传操作、第二排已连接参考图；图片 / 视频共用布局，各排独立换行。41份Markdown / 26条ADR、TypeScript、86项现有测试、CSS解析和构建通过。本轮仅布局，无新增业务测试；Host、数据、引用绑定和任务行为保持。双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.12.manifest.json`，浏览器两排效果由用户按[手动清单](manual-tests.md)101验收。
+
+2026-10-26，0.2.11：根据用户截图调整媒体外框、SVG圆圈加号、主图专属端点、固定收起位置和展开隐藏编辑，见[ADR-0026](adr/0026-primary-only-group-interaction.md)。41份Markdown / 26条ADR、TypeScript、86项测试、CSS解析和构建通过。新增4项[分组回归](../tests/generationGroup.test.tsx)遍历图片 / 视频、2 / 3 / 4份与每个主图位置，检查只有主图一对端点、左下收起不移动、编辑卡片开关和正方形SVG中心圆；[Mock测试](../tests/mockGeneration.test.ts)更新为新连线仅主图、旧边不改绑。Host、依赖和存量数据结构不变；双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.11.manifest.json`。未操作浏览器，用户按95–100完成实际视觉与交互验收。
+
+2026-10-26，0.2.10：简洁生成节点、动态参数弹层、图片 / 视频分组主图和本地Mock见[ADR-0025](adr/0025-generation-groups-and-local-mock.md)。40份Markdown / 25条ADR、TypeScript、82项测试、CSS解析和构建通过。新增7项[Mock测试](../tests/mockGeneration.test.ts)：mock-generate返回202摘要、无fetch / 无凭据或外部完成标记、多PNG可解码 / 差异、真实MP4解码、参数 / CAS / 幂等拒绝、重启主图身份保留、保存失败复用暂存结果、展开具体素材绑定与几何。存量21表DDL和图 / 任务DTO不变，视频样例尺寸 / 时长复用现有资产字段。双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.10.manifest.json`。当前UI仅Mock，未调用浏览器；参考样式、分组交互与焦点由用户按92–99验收。
+
+2026-10-26，0.2.9：自定义有声视频控制与无外框原媒体预览见[ADR-0024](adr/0024-custom-video-and-chromeless-preview.md)。39份Markdown / 24条ADR、TypeScript、75项测试及构建通过，PostCSS样式解析通过。新增12项[播放控制器测试](../tests/videoPlayback.test.ts)，覆盖声音开启、媒体事件、时间 / 定位边界、未知时长、自动播放拒绝 / 恢复、解码错误与关闭后的迟到Promise；3项[静态UI检查](../tests/mediaUi.test.tsx)核对节点 / 预览无native controls或muted、最小控件、官方headless参数、单关闭按钮与开发dialog语义。双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.9.manifest.json`；没有操作浏览器，截图效果、真实有声播放和焦点验收由用户按88–91完成。
+
+2026-10-26，0.2.8：普通滚轮 / 双指移动改为平移，Command / Ctrl加滚轮缩放，见[ADR-0023](adr/0023-canvas-wheel-and-trackpad-gestures.md)。38份Markdown / 23条ADR、TypeScript、60项测试及构建通过；新增[原生wheel测试](../tests/gestures.test.ts)9项，驱动实际XYFlow / D3核对上下 / 双轴 / 惯性平移、空格、两种修饰键、指针中心 / 最小缩放、捏合、line-mode和nowheel控件隔离。依赖与存量数据结构不变；双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.8.manifest.json`。未调用浏览器，真实键盘订阅、框选、触控板与鼠标交互由用户按83–87验收。
+
+2026-10-26，0.2.7：增加资源画面双击后的画布聚焦放大，适应单个节点当前测量尺寸并沿用缩放边界；在捕获阶段处理资源双击，避免React Flow原生双击缩放叠加。名称改名、顶部原文件预览、视频单击播放和存量数据保持原规则。37份Markdown / 22条ADR、TypeScript、51项现有测试及构建通过；双构建 / 包 / 安装身份记于 `dsh-canvas-0.2.7.manifest.json`。此次没有新增业务测试或调用浏览器；事件交互和参考图效果由用户按清单81–82验收。
+
+2026-10-26，0.2.6：纯媒体节点、独立压缩封面与曲线连线见[ADR-0022](adr/0022-media-covers-and-curved-edges.md)。37份Markdown / 22条ADR、TypeScript、51项测试及清理构建通过。新增[封面测试](../tests/previews.test.ts)6项使用真实sharp生成EXIF旋转JPEG、真实ffmpeg生成首红后蓝MP4，检查尺寸、第一帧颜色、原字节 / 图 / 表数不变、并发缓存、Range/HEAD与归属 / symlink拒绝；另覆盖原生图片转换中停止服务，不触发未捕获stream error、不发布封面。生产依赖审计0项；产物 / 包 / 安装身份继续由当前管线写入 `dsh-canvas-0.2.6.manifest.json`，不代表浏览器视觉已验收。
+
+2026-10-26，0.2.5：增加每轮自动更新与压缩包清理规则，新增AGENTS入口，并将其纳入文档检查和源码身份清单。36份Markdown / 21条ADR、TypeScript、45个现有测试及构建通过；双构建 / 编译Host隔离启动 / 包内hash沿用原管线，身份写入 `dsh-canvas-0.2.5.manifest.json`。本次未修改运行时功能。
+
+先核对0.2.4源码 / 安装版本及当前包hash，再删除0.1.0至0.2.3的五个旧tgz；完成本轮本机更新核验后，清理被替代的0.2.4包。压缩包只留最新已核验版本，历史manifest保留作为证据，不代表旧tgz仍可取得，见[ADR-0021](adr/0021-local-update-and-package-retention.md)。
+
+2026-10-26，0.2.4：画布目录改为固定300px卡片 / 20px间距的自动网格，保留现有字段及官方操作菜单。TypeScript、45个现有测试、34份Markdown / 20条ADR及CSS解析通过。CSS列数规则核对940px容纳3列、1260px容纳4列，少量卡片不拉伸；不足300px时收窄。此处是布局规则检查，不代表浏览器截图或实际排版已验收；用户按手动清单72–73确认。
+
+双清理构建、编译Host隔离启动与包内hash继续沿用既有管线；产物身份记于根目录 `dsh-canvas-0.2.4.manifest.json`。本次仅修改客户端呈现，更新前后通过公开API比对目录、模型和存储设置。
+
+2026-10-26，0.2.3：接入 Harness 官方 UI primitives，并以官方 Button / Menu 组合单选，替换设置、编辑器与列表常规操作组件。TypeScript、45个现有测试、34份Markdown / 20条ADR和生产依赖审计0项通过。组件封装静态渲染核对两处入口、宿主 / 独立开发分支、输入属性、数字选项转字符串、按钮 type 和弹窗 / 菜单组合；宿主组件使用契约替身，未将此检查当作官方组件浏览器交互实测。
+
+官方公开包只作为固定开发依赖，浏览器构建 external 交给宿主共享。0.2.3继续使用双清理构建 / lib hash、编译Host隔离启动和包内hash管线；产物身份写入根目录 `dsh-canvas-0.2.3.manifest.json`。菜单方向键 / Escape、焦点回归、弹窗层级、边缘定位和主题视觉见手动清单68–71。
+
+2026-10-26，0.2.2：设置页名称 / 原生卡片与表单 / 宿主主题继承通过 TypeScript、45个现有测试和文档检查（33份Markdown / 19条ADR）。PostCSS解析样式，并对照已安装Harness `0.2.1-rc.2` 的官方主题bundle核对全部宿主变量名称；背景、文字、主按钮、边框、网格、强调色在浅 / 深色中均解析为不同的官方色值，自定义强调色覆盖也被继承。React静态渲染包含新名称、图片 / 视频标签、空态和添加入口；默认项目列表仍正确。此检查没有调用真实模型或浏览器，不代表截图视觉验收已完成。
+
+0.2.2产物身份由 [verify-artifact.mjs](../scripts/verify-artifact.mjs) 写入根目录 `dsh-canvas-0.2.2.manifest.json`；双构建、编译Host隔离启动与包内hash核验仍按同一发布管线执行。手动清单新增65–67，覆盖窄设置区域、全插件主题切换、跟随系统 / 固定主题以及输入和图状态保留。
+
+2026-10-26，0.2.1：项目列表 / 编辑器导航调整通过 TypeScript、45 个现有测试（服务20、SQLite11、GPU14）和文档检查（32份Markdown / 18条ADR）。两次清理构建28份lib文件SHA-256一致；编译后的Host / Worker / schema在系统临时目录启动、创建画布及注册 / 清理13个路由通过。未启动或迁移用户真实数据。
+
+一次内存构建后使用 React 服务端渲染检查默认 `CanvasApp`：输出包含“画布项目”及列表加载态，没有画布区域、旧目录条或项目下拉框，初始渲染不调用图 / 模型 API。该检查只覆盖默认渲染，不代替点击、保存、菜单和浏览器布局验收。
+
+0.2.1 lib集合hash：`78f3c985a1238c5771990e6a18fcd2abc978793ee89a2a409e4dc9d3677e1eb2`。输入 / 单文件hash由 [verify-artifact.mjs](../scripts/verify-artifact.mjs) 生成根目录 `dsh-canvas-0.2.1.manifest.json`，构建比较与隔离运行的中间文件位于系统临时目录。安装包另核对包内版本、运行文件hash及文档内容，构建身份不代表真实Harness UI已验收。
+
+历史0.2.0存储实施：锁定安装后的31份Markdown / 17条ADR、TypeScript、45个测试、27份lib双构建及编译Host隔离启动通过；lib集合hash `aff4f6d8627a8cfce7990031c3c35520fab1ca8e279852b187690cf1e044dcbb`，原清单保留为 `dsh-canvas-0.2.0.manifest.json`。
+
+| 范围 | 可追溯证据 |
+| --- | --- |
+| 增量 / 事务 | [sqlite.test](../tests/sqlite.test.ts)：改变行、no-op、用户 / 后台 hash 链、重复 ACK 原回执、hash / revision / request冲突、FK / CAS回滚、跨画布FK、writer token fence |
+| 目录 / 上传 | 一级目录唯一与请求幂等、非空文件夹、软删除、upload-start幂等、资源占位 / 导入成功 |
+| 文件 / 迁移 | 连续改名 superseded CAS、原字节保留、根目录切换 / 重启、陌生文件不覆盖、越界symlink拒绝、manifest核验、迁移凭据故障续跑 / 旧源不变 / 源变化拒绝 |
+| 生成 / 生命周期 | [service.test](../tests/service.test.ts)：图片 / 视频、原 Key / ID恢复、外部失败code/原因、外部完成与storage失败分离、重试保留attempt、断开请求后继续、文件发布 / 输出提交间恢复、未知提交不重提 |
+| 权限 / 协议 | Key不回显 / 错误脱敏 / 空值编辑、LocalVault0600、引用格式 / 归属 / 环、stream超限 / SVG拒绝、Range、Harness有限路由与清理 |
+| 提示词引用 | [promptMentions.test](../tests/promptMentions.test.ts)、[promptEditor.test](../tests/promptEditor.test.ts)、[mentionPromptEditor.test](../tests/mentionPromptEditor.test.tsx)：稳定UUID / 输入编号、无环 / 能力 / 主图、IME / caret / plain clipboard / undo、受控parent echo与portal；[Mock链路](../tests/mockGeneration.test.ts)验证图片 / 视频快照和失效拒绝 |
+| GPU | [gpu.test](../tests/gpu.test.ts)：14个硬件 / 软件 / 未知 / 不支持 / 超时回退和上下文释放用例 |
+| 滚轮 | [gestures.test](../tests/gestures.test.ts)：真实XYFlow / D3的普通 / 双轴 / 惯性平移、空格、Meta / Ctrl修饰键、指针中心缩放、捏合、line-mode与nowheel；键盘订阅和鼠标框选仍需人工验收 |
+| 播放 / 预览 | [videoPlayback.test](../tests/videoPlayback.test.ts)、[mediaUi.test](../tests/mediaUi.test.tsx)：原生媒体事件替身、固定声音、定位 / 元数据 / 拒绝 / 销毁与迟到Promise，静态最小控件 / 官方headless / 单关闭按钮；真实编码和焦点仍需人工验收 |
+| 封面 | [previews.test](../tests/previews.test.ts)：真实图片 / 视频解码、第一帧、压缩 / EXIF、原字节 / 图 / Schema兼容、并发缓存、Range / HEAD、归属 / 路径 / 错误隔离；页面旋转和播放仍由人工验收 |
+
+这些证据不代表完整断电可靠性、真实模型费用 / 效果、目标 Harness profile 或浏览器视觉已验收。旧版曾核对隔离 Harness 认证 / lazy注册，不能自动替代新包真实加载。
+
+## 待用户手动完成
+
+按[手动清单](manual-tests.md)执行，记录日期、版本、Host / SDK / 浏览器、实际结果和脱敏证据：
+
+- 真实文生图 / 图生图 / 文生视频 / 单图生视频与原 ID 恢复。
+- 项目列表默认入口、点击进入 / 保存后返回、菜单 / 文件夹筛选、手机布局；添加菜单、上传拖拽 / 多文件、名称修改、目录 CRUD 与跨窗口冲突。
+- 接收中断、完整接收后关页面、生成中关面板与停 / 重启 Harness。
+- 外接盘断开 / ENOSPC、复制中断、离线完整备份恢复。
+- 键盘焦点、媒体编码可播放性、GPU实际图层 / 大图帧时间和内存。
+- 原生设置页面版式；浅色 / 深色 / 跟随系统在项目列表、画布与全部弹窗中的实际显示和输入保持。
+
+## 当前限制
+
+| 优先级 | 限制与影响 | 控制 / 重审 |
+| --- | --- | --- |
+| 高 | 外部请求与SQLite不是原子事务，不能保证exactly-once或取消 | issued不明停自动重提；详情 / 外部ID供核对；[ADR-0016](adr/0016-host-runtime-task-details-and-credentials.md) |
+| 高 | 文件 / 凭据与SQL分介质 | manifest / hash / CAS、旧源保留、原Key版本；完整断电仍待测 |
+| 中 | 全画布 / 资产 / 生成历史常驻宿主投影，diff仍遍历图 | SQL只写变化行，但尚无大图性能成绩；超预算拆投影 / 懒载 |
+| 中 | 文件发布持有Store串行队列；OS阻塞调用无固定收尾上限 | 独立到期扫描、可取消流、等待writer收尾后释放锁；慢盘需实测 |
+| 中 | staging、搬移来源、历史任务 / mutations / 凭据不自动GC | 空间需要预留；不按当前预览删除恢复来源 |
+| 中 | 封面首次解码 / 平台原生依赖 / 无自动缓存GC | 串行64待处理、超时 / 图像像素限额；缓存可停机删除重建，原视频解码内存与浏览器长时负载仍待测；[ADR-0022](adr/0022-media-covers-and-curved-edges.md) |
+| 中 | Base64模型JSON、图片引用仍整体缓冲 | per-file / reference限额与并发，尚无峰值预算实测 |
+| 中 | 模型JSON / 凭据绑定非跨文件事务；Host凭据备份依赖提供方 | 限制权限，先建版本再绑定；缺失版本拒绝恢复，人工完整备份 |
+| 中 | 结果URL过期无法通用刷新 | 重试原描述，不重新付费生成；无刷新协议 |
+| 中 | 同步Base64结果的暂存写失败可能无法保留原输出描述 | 先保存外部完成事实，标save_failed；缺原描述 / 外部ID时重存返回RESULT_UNAVAILABLE，不盲目重提 |
+| 中 | 队列限制仅生成接受态1000，不是磁盘 / 历史 / 上传总量限额 | 未设查询次数上限；容量 / 公平性尚未压测 |
+| 低 | 手动输入Host根目录，无官方native/browse picker UI | [ADR-0015](adr/0015-named-media-and-durable-moves.md) |
+| 低 | 格式签名不等于完整解码；部分尺寸 / 时长缺失 | 实际编码 / 播放人工验收 |
+| 低 | 根路径URL、单owner、无跨设备同步 / 图导入 / 全批次历史浏览 | 有明确新需求再立ADR |
+
+本次修复了旧版媒体异步错误越过JSON catch的问题；路径不可用返回MEDIA_MISSING。目录 / 任务 / 图结构已用SQLite事务替代旧多JSON写入；不再将旧缺口列为当前行为。
+
+依赖审计（2026-10-26）：`npm audit --omit=dev` 当前为0；完整开发树仍报告5项（Vitest / mocker / tinypool，SDK自己的Zod依赖）。本次不强制升级测试主版本或改官方SDK依赖；维护者在生产使用前、最迟2026-11-02复核。该结果只覆盖本项目安装树，不代表目标Harness实际运行依赖已审计。
+
+## 检查入口
+
+`npm run docs:check`、`npm run typecheck`、`npm test`、`npm run build`；`npm run check` 串行执行全部。打包前评审和构建身份记录见[本次构建审查](release-review.md)。浏览器与真实模型验收由用户完成，本次不操作浏览器。

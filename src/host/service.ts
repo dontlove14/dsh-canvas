@@ -1,0 +1,321 @@
+import { randomUUID } from 'node:crypto'
+import { stat, realpath } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { Readable } from 'node:stream'
+import { z } from 'zod'
+import { API_ROOT, IdSchema, WorkspaceIdSchema, ModelInputSchema, CanvasGraphSchema, TRACKED_STATUSES, validateGeneration, validateGraph, isGeneration, nodeMediaKind, type CanvasGraph, type Task, type WorkspaceState, type TaskAction } from '../shared/contracts'
+import { V2_ROOT, MutationSchema, NameSchema, parseTaskSearchParams, type GraphMutation } from '../shared/v2'
+import { CanvasError, Store } from './store'
+import { CanvasRuntime } from './runtime'
+import { hash, sql } from './persistence/database'
+import { PreviewCache, PREVIEW_VERSION } from './media/previews'
+import type { CredentialVault } from './credentials'
+import { mockRecord, validateMockGeneration } from '../shared/mockModels'
+import { resolvePrompt } from '../shared/promptMentions'
+import { WaveformCache } from './media/waveforms'
+import { WAVEFORM_VERSION } from '../shared/audioWaveform'
+import { TtsSettingsInputSchema, TtsParamsSchema, TtsTaskSnapshotSchema, isTtsParams, validateTtsText, type AnyTaskSnapshot } from '../shared/contracts'
+
+export interface CanvasConfig {
+  dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number
+  maxMediaBytes: number; maxReferenceBytes: number
+}
+export const routeDefinitions = [
+  { suffix: 'models', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'model-delete', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'catalog', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'graph', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'generate', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'mock-generate', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'tts-generate', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'tts-settings', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'tasks', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'task-search', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'task', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'upload-start', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'upload', methods: ['POST'] as const, requestBody: 'streaming' as const },
+  { suffix: 'media', methods: ['GET', 'HEAD'] as const, requestBody: 'buffered' as const },
+  { suffix: 'storage', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'storage-retry', methods: ['POST'] as const, requestBody: 'buffered' as const },
+]
+const CatalogCommand = z.object({
+  requestId: IdSchema, operation: z.enum(['folder-create', 'folder-rename', 'folder-delete', 'canvas-create', 'canvas-rename', 'canvas-move', 'canvas-delete']),
+  id: WorkspaceIdSchema.optional(), name: NameSchema.optional(), folderId: IdSchema.nullable().optional(), revision: z.number().int().nonnegative().optional(),
+}).strict()
+
+export class CanvasService {
+  readonly store: Store
+  readonly runtime: CanvasRuntime
+  readonly previews: PreviewCache
+  readonly waveforms: WaveformCache
+  private closing = false
+  constructor(readonly config: CanvasConfig, vault?: CredentialVault) {
+    this.store = new Store(config.dataDir, vault)
+    this.runtime = new CanvasRuntime(this.store, config)
+    this.previews = new PreviewCache(config.dataDir)
+    this.waveforms = new WaveformCache(config.dataDir)
+  }
+  async init(): Promise<void> {
+    await this.store.init()
+    try { await this.runtime.start() } catch (error) { await this.close(); throw error }
+  }
+  private async validate(state: WorkspaceState, graph: CanvasGraph): Promise<void> {
+    validateGraph(graph, state.assets, state.tasks)
+    for (const previous of state.graph.nodes) if (!graph.nodes.some((n) => n.id === previous.id) && await this.store.hasUnfinished(state.workspaceId, previous.id)) throw new CanvasError('节点仍有未结束任务或上传', 409, 'NODE_BUSY')
+    for (const node of graph.nodes) {
+      NameSchema.parse(node.title)
+      if (node.assetId) {
+        const asset = state.assets.find((a) => a.id === node.assetId)
+        if (isGeneration(node.kind) || !asset || asset.kind !== nodeMediaKind(node.kind)) throw new CanvasError('资源节点素材类型不一致')
+      }
+      if (node.selectedResultId && !state.tasks.some((t) => t.nodeId === node.id && t.resultIds.includes(node.selectedResultId!))) throw new CanvasError('选中的生成结果不属于这个节点')
+    }
+  }
+  async saveGraph(canvas: string, graph: CanvasGraph, revision: number): Promise<WorkspaceState> {
+    graph = CanvasGraphSchema.parse(graph)
+    await this.store.update(canvas, async (state) => {
+      if (state.graphRevision !== revision) throw new CanvasError('画布已更新，请保留草稿并重新载入', 409, 'GRAPH_CONFLICT')
+      await this.validate(state, graph)
+      state.graph = graph; state.graphRevision++
+    })
+    return this.store.state(canvas)
+  }
+  async mutateGraph(canvas: string, input: GraphMutation) {
+    const requestHash = hash(input)
+    let replay = false
+    await this.store.update(canvas, async (state) => {
+      const receipt = await this.store.db.get('SELECT * FROM canvas_mutations WHERE canvas_id=? AND mutation_id=?', [canvas, input.mutationId])
+      if (receipt) {
+        if (receipt.request_hash !== requestHash) throw new CanvasError('增量 ID 已用于其他内容', 409, 'REQUEST_REUSED')
+        replay = true; return
+      }
+      if (state.graphRevision !== input.baseRevision) throw new CanvasError('画布已更新，请保留草稿并重新载入', 409, 'GRAPH_CONFLICT')
+      for (const entry of [...input.nodes, ...input.edges, ...(input.viewport ? [input.viewport] : [])]) if (hash(entry.value) !== entry.hash) throw new CanvasError('增量内容 hash 不匹配', 409, 'HASH_MISMATCH')
+      if (new Set(input.nodes.map((n) => n.value.id)).size !== input.nodes.length || new Set(input.edges.map((e) => e.value.id)).size !== input.edges.length) throw new CanvasError('增量包含重复对象')
+      const nodeUpserts = new Map(input.nodes.map(({ value }) => [value.id, value]))
+      const edgeUpserts = new Map(input.edges.map(({ value }) => [value.id, value]))
+      const graph: CanvasGraph = {
+        ...state.graph,
+        nodes: state.graph.nodes.filter((n) => !input.deleteNodes.includes(n.id)).map((n) => { const next = nodeUpserts.get(n.id) ?? n; nodeUpserts.delete(n.id); return next }).concat([...nodeUpserts.values()]),
+        edges: state.graph.edges.filter((e) => !input.deleteEdges.includes(e.id)).map((e) => { const next = edgeUpserts.get(e.id) ?? e; edgeUpserts.delete(e.id); return next }).concat([...edgeUpserts.values()]),
+        viewport: input.viewport?.value ?? state.graph.viewport,
+      }
+      await this.validate(state, graph)
+      if (hash(graph) !== hash(state.graph)) { state.graph = graph; state.graphRevision++ }
+    }, (before, after) => replay ? [] : [
+      sql('INSERT INTO canvas_mutations VALUES(?,?,?,?,?,?,?,?,?,?,?)', [canvas, input.mutationId, 'user', requestHash, before.graphRevision, after.graphRevision, Number(after.graphRevision !== before.graphRevision), hash({ revision: before.graphRevision, graph: before.graph }), hash({ revision: after.graphRevision, graph: after.graph }), JSON.stringify(input), Date.now()]),
+    ])
+    const snapshot = await this.store.snapshot(canvas)
+    const receipt = await this.store.db.get('SELECT committed_revision AS revision,commit_hash AS commitHash,has_changes AS hasChanges FROM canvas_mutations WHERE canvas_id=? AND mutation_id=?', [canvas, input.mutationId])
+    return { ...snapshot, mutation: { id: input.mutationId, replay, ...receipt } }
+  }
+  async generate(canvas: string, nodeId: string, revision: number, requestId: string = randomUUID(), mock = false, tts = false): Promise<Task> {
+    let acceptedTaskId = ''
+    let ttsCredentialRef: string | undefined
+    const requestHash = hash({ canvas, nodeId, revision, ...(mock ? { mock: true } : {}), ...(tts ? { tts: true } : {}) })
+    const task = await this.store.update(canvas, async (state) => {
+      const replay = await this.store.db.get('SELECT task_id,request_hash FROM task_details WHERE request_id=?', [requestId])
+      if (replay) {
+        if (replay.request_hash !== requestHash) throw new CanvasError('请求 ID 已用于其他内容', 409, 'REQUEST_REUSED')
+        const old = state.tasks.find((t) => t.id === replay.task_id)
+        if (!old) throw new CanvasError('请求归属不一致', 409)
+        acceptedTaskId = old.id; return old
+      }
+      if (state.graphRevision !== revision) throw new CanvasError('请先保存当前画布后再生成', 409, 'GRAPH_CONFLICT')
+      const node = state.graph.nodes.find((n) => n.id === nodeId)
+      if (!node || !isGeneration(node.kind)) throw new CanvasError('请选择生成节点')
+      if (await this.store.hasUnfinished(canvas, nodeId)) throw new CanvasError('这个节点有未结束任务', 409, 'NODE_BUSY')
+      let snapshot: AnyTaskSnapshot
+      if (tts) {
+        if (node.kind !== 'tts-generation') throw new CanvasError('请选择语音生成节点')
+        if (state.graph.edges.some((edge) => edge.target === nodeId)) throw new CanvasError('语音节点不支持输入连线')
+        validateTtsText(node.prompt)
+        const service = this.store.ttsService()
+        const params = TtsParamsSchema.parse(node.params)
+        snapshot = TtsTaskSnapshotSchema.parse({ model: service.model, prompt: node.prompt.trim(), params: { ...params, reference_id: params.reference_id.trim() }, referenceIds: [] })
+        ttsCredentialRef = service.credentialRef
+      } else {
+        if (node.kind === 'tts-generation') throw new CanvasError('语音节点请使用语音生成接口')
+        if (!node.modelId || !node.params || isTtsParams(node.params)) throw new CanvasError('请先选择模型')
+        const model = mock ? mockRecord(node.modelId) : this.store.model(node.modelId).model
+        if (model.kind !== nodeMediaKind(node.kind)) throw new CanvasError('模型类型与节点不一致')
+        snapshot = { model, prompt: node.prompt.trim(), params: node.params, referenceIds: state.graph.edges.filter((e) => e.target === nodeId).map((e) => e.assetId) }
+        if (mock) validateMockGeneration(snapshot, state.assets)
+        else validateGeneration(snapshot, state.assets)
+        snapshot.prompt = resolvePrompt(snapshot.prompt, snapshot.referenceIds, state.assets)
+      }
+      let bytes = 0
+      for (const id of snapshot.referenceIds) {
+        bytes += (await stat(this.store.mediaPath(id))).size
+        if (bytes > this.config.maxReferenceBytes) throw new CanvasError('参考素材总大小超过限制', 413)
+      }
+      if ((await this.store.db.get("SELECT COUNT(*) AS count FROM task_catalog WHERE status IN ('queued','running','external_wait','saving')")).count >= 1000) throw new CanvasError('任务队列已满，请稍后再提交', 429, 'QUEUE_FULL')
+      const task: Task = { id: randomUUID(), nodeId, workspaceId: canvas, snapshot, status: 'submitted', resultIds: [], createdAt: Date.now(), updatedAt: Date.now() }
+      state.tasks.push(task)
+      acceptedTaskId = task.id
+      return task
+    }, (_before, after) => {
+      return [sql('UPDATE task_details SET request_id=?,request_hash=? WHERE task_id=?', [requestId, requestHash, acceptedTaskId]), ...(ttsCredentialRef ? [sql('UPDATE task_details SET credential_ref=? WHERE task_id=?', [ttsCredentialRef, acceptedTaskId])] : [])]
+    })
+    this.runtime.wake()
+    return task
+  }
+  async taskAction(canvas: string, id: string, action: TaskAction): Promise<void> {
+    if (this.runtime.isActive(id)) throw new CanvasError('任务正在处理，请稍后重试', 409)
+    const catalog = await this.store.db.get('SELECT kind,status FROM task_catalog WHERE id=? AND canvas_id=?', [id, canvas])
+    if (catalog?.kind === 'import') {
+      if (catalog.status !== 'save_failed') throw new CanvasError('当前导入任务不可重试', 409)
+      await this.store.db.batch([sql('UPDATE task_catalog SET status=? WHERE id=?', [action === 'abandon' ? 'abandoned' : 'queued', id])])
+      this.runtime.wake(); return
+    }
+    await this.store.update(canvas, async (state) => {
+      const task = state.tasks.find((t) => t.id === id)
+      if (!task) throw new CanvasError('任务不存在', 404)
+      if (action === 'retry-save') {
+        if (task.status !== 'save_failed') throw new CanvasError('只有结果保存失败可重新保存')
+        const data = await this.store.taskPrivate(id)
+        if (!data.outputs && !task.providerTaskId) throw new CanvasError('原结果描述未能持久保存，无法恢复；请核对后结束本地等待', 409, 'RESULT_UNAVAILABLE')
+        task.status = task.providerTaskId ? 'generating' : 'saving'; task.error = undefined
+      } else if (action === 'resume-query') {
+        if (task.status !== 'unknown' || !task.providerTaskId) throw new CanvasError('这个任务没有可恢复查询的外部 ID')
+        await this.store.taskPrivate(id); task.status = 'generating'; task.error = undefined
+      } else {
+        if (!['unknown', 'save_failed'].includes(task.status)) throw new CanvasError('当前任务不能结束本地等待')
+        task.status = 'abandoned'
+      }
+      task.updatedAt = Date.now()
+    }, () => [sql('UPDATE task_details SET next_run_at=0 WHERE task_id=?', [id])])
+    this.runtime.wake()
+  }
+  async handle(request: Request): Promise<Response> {
+    try {
+      if (this.closing) throw new CanvasError('宿主正在停止', 503)
+      const url = new URL(request.url)
+      const isV2 = url.pathname.startsWith(`/${V2_ROOT}/`)
+      const suffix = url.pathname.slice(`/${isV2 ? V2_ROOT : API_ROOT}/`.length)
+      const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } })
+      const canvas = () => WorkspaceIdSchema.parse(url.searchParams.get('canvas') ?? url.searchParams.get('workspace'))
+      const requireCanvas = async () => {
+        const id = canvas()
+        if (!(await this.store.db.get('SELECT id FROM canvases WHERE id=? AND deleted_at IS NULL', [id]))) throw new CanvasError('画布不存在', 404)
+        return id
+      }
+      if (!isV2 && suffix === 'workspace' && request.method === 'GET') return json(this.store.state(canvas()))
+      if (suffix === 'models') {
+        if (request.method === 'GET') return json({ models: this.store.listModels() })
+        if (request.method === 'POST') return json({ models: await this.store.saveModel(ModelInputSchema.parse(await request.json())) })
+      }
+      if (!isV2) throw new CanvasError('请使用 v2 接口', 410, 'API_RETIRED')
+      if (suffix === 'tts-settings') {
+        if (request.method === 'GET') return json(this.store.ttsSettings())
+        if (request.method === 'POST') return json(await this.store.saveTtsSettings(TtsSettingsInputSchema.parse(await request.json())))
+      }
+      if (suffix === 'model-delete' && request.method === 'POST') return json({ models: await this.store.deleteModel(IdSchema.parse(url.searchParams.get('id'))) })
+      if (suffix === 'catalog') {
+        if (request.method === 'GET') return json(await this.store.catalog())
+        if (request.method === 'POST') return json(await this.store.catalogCommand(CatalogCommand.parse(await request.json())))
+      }
+      if (suffix === 'graph') {
+        const id = await requireCanvas()
+        if (request.method === 'GET') {
+          if (url.searchParams.has('afterRevision')) {
+            const after = z.coerce.number().int().nonnegative().parse(url.searchParams.get('afterRevision'))
+            return json(await this.store.graphChanges(id, after))
+          }
+          return json(await this.store.snapshot(id))
+        }
+        if (request.method === 'POST') return json(await this.mutateGraph(id, MutationSchema.parse(await request.json())))
+      }
+      if (['generate', 'mock-generate', 'tts-generate'].includes(suffix) && request.method === 'POST') {
+        const body = z.object({ nodeId: IdSchema, revision: z.number().int().nonnegative(), requestId: IdSchema }).strict().parse(await request.json())
+        const task = await this.generate(await requireCanvas(), body.nodeId, body.revision, body.requestId, suffix === 'mock-generate', suffix === 'tts-generate')
+        const { snapshot: _s, providerTaskId: _p, error: _e, ...summary } = task
+        return json(summary, 202)
+      }
+      if (suffix === 'task-search' && request.method === 'GET') return json(await this.store.searchTasks(parseTaskSearchParams(url.searchParams)))
+      if (suffix === 'tasks' && request.method === 'GET') {
+        const id = await requireCanvas()
+        const cursor = z.coerce.number().int().nonnegative().parse(url.searchParams.get('cursor') ?? 0)
+        const rows = await this.store.db.all('SELECT id,node_id AS nodeId,kind,title,queue_seq AS sequence,status,progress,created_at AS createdAt,updated_at AS updatedAt FROM task_catalog WHERE canvas_id=? AND queue_seq>? ORDER BY queue_seq LIMIT 50', [id, cursor])
+        return json({ items: rows, nextCursor: rows.length === 50 ? rows.at(-1).sequence : null })
+      }
+      if (suffix === 'task') {
+        const id = await requireCanvas()
+        if (request.method === 'GET') return json(await this.store.taskDetail(id, IdSchema.parse(url.searchParams.get('id'))))
+        if (request.method === 'POST') {
+          const body = z.object({ id: IdSchema, action: z.enum(['retry-save', 'resume-query', 'abandon']) }).strict().parse(await request.json())
+          await this.taskAction(id, body.id, body.action); return json({ ok: true })
+        }
+      }
+      if (suffix === 'upload-start' && request.method === 'POST') {
+        const body = z.object({ requestId: IdSchema, filename: z.string().min(1).max(255), kind: z.enum(['image', 'video', 'audio']), position: z.object({ x: z.number().finite(), y: z.number().finite() }).strict() }).strict().parse(await request.json())
+        return json(await this.runtime.uploads.start(await requireCanvas(), body), 201)
+      }
+      if (suffix === 'upload' && request.method === 'POST') {
+        const id = await requireCanvas()
+        if (!request.body) throw new CanvasError('请上传文件')
+        if (Number(request.headers.get('content-length')) > this.config.maxMediaBytes) throw new CanvasError('文件过大', 413)
+        const kind = z.enum(['image', 'video', 'audio']).parse(url.searchParams.get('kind'))
+        const filename = decodeURIComponent(request.headers.get('x-canvas-filename') ?? 'media')
+        const result = await this.runtime.uploads.accept(id, IdSchema.parse(url.searchParams.get('id')), Readable.fromWeb(request.body as import('node:stream/web').ReadableStream), kind, filename, request.signal)
+        this.runtime.wake(); return json(result, 202)
+      }
+      if (suffix === 'storage') {
+        if (request.method === 'GET') return json(await this.store.storage())
+        if (request.method === 'POST') return json(await this.store.setStorage(z.object({ requestId: IdSchema, path: z.string().min(1).max(4096), revision: z.number().int().nonnegative() }).strict().parse(await request.json())))
+      }
+      if (suffix === 'storage-retry' && request.method === 'POST') { await this.store.retryMoves(); this.runtime.wake(); return json({ ok: true }) }
+      if (suffix === 'media' && ['GET', 'HEAD'].includes(request.method)) return await this.media(request, await requireCanvas(), IdSchema.parse(url.searchParams.get('id')))
+      return json({ error: '接口不存在', code: 'NOT_FOUND' }, 404)
+    } catch (error) {
+      const message = error instanceof z.ZodError ? error.issues[0]?.message ?? '输入无效' : error instanceof SyntaxError ? '请求内容格式错误' : error instanceof Error ? error.message : '操作失败'
+      return Response.json({ error: this.store.redact(message), code: error instanceof CanvasError ? error.code : 'INVALID_REQUEST' }, { status: error instanceof CanvasError ? error.status : 400, headers: { 'Cache-Control': 'no-store' } })
+    }
+  }
+  private async media(request: Request, canvas: string, id: string): Promise<Response> {
+    const asset = this.store.state(canvas).assets.find((a) => a.id === id)
+    if (!asset) throw new CanvasError('媒体文件不存在', 404)
+    let path = this.store.mediaPath(id)
+    const actual = await realpath(path).catch(() => { throw new CanvasError('本地媒体不可用', 404, 'MEDIA_MISSING') })
+    if (actual !== path) throw new CanvasError('媒体路径发生外部变更', 409, 'UNSAFE_PATH')
+    const params = new URL(request.url).searchParams
+    const variant = params.get('variant')
+    if (variant === 'waveform') {
+      if (params.has('v') && params.get('v') !== WAVEFORM_VERSION) throw new CanvasError('波形版本不可用', 400)
+      if (asset.kind !== 'audio') throw new CanvasError('仅音频支持波形', 415)
+      const waveform = await this.waveforms.get(canvas, id, actual, await this.store.mediaHash(canvas, id))
+      const body = JSON.stringify(waveform)
+      return new Response(request.method === 'HEAD' ? null : body, { headers: {
+        'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)),
+        'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff',
+      } })
+    }
+    if (variant && (variant !== 'preview' || (params.has('v') && params.get('v') !== PREVIEW_VERSION))) throw new CanvasError('封面版本不可用', 400)
+    const preview = variant === 'preview'
+    if (preview) {
+      if (asset.kind === 'audio') throw new CanvasError('音频不提供图片封面', 415)
+      path = await this.previews.get(canvas, id, actual, await this.store.mediaHash(canvas, id), asset.kind)
+    }
+    const size = (await stat(path)).size
+    const headers = new Headers({ 'Content-Type': preview ? 'image/webp' : asset.mime, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': preview ? 'private, max-age=3600' : 'private, max-age=31536000, immutable', 'Content-Disposition': `${!preview && params.has('download') ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(preview ? `${asset.filename}.webp` : asset.filename)}` })
+    let start = 0; let end = size - 1; let status = 200
+    const range = request.headers.get('range')
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+      if (!match || (!match[1] && !match[2])) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
+      start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]))
+      end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1
+      if (start > end || start >= size || !Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
+      status = 206; headers.set('Content-Range', `bytes ${start}-${end}/${size}`)
+    }
+    headers.set('Content-Length', String(end - start + 1))
+    if (request.method === 'HEAD') return new Response(null, { status, headers })
+    return new Response(Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream, { status, headers })
+  }
+  async close(): Promise<void> {
+    if (this.closing) return
+    this.closing = true
+    await Promise.all([this.previews.close(), this.waveforms.close(), this.runtime.close()])
+    await this.store.close()
+  }
+}

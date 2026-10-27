@@ -1,0 +1,12 @@
+node_modules/
+lib/
+dist/
+.canvas-local/
+.dev-data/
+.harness-check/
+.checks/
+*.manifest.json
+*.tgz
+.trae-html-share-packages/
+*.log
+.DS_Store
