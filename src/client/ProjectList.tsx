@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { type CanvasChoice, type Catalog, type Folder } from '../shared/v2'
 import { CanvasApi } from './api'
 import { UiActionMenu, UiButton, UiModal, UiSelect } from './ui'
+import { CanvasSettings } from './Settings'
+import { STORAGE_REQUIRED } from '../shared/objectStorage'
 
 type CatalogCommand = Parameters<CanvasApi['catalogCommand']>[0]
 interface ProjectListProps {
@@ -19,6 +21,9 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
   const [refresh, setRefresh] = useState(0)
   const [busy, setBusy] = useState(false)
   const [moveTarget, setMoveTarget] = useState<CanvasChoice | null>(null)
+  const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
+  const [storageError, setStorageError] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
   const commandPending = useRef(false)
   const mounted = useRef(true)
   const activeRef = useRef(active)
@@ -36,6 +41,8 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
     const load = async () => {
       if (!activeRef.current || document.hidden || commandPending.current) { schedule(); return }
       try {
+        void api.storage().then((s) => { if (live) { setStorageConfigured(s.configured); setStorageError('') } })
+          .catch((e) => { if (live) { setStorageConfigured(null); setStorageError(`对象存储设置读取失败：${e.message}`) } })
         const next = await api.catalog()
         if (live) { setCatalog(next); setLoadError('') }
       } catch (failure) {
@@ -82,6 +89,10 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
     }
   }
   const nameCommand = (kind: 'canvas' | 'folder', item?: CanvasChoice | Folder) => {
+    if (kind === 'canvas' && !item && storageConfigured !== true) {
+      setCommandError(storageConfigured === false ? STORAGE_REQUIRED : storageError || '正在读取对象存储设置，请稍后重试')
+      return
+    }
     const label = kind === 'canvas' ? '画布' : '文件夹'
     const name = window.prompt(`${item ? '重命名' : '新建'}${label}`, item?.name ?? '')
     if (name === null) return
@@ -92,7 +103,7 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
     })
   }
   const deleteItem = (kind: 'canvas' | 'folder', item: CanvasChoice | Folder) => {
-    const detail = kind === 'canvas' ? '本地媒体文件将保留。' : '仅可删除空文件夹。'
+    const detail = kind === 'canvas' ? '对象存储中的媒体将保留。' : '仅可删除空文件夹。'
     if (window.confirm(`删除“${item.name}”？${detail}`)) void command({ operation: `${kind}-delete`, id: item.id, revision: item.revision })
   }
   const folderButton = (id: string, name: string, count: number, icon: 'all' | 'folder') => <button key={id} className={`dc-folder-item ${activeFolder === id ? 'active' : ''}`} aria-current={activeFolder === id ? 'page' : undefined} disabled={busy} onClick={() => onFolder(id)}>
@@ -102,7 +113,8 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
   return <div className="dc-root dc-projects">
     <header className="dc-projects-header">
       <div className="dc-title"><span className="dc-brand-mark" aria-hidden="true">✦</span><div><h1 ref={heading} tabIndex={-1}>画布项目</h1><small>无限画布</small></div></div>
-      <UiButton variant="primary" size="md" disabled={!catalog || busy} onClick={() => nameCommand('canvas')}>＋ 新建画布</UiButton>
+      <div className="dc-header-actions"><UiButton variant="outline" onClick={() => setShowSettings(true)}>⚙ 设置</UiButton>
+        <UiButton variant="primary" size="md" disabled={!catalog || busy} onClick={() => nameCommand('canvas')}>＋ 新建画布</UiButton></div>
     </header>
     <div className="dc-projects-layout">
       <aside className="dc-projects-sidebar">
@@ -121,7 +133,10 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
             { id: 'delete', label: '删除空文件夹', danger: true, disabled: busy, onSelect: () => deleteItem('folder', selectedFolder) },
           ]} />}
         </div>
-        {(commandError || loadError) && <div className="dc-projects-error" role="alert"><span>{commandError || loadError}</span><UiButton disabled={busy} onClick={() => { setCommandError(''); setRefresh((value) => value + 1) }}>刷新列表</UiButton></div>}
+        {(commandError || loadError) && <div className="dc-projects-error" role="alert"><span>{commandError || loadError}</span>
+          {commandError === STORAGE_REQUIRED && <UiButton onClick={() => setShowSettings(true)}>前往设置</UiButton>}
+          <UiButton disabled={busy} onClick={() => { setCommandError(''); setRefresh((value) => value + 1) }}>刷新列表</UiButton></div>}
+        {storageConfigured === false && <div className="dc-projects-error"><span>{STORAGE_REQUIRED}</span><UiButton onClick={() => setShowSettings(true)}>对象存储设置</UiButton></div>}
         {!catalog ? <div className="dc-projects-empty"><p role="status">{loadError ? '画布列表暂时不可用' : '正在加载画布项目…'}</p></div>
           : !projects.length ? <div className="dc-projects-empty"><ProjectIcon kind="canvas" /><h3>{activeFolder === 'all' ? '还没有画布项目' : '这里还没有画布'}</h3><p>新建一张画布，开始连接你的创作灵感。</p><UiButton variant="primary" disabled={busy} onClick={() => nameCommand('canvas')}>＋ 新建画布</UiButton></div>
             : <ul className="dc-project-list" aria-label={`${folderName}项目`}>{projects.map((item) => <li key={item.id} className="dc-project-card">
@@ -144,6 +159,9 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
     {active && moveTarget && <MoveDialog canvas={moveTarget} folders={catalog?.folders ?? []} busy={busy} error={commandError} onClose={() => setMoveTarget(null)} onMove={async (folderId) => {
       if (await command({ operation: 'canvas-move', id: moveTarget.id, revision: moveTarget.revision, folderId })) setMoveTarget(null)
     }} />}
+    {active && showSettings && <UiModal label="无限画布" onClose={() => { setShowSettings(false); setRefresh((v) => v + 1) }}>
+      <CanvasSettings api={api} onChanged={() => { setCommandError(''); setRefresh((v) => v + 1) }} />
+    </UiModal>}
   </div>
 }
 

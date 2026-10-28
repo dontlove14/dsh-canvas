@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CanvasNodeSchema, CanvasEdgeSchema, CanvasGraphSchema, type WorkspaceState, type Task, type TaskStatus } from './contracts'
+import { CanvasNodeSchema, CanvasEdgeSchema, CanvasGraphSchema, TaskSchema, type WorkspaceState, type Task, type TaskStatus } from './contracts'
 
 export const V2_ROOT = 'api/canvas/v2'
 export const NameSchema = z.string().transform((v) => v.trim().normalize('NFC')).pipe(z.string().min(1).max(160))
@@ -21,7 +21,8 @@ export const MutationSchema = z.object({
   viewport: z.object({ value: CanvasGraphSchema.shape.viewport, hash: HashSchema }).strict().optional(),
 }).strict()
 export type GraphMutation = z.infer<typeof MutationSchema>
-export type TaskSummary = Omit<Task, 'snapshot' | 'error' | 'providerTaskId'>
+export const TaskSummarySchema = TaskSchema.omit({ snapshot: true, error: true, providerTaskId: true }).extend({ requestId: z.string().uuid().optional() })
+export type TaskSummary = z.infer<typeof TaskSummarySchema>
 export interface CanvasSnapshot extends Omit<WorkspaceState, 'tasks'> {
   tasks: TaskSummary[]
   commitHash: string
@@ -30,7 +31,6 @@ export interface CanvasSnapshot extends Omit<WorkspaceState, 'tasks'> {
 export interface Folder { id: string; name: string; revision: number; hash: string }
 export interface CanvasChoice { id: string; name: string; folderId: string | null; revision: number; hash: string; moving: boolean; moveError?: string }
 export interface Catalog { folders: Folder[]; canvases: CanvasChoice[] }
-export interface StorageSettings { path: string; revision: number; moving: number; failed: number }
 export const TaskSearchQuerySchema = z.object({
   taskId: z.string().uuid().transform((value) => value.toLowerCase()).optional(),
   folderName: z.string().trim().normalize('NFC').min(1).max(160).optional(),

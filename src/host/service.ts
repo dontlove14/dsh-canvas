@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { stat, realpath } from 'node:fs/promises'
-import { createReadStream } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { z } from 'zod'
 import { API_ROOT, IdSchema, WorkspaceIdSchema, ModelInputSchema, CanvasGraphSchema, TRACKED_STATUSES, validateGeneration, validateGraph, isGeneration, nodeMediaKind, type CanvasGraph, type Task, type WorkspaceState, type TaskAction } from '../shared/contracts'
@@ -8,13 +7,15 @@ import { V2_ROOT, MutationSchema, NameSchema, parseTaskSearchParams, type GraphM
 import { CanvasError, Store } from './store'
 import { CanvasRuntime } from './runtime'
 import { hash, sql } from './persistence/database'
-import { PreviewCache, PREVIEW_VERSION } from './media/previews'
+import { PreviewCache } from './media/previews'
 import type { CredentialVault } from './credentials'
 import { mockRecord, validateMockGeneration } from '../shared/mockModels'
 import { resolvePrompt } from '../shared/promptMentions'
 import { WaveformCache } from './media/waveforms'
-import { WAVEFORM_VERSION } from '../shared/audioWaveform'
 import { TtsSettingsInputSchema, TtsParamsSchema, TtsTaskSnapshotSchema, isTtsParams, validateTtsText, type AnyTaskSnapshot } from '../shared/contracts'
+import { StorageInputSchema, MediaUrlsSchema, MediaVariantSchema } from '../shared/objectStorage'
+import type { StorageFactory } from './object-storage/types'
+import { DerivedAssets } from './object-storage/derived'
 
 export interface CanvasConfig {
   dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number
@@ -36,6 +37,8 @@ export const routeDefinitions = [
   { suffix: 'upload', methods: ['POST'] as const, requestBody: 'streaming' as const },
   { suffix: 'media', methods: ['GET', 'HEAD'] as const, requestBody: 'buffered' as const },
   { suffix: 'storage', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'storage-test', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'media-urls', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'storage-retry', methods: ['POST'] as const, requestBody: 'buffered' as const },
 ]
 const CatalogCommand = z.object({
@@ -48,12 +51,14 @@ export class CanvasService {
   readonly runtime: CanvasRuntime
   readonly previews: PreviewCache
   readonly waveforms: WaveformCache
+  readonly derived: DerivedAssets
   private closing = false
-  constructor(readonly config: CanvasConfig, vault?: CredentialVault) {
-    this.store = new Store(config.dataDir, vault)
+  constructor(readonly config: CanvasConfig, vault?: CredentialVault, factory?: StorageFactory) {
+    this.store = new Store(config.dataDir, vault, factory)
     this.runtime = new CanvasRuntime(this.store, config)
     this.previews = new PreviewCache(config.dataDir)
     this.waveforms = new WaveformCache(config.dataDir)
+    this.derived = new DerivedAssets(this.store, config.maxMediaBytes)
   }
   async init(): Promise<void> {
     await this.store.init()
@@ -121,10 +126,10 @@ export class CanvasService {
         if (!old) throw new CanvasError('请求归属不一致', 409)
         acceptedTaskId = old.id; return old
       }
+      await this.store.requireStorage()
       if (state.graphRevision !== revision) throw new CanvasError('请先保存当前画布后再生成', 409, 'GRAPH_CONFLICT')
       const node = state.graph.nodes.find((n) => n.id === nodeId)
       if (!node || !isGeneration(node.kind)) throw new CanvasError('请选择生成节点')
-      if (await this.store.hasUnfinished(canvas, nodeId)) throw new CanvasError('这个节点有未结束任务', 409, 'NODE_BUSY')
       let snapshot: AnyTaskSnapshot
       if (tts) {
         if (node.kind !== 'tts-generation') throw new CanvasError('请选择语音生成节点')
@@ -146,7 +151,7 @@ export class CanvasService {
       }
       let bytes = 0
       for (const id of snapshot.referenceIds) {
-        bytes += (await stat(this.store.mediaPath(id))).size
+        bytes += (await this.store.locator(canvas, id)).bytes
         if (bytes > this.config.maxReferenceBytes) throw new CanvasError('参考素材总大小超过限制', 413)
       }
       if ((await this.store.db.get("SELECT COUNT(*) AS count FROM task_catalog WHERE status IN ('queued','running','external_wait','saving')")).count >= 1000) throw new CanvasError('任务队列已满，请稍后再提交', 429, 'QUEUE_FULL')
@@ -166,6 +171,10 @@ export class CanvasService {
     if (catalog?.kind === 'import') {
       if (catalog.status !== 'save_failed') throw new CanvasError('当前导入任务不可重试', 409)
       await this.store.db.batch([sql('UPDATE task_catalog SET status=? WHERE id=?', [action === 'abandon' ? 'abandoned' : 'queued', id])])
+      if (action === 'abandon') {
+        const descriptor = await this.store.db.get('SELECT import_json FROM task_details WHERE task_id=?', [id])
+        if (descriptor?.import_json) await rm(this.store.stagePath(JSON.parse(descriptor.import_json).stageFile), { force: true })
+      }
       this.runtime.wake(); return
     }
     await this.store.update(canvas, async (state) => {
@@ -185,6 +194,7 @@ export class CanvasService {
       }
       task.updatedAt = Date.now()
     }, () => [sql('UPDATE task_details SET next_run_at=0 WHERE task_id=?', [id])])
+    if (action === 'abandon') await this.store.removeTaskPrivate(id)
     this.runtime.wake()
   }
   async handle(request: Request): Promise<Response> {
@@ -230,7 +240,7 @@ export class CanvasService {
         const body = z.object({ nodeId: IdSchema, revision: z.number().int().nonnegative(), requestId: IdSchema }).strict().parse(await request.json())
         const task = await this.generate(await requireCanvas(), body.nodeId, body.revision, body.requestId, suffix === 'mock-generate', suffix === 'tts-generate')
         const { snapshot: _s, providerTaskId: _p, error: _e, ...summary } = task
-        return json(summary, 202)
+        return json({ ...summary, requestId: body.requestId }, 202)
       }
       if (suffix === 'task-search' && request.method === 'GET') return json(await this.store.searchTasks(parseTaskSearchParams(url.searchParams)))
       if (suffix === 'tasks' && request.method === 'GET') {
@@ -262,7 +272,24 @@ export class CanvasService {
       }
       if (suffix === 'storage') {
         if (request.method === 'GET') return json(await this.store.storage())
-        if (request.method === 'POST') return json(await this.store.setStorage(z.object({ requestId: IdSchema, path: z.string().min(1).max(4096), revision: z.number().int().nonnegative() }).strict().parse(await request.json())))
+        if (request.method === 'POST') return json(await this.store.setStorage(StorageInputSchema.parse(await request.json())))
+      }
+      if (suffix === 'storage-test' && request.method === 'POST') {
+        await this.store.testStorage(StorageInputSchema.parse(await request.json())); return json({ ok: true })
+      }
+      if (suffix === 'media-urls' && request.method === 'POST') {
+        const id = await requireCanvas()
+        const body = MediaUrlsSchema.parse(await request.json())
+        const items = []
+        for (const item of body.items) {
+          try {
+            const locator = await this.derived.get(id, item.assetId, item.variant)
+            items.push({ ...item, ...await this.store.objects.sign(locator, { method: 'GET', ttl: 3600 }, body.force) })
+          } catch (error) {
+            items.push({ ...item, error: this.store.redact(error instanceof Error ? error.message : '媒体读取失败') })
+          }
+        }
+        return json({ items })
       }
       if (suffix === 'storage-retry' && request.method === 'POST') { await this.store.retryMoves(); this.runtime.wake(); return json({ ok: true }) }
       if (suffix === 'media' && ['GET', 'HEAD'].includes(request.method)) return await this.media(request, await requireCanvas(), IdSchema.parse(url.searchParams.get('id')))
@@ -275,47 +302,25 @@ export class CanvasService {
   private async media(request: Request, canvas: string, id: string): Promise<Response> {
     const asset = this.store.state(canvas).assets.find((a) => a.id === id)
     if (!asset) throw new CanvasError('媒体文件不存在', 404)
-    let path = this.store.mediaPath(id)
-    const actual = await realpath(path).catch(() => { throw new CanvasError('本地媒体不可用', 404, 'MEDIA_MISSING') })
-    if (actual !== path) throw new CanvasError('媒体路径发生外部变更', 409, 'UNSAFE_PATH')
     const params = new URL(request.url).searchParams
-    const variant = params.get('variant')
+    const variant = MediaVariantSchema.parse(params.get('variant') ?? 'original')
+    if (params.has('v') && params.get('v') !== '1') throw new CanvasError('派生资源版本不可用', 400)
     if (variant === 'waveform') {
-      if (params.has('v') && params.get('v') !== WAVEFORM_VERSION) throw new CanvasError('波形版本不可用', 400)
-      if (asset.kind !== 'audio') throw new CanvasError('仅音频支持波形', 415)
-      const waveform = await this.waveforms.get(canvas, id, actual, await this.store.mediaHash(canvas, id))
-      const body = JSON.stringify(waveform)
-      return new Response(request.method === 'HEAD' ? null : body, { headers: {
-        'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)),
-        'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff',
-      } })
+      const bytes = await this.derived.waveform(canvas, id)
+      return new Response(request.method === 'HEAD' ? null : new Uint8Array(bytes), {
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': String(bytes.length),
+          'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+      })
     }
-    if (variant && (variant !== 'preview' || (params.has('v') && params.get('v') !== PREVIEW_VERSION))) throw new CanvasError('封面版本不可用', 400)
-    const preview = variant === 'preview'
-    if (preview) {
-      if (asset.kind === 'audio') throw new CanvasError('音频不提供图片封面', 415)
-      path = await this.previews.get(canvas, id, actual, await this.store.mediaHash(canvas, id), asset.kind)
-    }
-    const size = (await stat(path)).size
-    const headers = new Headers({ 'Content-Type': preview ? 'image/webp' : asset.mime, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': preview ? 'private, max-age=3600' : 'private, max-age=31536000, immutable', 'Content-Disposition': `${!preview && params.has('download') ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(preview ? `${asset.filename}.webp` : asset.filename)}` })
-    let start = 0; let end = size - 1; let status = 200
-    const range = request.headers.get('range')
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(range)
-      if (!match || (!match[1] && !match[2])) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
-      start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]))
-      end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1
-      if (start > end || start >= size || !Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
-      status = 206; headers.set('Content-Range', `bytes ${start}-${end}/${size}`)
-    }
-    headers.set('Content-Length', String(end - start + 1))
-    if (request.method === 'HEAD') return new Response(null, { status, headers })
-    return new Response(Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream, { status, headers })
+    const locator = await this.derived.get(canvas, id, variant)
+    const signed = await this.store.objects.sign(locator, { method: request.method === 'HEAD' ? 'HEAD' : 'GET', ttl: 3600,
+      ...(params.has('download') ? { download: asset.filename } : {}) })
+    return new Response(null, { status: 307, headers: { Location: signed.url, 'Cache-Control': 'no-store' } })
   }
   async close(): Promise<void> {
     if (this.closing) return
     this.closing = true
-    await Promise.all([this.previews.close(), this.waveforms.close(), this.runtime.close()])
+    await Promise.all([this.derived.close(), this.previews.close(), this.waveforms.close(), this.runtime.close()])
     await this.store.close()
   }
 }

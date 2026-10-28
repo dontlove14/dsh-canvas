@@ -133,12 +133,54 @@ describe('TTS editing controls', () => {
   it('uses only requested TTS fields, defaults and a generation action without a model selector', () => {
     const node: CanvasNode = { id: crypto.randomUUID(), kind: 'tts-generation', title: 'TTS', position: { x: 0, y: 0 }, modelId: null, assetId: null, selectedResultId: null, params: defaultTtsParams(), prompt: 'hello' }
     const generate = vi.fn().mockResolvedValue(undefined)
-    const container = mount(<TtsEditor node={node} submitting={false} patchNode={vi.fn()} generate={generate} />)
+    const container = mount(<TtsEditor node={node} submitting={false} configured={true} patchNode={vi.fn()} generate={generate} />)
     expect(container.querySelector<HTMLInputElement>('input[aria-label="语速"]')!.value).toBe('1.00')
     expect(container.querySelector<HTMLInputElement>('input[aria-label="音量"]')!.value).toBe('0.00')
     expect(container.querySelector('input[aria-label="音色 ID"]')).toBeTruthy()
     expect(container.querySelector('[role="combobox"]')).toBeNull(); expect(container.querySelector('input[type="file"]')).toBeNull()
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.click()); expect(generate).toHaveBeenCalledWith(node)
+  })
+  it('keeps TTS inputs and generate available during earlier tasks and disables them only while dispatching', () => {
+    const node: CanvasNode = { id: crypto.randomUUID(), kind: 'tts-generation', title: 'TTS', position: { x: 0, y: 0 }, modelId: null, assetId: null,
+      selectedResultId: null, params: defaultTtsParams(), prompt: 'hello' }
+    const task = { id: crypto.randomUUID(), nodeId: node.id, workspaceId: 'w', status: 'generating' as const, createdAt: 1, updatedAt: 1, resultIds: [] }
+    const props = { node, task, configured: true, patchNode: vi.fn(), generate: vi.fn() }
+    const container = mount(<TtsEditor {...props} submitting={false} />)
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(false)
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="音色 ID"]')!.disabled).toBe(false)
+    act(() => roots.at(-1)!.render(<TtsEditor {...props} submitting />))
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(true)
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="音色 ID"]')!.disabled).toBe(true)
+  })
+  it.each([false, null] as const)('shows configuration status and blocks generation even with valid text when readiness is %s', (configured) => {
+    const node: CanvasNode = { id: crypto.randomUUID(), kind: 'tts-generation', title: 'TTS', position: { x: 0, y: 0 }, modelId: null, assetId: null,
+      selectedResultId: null, params: defaultTtsParams(), prompt: '(happy) 你好' }
+    const generate = vi.fn()
+    const container = mount(<TtsEditor node={node} submitting={false} configured={configured} patchNode={vi.fn()} generate={generate} />)
+    expect(container.querySelector('[role="status"]')!.textContent).toBe(configured === false ? '请前往设置页面配置模型' : '正在读取 FishTTS 配置…')
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!
+    expect(button.disabled).toBe(true); act(() => button.click()); expect(generate).not.toHaveBeenCalled()
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="音色 ID"]')!.disabled).toBe(false)
+    expect(editorText(container.querySelector<HTMLElement>('[role="textbox"]')!)).toBe(node.prompt)
+  })
+  it('updates the configuration prompt without changing drafts and fails closed on a read error', () => {
+    const node: CanvasNode = { id: crypto.randomUUID(), kind: 'tts-generation', title: 'TTS', position: { x: 0, y: 0 }, modelId: null, assetId: null,
+      selectedResultId: null, params: defaultTtsParams(), prompt: '(happy) 原有文字' }
+    const patch = vi.fn(), generate = vi.fn()
+    const view = (configured: boolean, configurationError = false) => <TtsEditor node={node} submitting={false} configured={configured}
+      configurationError={configurationError} patchNode={patch} generate={generate} />
+    const container = mount(view(false)), root = roots.at(-1)!
+    act(() => root.render(view(true)))
+    expect(container.querySelector('.dc-tts-configuration')).toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(false)
+    act(() => root.render(view(false)))
+    expect(container.querySelector('[role="status"]')!.textContent).toBe('请前往设置页面配置模型')
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(true)
+    act(() => root.render(view(true, true)))
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('配置读取失败')
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(true)
+    expect(editorText(container.querySelector<HTMLElement>('[role="textbox"]')!)).toBe(node.prompt)
+    expect(patch).not.toHaveBeenCalled(); expect(generate).not.toHaveBeenCalled()
   })
   it('saves global endpoint/credentials and leaves an existing key untouched when the field stays empty', async () => {
     const api = new CanvasApi()

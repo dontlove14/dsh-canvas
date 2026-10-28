@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { useUpdateNodeInternals } from '@xyflow/react'
-import { TaskStatusLabels, TRACKED_STATUSES, type Asset, type CanvasNode } from '../shared/contracts'
+import { type Asset, type CanvasNode } from '../shared/contracts'
 import type { TaskSummary } from '../shared/v2'
 import { CanvasApi } from './api'
 import { CanvasHandle } from './CanvasHandle'
@@ -9,6 +9,8 @@ import { generationFrame } from './generationLayout'
 import { UiButton } from './ui'
 import { VideoPlayer } from './VideoPlayer'
 import { useNodeActions } from './CanvasSelection'
+import { SignedImage } from './SignedMedia'
+import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
 
 export function GenerationGlyph({ video = false }: { video?: boolean }) {
   return <svg width="44" height="44" viewBox="0 0 48 48" fill="currentColor" aria-hidden="true">
@@ -21,7 +23,9 @@ export function ExpandGlyph({ collapse = false }: { collapse?: boolean }) {
     {collapse ? <path d="M4 10h6V4m10 10h-6v6M10 10 3 3m11 11 7 7" /> : <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />}
   </svg>
 }
-export const GenerationNode = memo(function GenerationNode({ node, asset, results, task, selected, expanded, api, workspace, playing, onPlay, onStop, onRename, onResult, onExpand, onOpen, onSize }: {
+export const GenerationNode = memo((props: Parameters<typeof GenerationNodeBody>[0]) =>
+  <NodeLoadingBoundary><GenerationNodeBody {...props} /></NodeLoadingBoundary>)
+function GenerationNodeBody({ node, asset, results, task, selected, expanded, api, workspace, playing, onPlay, onStop, onRename, onResult, onExpand, onOpen, onSize }: {
   node: CanvasNode; asset?: Asset; results: Asset[]; task?: TaskSummary; selected: boolean; expanded: boolean; api: CanvasApi; workspace: string; playing: boolean
   onPlay: (id: string) => void; onStop: (id: string) => void; onRename: (id: string, title: string) => void
   onResult: (id: string, assetId: string) => void; onExpand: (id: string) => void; onOpen: (asset: Asset) => void
@@ -33,11 +37,11 @@ export const GenerationNode = memo(function GenerationNode({ node, asset, result
   const size = generationFrame(displayAsset, results.length, expanded)
   const internals = useUpdateNodeInternals()
   const [playingAsset, setPlayingAsset] = useState<string | null>(null)
+  const geometry = JSON.stringify([expanded, asset?.id, size, expanded ? results.map((item) => item.id) : []])
   useEffect(() => {
     onSize(node.id, size.width, size.height); internals(node.id)
-  }, [node.id, size.width, size.height, expanded, asset?.id, results, onSize, internals])
+  }, [node.id, size.width, size.height, geometry, onSize, internals])
   useEffect(() => { setPlayingAsset(null); onStop(node.id) }, [expanded, asset?.id, node.id, onStop])
-  const busy = task && TRACKED_STATUSES.has(task.status)
   const shown = expanded ? results : asset ? [asset] : []
   return <article className={`dc-node dc-generation-node ${asset ? 'has-result' : ''} ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''} ${results.length > 1 && !expanded ? 'stacked' : ''}`}
     style={{ width: size.width, height: size.height }}>
@@ -45,7 +49,7 @@ export const GenerationNode = memo(function GenerationNode({ node, asset, result
     {(!expanded || !asset) && <><CanvasHandle type="target" /><CanvasHandle type="source" disabled={!asset} /></>}
     {results.length > 1 && !expanded && results.filter((item) => item.id !== asset?.id).slice(0, 2).reverse().map((item, index) =>
       <div key={item.id} className={`dc-result-layer ${index === 0 && results.length > 2 ? 'second' : 'first'}`}>
-        <img src={api.preview(workspace, item.id)} alt="" draggable={false} loading="lazy" decoding="async" />
+        <SignedImage api={api} canvas={workspace} assetId={item.id} trackLoading={false} alt="" draggable={false} loading="lazy" decoding="async" />
       </div>)}
     {!asset ? <div className="dc-generation-empty"><GenerationGlyph video={node.kind === 'video-generation'} /></div>
       : <div className="dc-generation-grid" style={{ gridTemplateColumns: `repeat(${size.columns}, ${size.cell.width}px)` }}>
@@ -70,16 +74,17 @@ export const GenerationNode = memo(function GenerationNode({ node, asset, result
           </div>}
         </div>)}
       </div>}
-    {busy && <div className="dc-task-overlay" role="status"><span className="dc-spinner" />{TaskStatusLabels[task.status]}{task.progress !== undefined ? ` ${Math.round(task.progress)}%` : ''}</div>}
+    <NodeLoading task={task} title={node.title} />
   </article>
-})
+}
 function download(api: CanvasApi, workspace: string, asset: Asset) {
   const link = document.createElement('a'); link.href = api.media(workspace, asset.id, true); link.download = asset.filename; link.click()
 }
-function ResultMedia({ asset, api, workspace, playing, onPlay, onStop, onOpen, onDimensions }: { asset: Asset; api: CanvasApi; workspace: string; playing: boolean; onPlay: () => void; onStop: () => void; onOpen: () => void; onDimensions: (width: number, height: number) => void }) {
+export function ResultMedia({ asset, api, workspace, playing, onPlay, onStop, onOpen, onDimensions }: { asset: Asset; api: CanvasApi; workspace: string; playing: boolean; onPlay: () => void; onStop: () => void; onOpen: () => void; onDimensions: (width: number, height: number) => void }) {
   const frame = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
   const [missing, setMissing] = useState(false)
+  useNodeMediaLoading(!visible && !missing)
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '160px' })
     if (frame.current) observer.observe(frame.current)
@@ -93,8 +98,8 @@ function ResultMedia({ asset, api, workspace, playing, onPlay, onStop, onOpen, o
   }, [onStop])
   return <div ref={frame} className="dc-generation-media" onClick={() => { if (asset.kind === 'video') onPlay() }}
     onDoubleClick={(event) => { if ((event.target as Element).closest('.dc-video-controls')) return; event.preventDefault(); event.stopPropagation(); onOpen() }}>
-    {visible && (missing ? <div className="dc-missing">封面暂不可用</div> : <img src={api.preview(workspace, asset.id)} alt={asset.filename} draggable={false} loading="lazy" decoding="async" onError={() => setMissing(true)}
+    {visible && (missing ? <div className="dc-missing">封面暂不可用</div> : <SignedImage api={api} canvas={workspace} assetId={asset.id} alt={asset.filename} draggable={false} loading="lazy" decoding="async" onError={() => setMissing(true)}
       onLoad={(event) => onDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />)}
-    {visible && playing && asset.kind === 'video' && <VideoPlayer key={asset.id} src={api.media(workspace, asset.id)} poster={api.preview(workspace, asset.id)} autoPlay label={`播放 ${asset.filename}`} />}
+    {visible && playing && asset.kind === 'video' && <VideoPlayer key={asset.id} src={api.media(workspace, asset.id)} api={api} canvas={workspace} assetId={asset.id} autoPlay label={`播放 ${asset.filename}`} />}
   </div>
 }

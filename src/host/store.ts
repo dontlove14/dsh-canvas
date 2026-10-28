@@ -12,6 +12,8 @@ export interface Output {
   base64?: string
   stageFile?: string
   authenticated?: boolean
+  width?: number
+  height?: number
 }
 export interface TaskPrivate { key: string; issued: boolean; outputs?: Output[] }
 export function detectMedia(bytes: Buffer): { kind: MediaKind; mime: string } | undefined {

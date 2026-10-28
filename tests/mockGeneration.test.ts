@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { CanvasService } from '../src/host/service'
+import { fakeFactory, initialize, cloudPath, remoteBody } from './support/objectStorage'
 import { mockOutputId } from '../src/host/mockGeneration'
 import { videoFirstFrame } from '../src/host/media/previews'
 import { MOCK_MODELS, mockRecord, validateMockGeneration } from '../src/shared/mockModels'
@@ -12,13 +13,14 @@ import { defaultParams, emptyGraph, GenerationParamsSchema, supportsVideoDuratio
 import { generationFrame, connectionAsset } from '../src/client/generationLayout'
 import { chooseResolution, sizeChoices } from '../src/client/generationParams'
 import { assetToken } from '../src/shared/promptMentions'
+import { BUILTIN_MODELS } from '../src/shared/modelCatalog'
 
 const dispose: Array<() => Promise<void>> = []
 afterEach(async () => { vi.unstubAllGlobals(); for (const cleanup of dispose.splice(0).reverse()) await cleanup() })
 async function service(root?: string) {
   if (!root) { root = await mkdtemp(join(tmpdir(), 'canvas-mock-')); const path = root; dispose.push(() => rm(path, { recursive: true, force: true })) }
-  const instance = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 50, requestTimeoutMs: 3000, maxMediaBytes: 8_000_000, maxReferenceBytes: 1_000_000 })
-  await instance.init(); dispose.push(() => instance.close())
+  const instance = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 50, requestTimeoutMs: 3000, maxMediaBytes: 8_000_000, maxReferenceBytes: 1_000_000 }, undefined, fakeFactory(root))
+  await initialize(instance, true); dispose.push(() => instance.close())
   return instance
 }
 function generator(index = 0, count = 4): CanvasNode {
@@ -30,7 +32,7 @@ async function finished(instance: CanvasService, id: string) {
   const deadline = Date.now() + 20000
   for (;;) {
     const task = instance.store.state('w').tasks.find((task) => task.id === id)!
-    if (task.status === 'completed') return task
+    if (task.status === 'completed' && !instance.runtime.isActive(id)) return task
     if (['unknown', 'failed', 'save_failed'].includes(task.status) || Date.now() > deadline) throw new Error(`${task.status}: ${task.error}`)
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
@@ -52,24 +54,26 @@ describe('Mock task pipeline', () => {
     await expect(instance.generate('w', node.id, state.graphRevision, requestId)).rejects.toMatchObject({ code: 'REQUEST_REUSED' })
     const completed = await finished(instance, task.id)
     expect(completed.resultIds).toEqual([0, 1, 2, 3].map((i) => mockOutputId(task.id, i)))
-    const buffers = await Promise.all(completed.resultIds.map((id) => readFile(instance.store.mediaPath(id))))
+    const buffers = await Promise.all(completed.resultIds.map((id) => instance.store.readMedia(id, 8000000)))
     expect(new Set(buffers.map((buffer) => buffer.toString('base64'))).size).toBe(4)
     expect(await sharp(buffers[0]).metadata()).toMatchObject({ format: 'png', width: 1024, height: 1024 })
     expect(await instance.store.db.get('SELECT credential_ref,submit_issued,external_completed_at FROM task_details WHERE task_id=?', [task.id])).toMatchObject({ credential_ref: null, submit_issued: 0, external_completed_at: null })
-    expect(network).not.toHaveBeenCalled(); expect(instance.store.listModels()).toEqual([])
+    expect(network).not.toHaveBeenCalled()
+    expect(instance.store.listModels().every((model) => !model.has_api_key)).toBe(true)
+    expect(instance.store.listModels().map((model) => model.id)).toEqual(BUILTIN_MODELS.map((model) => model.id))
     const next = instance.store.state('w'); const target = generator()
     const edge = { id: randomUUID(), source: node.id, target: target.id, assetId: completed.resultIds[0] }
     const saved = await instance.saveGraph('w', { ...next.graph, nodes: [{ ...node, selectedResultId: completed.resultIds[2] }, target], edges: [edge] }, next.graphRevision)
     expect(saved.graph.edges).toEqual([edge])
     const result = await instance.handle(new Request(`http://localhost/api/canvas/v2/media?canvas=w&id=${completed.resultIds[0]}&variant=preview&v=1`))
-    expect(result.status).toBe(200); expect(result.headers.get('content-type')).toBe('image/webp')
+    expect(result.status).toBe(307); expect(await sharp(await remoteBody(instance.store, result)).metadata()).toMatchObject({ format: 'webp' })
   })
   it('rejects stale revisions, unsupported params and real configured models on the Mock route', async () => {
     const instance = await service(); const node = { ...generator(1, 4), params: { ...defaultParams(MOCK_MODELS[1]), size: '2048x2048' } }
     await instance.saveGraph('w', { ...emptyGraph(), nodes: [node] }, 0)
     await expect(instance.generate('w', node.id, 0, randomUUID(), true)).rejects.toMatchObject({ code: 'GRAPH_CONFLICT' })
     await expect(instance.generate('w', node.id, 1, randomUUID(), true)).rejects.toThrow('尺寸')
-    const real = (await instance.store.saveModel({ kind: 'image', name: 'Real', model_id: 'gpt-image-1', protocol: 'openai-image', api_base: 'http://localhost:1', api_key: 'test' }))[0]
+    const real = (await instance.store.saveModel({ ...BUILTIN_MODELS[0], api_key: 'test' }))[0]
     await instance.saveGraph('w', { ...emptyGraph(), nodes: [{ ...node, modelId: real.id }] }, 1)
     await expect(instance.generate('w', node.id, 2, randomUUID(), true)).rejects.toThrow('Mock')
     expect(instance.store.state('w').tasks).toHaveLength(0)
@@ -98,8 +102,8 @@ describe('Mock task pipeline', () => {
     const asset = instance.store.state('w').assets.find((asset) => asset.id === completed.resultIds[0])!
     expect(asset).toMatchObject({ kind: 'video', mime: 'video/mp4', width: 1280, height: 720 })
     expect(asset.duration).toBeCloseTo(4, 0)
-    expect((await stat(instance.store.stagePath(`${asset.id}.raw`))).mode & 0o777).toBe(0o600)
-    const frame = await videoFirstFrame(instance.store.mediaPath(asset.id), new AbortController().signal)
+    await expect(stat(instance.store.stagePath(`${asset.id}.raw`))).rejects.toMatchObject({ code: 'ENOENT' })
+    const frame = await videoFirstFrame(await cloudPath(instance.store, asset.id), new AbortController().signal)
     expect(await sharp(frame).metadata()).toMatchObject({ format: 'png' })
     expect(network).not.toHaveBeenCalled()
   }, 25000)
@@ -112,11 +116,11 @@ describe('Mock task pipeline', () => {
     expect(completed.resultIds).toEqual(ids)
     const assets = instance.store.state('w').assets.filter((asset) => ids.includes(asset.id))
     expect(assets).toHaveLength(10)
-    const bytes = await Promise.all(ids.map((id) => readFile(instance.store.mediaPath(id))))
+    const bytes = await Promise.all(ids.map((id) => instance.store.readMedia(id, 8000000)))
     expect(new Set(bytes.map((buffer) => buffer.toString('base64'))).size).toBe(10)
     if (index === 3) {
       expect(assets.every((asset) => asset.kind === 'video' && Math.abs(asset.duration! - 1) < .1)).toBe(true)
-      expect(await sharp(await videoFirstFrame(instance.store.mediaPath(ids[9]), new AbortController().signal)).metadata()).toMatchObject({ format: 'png' })
+      expect(await sharp(await videoFirstFrame(await cloudPath(instance.store, ids[9]), new AbortController().signal)).metadata()).toMatchObject({ format: 'png' })
     }
     const state = instance.store.state('w')
     await instance.saveGraph('w', { ...state.graph, nodes: [{ ...node, selectedResultId: ids[9] }] }, state.graphRevision)

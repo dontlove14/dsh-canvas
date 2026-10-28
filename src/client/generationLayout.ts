@@ -10,8 +10,9 @@ export function generationFrame(asset: Asset | undefined, count: number, expande
 export function nodeEditorVisible(node: CanvasNode, asset: Asset | undefined, expanded: boolean): boolean {
   return isGeneration(node.kind) ? !expanded : !asset
 }
-/** New connections use the main result. Existing edge asset IDs remain immutable. */
-export function connectionAsset(node: CanvasNode, assets: readonly Asset[], results: readonly Asset[], handle: string | null): Asset | undefined {
+/** History requires an expanded, explicit asset port; persisted edges stay fixed. */
+export function connectionAsset(node: CanvasNode, assets: readonly Asset[], results: readonly Asset[], handle: string | null, history = false, expanded = false): Asset | undefined {
+  if (history) return expanded && handle?.startsWith('result:') ? results.find((asset) => `result:${asset.id}` === handle) : undefined
   if (handle) return undefined
   return isGeneration(node.kind) ? results.find((asset) => asset.id === node.selectedResultId) ?? results[0] : assets.find((asset) => asset.id === node.assetId)
 }

@@ -1,6 +1,8 @@
 # ADR-0015：按名称存储媒体与可恢复文件搬移
 
-状态：已采纳
+状态：已替代
+
+2026-10-28由[ADR-0043](0043-object-storage-and-expiring-media-access.md)替代：媒体改为OSS对象、设置改为单活动提供商，名称与恢复清单原则保留；下文为旧本地实现记录。
 
 文档类型：解释；负责人：项目维护者；最近核对：2026-10-26。
 记录日期：2026-10-26。替代 [ADR-0008](0008-streamed-local-media.md) 的文件布局 / 发布实现，延续 [ADR-0012](0012-retained-media-and-result-batches.md) 的历史保留原则。

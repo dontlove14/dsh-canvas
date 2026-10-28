@@ -1,6 +1,6 @@
 {
   "name": "dsh-canvas",
-  "version": "0.2.29",
+  "version": "0.2.47",
   "private": true,
   "description": "Local image, video and FishTTS generation canvas plugin for DeepSeek Harness",
   "type": "module",
@@ -22,7 +22,8 @@
     "cordis.patch.yml",
     "README.md",
     "AGENTS.md",
-    "docs"
+    "docs",
+    "scripts/patch-thinking-orbs.mjs"
   ],
   "dsh": {
     "bundle": {
@@ -39,8 +40,11 @@
     }
   },
   "scripts": {
+    "postinstall": "node scripts/patch-thinking-orbs.mjs",
     "build": "node scripts/build.mjs",
+    "pretypecheck": "node scripts/patch-thinking-orbs.mjs",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "pretest": "node scripts/patch-thinking-orbs.mjs",
     "test": "vitest run --maxWorkers=2",
     "docs:check": "node scripts/check-docs.mjs",
     "check": "npm run docs:check && npm run typecheck && npm test && npm run build",
@@ -60,8 +64,11 @@
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "1.1.0",
     "@xyflow/react": "^12.8.0",
+    "ali-oss": "6.23.0",
+    "border-beam": "1.4.1",
     "proper-lockfile": "^4.1.2",
     "sharp": "0.35.5",
+    "thinking-orbs": "0.3.2",
     "zod": "^4.1.0"
   },
   "devDependencies": {
@@ -75,6 +82,7 @@
     "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.2",
     "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@types/ali-oss": "6.23.3",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^22.15.0",
     "@types/proper-lockfile": "^4.1.4",

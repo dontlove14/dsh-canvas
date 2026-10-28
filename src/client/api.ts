@@ -1,6 +1,7 @@
 import { type ModelInput, type ModelsResponse, type PublicModel, type MediaKind, type TaskAction, type PublicTtsSettings, type TtsSettingsInput } from '../shared/contracts'
-import { V2_ROOT, type CanvasSnapshot, type GraphMutation, type Catalog, type StorageSettings, type TaskDetail, type TaskSummary, type TaskSearchQuery, type TaskPage } from '../shared/v2'
+import { V2_ROOT, type CanvasSnapshot, type GraphMutation, type Catalog, type TaskDetail, type TaskSummary, type TaskSearchQuery, type TaskPage } from '../shared/v2'
 import { WaveformSchema, WAVEFORM_VERSION, type AudioWaveform } from '../shared/audioWaveform'
+import type { ObjectStorageSettings, StorageInput, MediaUrl, MediaVariant } from '../shared/objectStorage'
 
 export class ApiError extends Error {
   constructor(message: string, readonly code: string, readonly status: number) { super(message) }
@@ -27,9 +28,9 @@ export class CanvasApi {
   }
   state(canvas: string): Promise<CanvasSnapshot> { return this.request('graph', { canvas }) }
   save(canvas: string, mutation: GraphMutation): Promise<CanvasSnapshot> { return this.request('graph', { canvas }, this.json(mutation)) }
-  generate(canvas: string, nodeId: string, revision: number): Promise<TaskSummary> { return this.request('generate', { canvas }, this.json({ nodeId, revision, requestId: crypto.randomUUID() })) }
-  mockGenerate(canvas: string, nodeId: string, revision: number): Promise<TaskSummary> { return this.request('mock-generate', { canvas }, this.json({ nodeId, revision, requestId: crypto.randomUUID() })) }
-  ttsGenerate(canvas: string, nodeId: string, revision: number): Promise<TaskSummary> { return this.request('tts-generate', { canvas }, this.json({ nodeId, revision, requestId: crypto.randomUUID() })) }
+  generate(canvas: string, nodeId: string, revision: number, requestId = crypto.randomUUID()): Promise<TaskSummary> { return this.request('generate', { canvas }, this.json({ nodeId, revision, requestId })) }
+  mockGenerate(canvas: string, nodeId: string, revision: number, requestId = crypto.randomUUID()): Promise<TaskSummary> { return this.request('mock-generate', { canvas }, this.json({ nodeId, revision, requestId })) }
+  ttsGenerate(canvas: string, nodeId: string, revision: number, requestId = crypto.randomUUID()): Promise<TaskSummary> { return this.request('tts-generate', { canvas }, this.json({ nodeId, revision, requestId })) }
   ttsSettings(): Promise<PublicTtsSettings> { return this.request('tts-settings', {}) }
   saveTtsSettings(input: TtsSettingsInput): Promise<PublicTtsSettings> { return this.request('tts-settings', {}, this.json(input)) }
   taskDetail(canvas: string, id: string, signal?: AbortSignal): Promise<TaskDetail> { return this.request('task', { canvas, id }, { signal }) }
@@ -39,8 +40,12 @@ export class CanvasApi {
   }
   tasks(canvas: string, cursor = 0): Promise<{ items: Array<{ id: string; nodeId: string; kind: string; title: string; sequence: number; status: string; progress: number | null; createdAt: number; updatedAt: number }>; nextCursor: number | null }> { return this.request('tasks', { canvas, cursor: String(cursor) }) }
   taskAction(canvas: string, id: string, action: TaskAction): Promise<{ ok: boolean }> { return this.request('task', { canvas }, this.json({ id, action })) }
-  storage(): Promise<StorageSettings> { return this.request('storage', {}) }
-  setStorage(path: string, revision: number): Promise<StorageSettings> { return this.request('storage', {}, this.json({ path, revision, requestId: crypto.randomUUID() })) }
+  storage(): Promise<ObjectStorageSettings> { return this.request('storage', {}) }
+  setStorage(input: StorageInput): Promise<ObjectStorageSettings> { return this.request('storage', {}, this.json(input)) }
+  testStorage(input: StorageInput): Promise<{ ok: boolean }> { return this.request('storage-test', {}, this.json(input)) }
+  mediaUrls(canvas: string, items: Array<{ assetId: string; variant: MediaVariant }>, force = false): Promise<{ items: Array<MediaUrl | { assetId: string; variant: MediaVariant; error: string }> }> {
+    return this.request('media-urls', { canvas }, this.json({ items, force }))
+  }
   retryMoves(): Promise<{ ok: boolean }> { return this.request('storage-retry', {}, { method: 'POST' }) }
   async upload(canvas: string, file: File, kind: MediaKind, position: { x: number; y: number }, onStarted?: () => Promise<void>, onProgress?: (value: number) => void): Promise<{ taskId: string; nodeId: string }> {
     const session = await this.request<{ id: string; nodeId: string }>('upload-start', { canvas }, this.json({ requestId: crypto.randomUUID(), filename: file.name, kind, position }))

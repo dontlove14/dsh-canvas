@@ -1,6 +1,6 @@
 # ADR 决策记录
 
-文档类型：解释；负责人：项目维护者；最近核对：2026-10-27。发布时复核有效性；决策替换或重审条件出现时立即更新，规则见[文档导航](../index.md)。
+文档类型：解释；负责人：项目维护者；最近核对：2026-10-28。发布时复核有效性；决策替换或重审条件出现时立即更新，规则见[文档导航](../index.md)。
 
 0001–0012 保留首版补录；0013–0017 记录 SQLite / 目录 / 媒体 / Runtime 实施，0018 补充项目列表与编辑器导航，0019 记录原生设置样式与宿主主题继承，0020 记录通用组件规则，0021 记录每轮自动更新本地插件和压缩包清理。被取代的实现标为“已替代”，仍有效的原则在原 ADR 增加更新说明。2026-10-26 为本次实施 / 核对日期。
 
@@ -24,7 +24,7 @@
 | [ADR-0012](0012-retained-media-and-result-batches.md) | 保留媒体历史与最新可用批次展示 | 删除、结果选择、部分保存、GC 边界 | 已采纳（补录） |
 | [ADR-0013](0013-sqlite-deltas-and-migration.md) | SQLite 增量事务、hash 链与只读旧源迁移 | 21 表 / 39 显式索引、CAS、回执、迁移 | 已采纳 |
 | [ADR-0014](0014-canvas-catalog-and-upload-nodes.md) | 自有画布目录与上传自动资源节点 | 一级文件夹、目录 CRUD、自动占位 / 导入 | 已采纳 |
-| [ADR-0015](0015-named-media-and-durable-moves.md) | 按名称媒体与可恢复搬移 | Host 路径、发布、复制 / CAS、历史保留 | 已采纳 |
+| [ADR-0015](0015-named-media-and-durable-moves.md) | 按名称媒体与可恢复搬移 | 本地实现由0043替代，命名 / 清单 / CAS原则保留 | 已替代 |
 | [ADR-0016](0016-host-runtime-task-details-and-credentials.md) | 宿主持久队列、任务两表与凭据版本 | 外部 ID、成功 / 失败、恢复、生命周期 | 已采纳 |
 | [ADR-0017](0017-harness-official-cases-and-badcases.md) | Harness 官方契约 case / badcase | 官方三页、固定源码 / SDK、反例与检查 | 已采纳 |
 | [ADR-0018](0018-project-list-before-canvas-editor.md) | 项目列表先行与独立画布编辑器 | 列表入口、上下文管理、保存后返回、页面任务边界 | 已采纳 |
@@ -46,6 +46,22 @@
 | [ADR-0034](0034-conversation-sidebar-canvas.md) | 对话右侧标签页画布 | 开始页入口、公开两阶段注册、保留草稿 / 隐藏暂停、容器响应式、共享API与原数据 | 已采纳 |
 | [ADR-0035](0035-searchable-paginated-task-dialog.md) | 任务目录分页查询 | owner范围、联合条件、序号上限、通用双月时间 / 分页、目录表格与详情返回、旧数据兼容 | 已采纳 |
 | [ADR-0036](0036-selected-node-relationship-flow.md) | 单选节点上下游连线流光 | 直接入出边、输出到输入、CSS亮段、隐藏暂停 / 静态降级、原数据与交互保持 | 已采纳 |
+| [ADR-0037](0037-fixed-provider-image-models.md) | 固定供应商与图片参数映射 | 双供应商独立凭据、真实图片任务、有效尺寸表、部分失败保留 | 已采纳 |
+| [ADR-0038](0038-model-configuration-summary-and-tts-header.md) | 配置概览与TTS s1 Header | 已配置模型汇总、先模型后供应商、密钥隔离、固定情绪版本 | 已采纳 |
+| [ADR-0039](0039-configured-only-canvas-model-picker.md) | 画布只选有配置的真实模型 | 已由0040收紧为组合级筛选，空态与历史约束保留 | 已替代 |
+| [ADR-0040](0040-configured-provider-combinations-only.md) | 只展示已配置模型供应商组合 | 未配置渠道隐藏、先过滤后分组、无自动换渠道、完整配置目录保留 | 已采纳 |
+| [ADR-0041](0041-tts-configuration-readiness.md) | TTS节点配置提示与资格校验 | 独立Key读取、加载 / 缺配置提示、新任务拦截、原任务凭据保留 | 已采纳 |
+| [ADR-0042](0042-node-anchored-overlays.md) | 节点附件自然锚定与层级 | 不按窗口挪动卡片，节点附件低于固定操作栏，视图状态不持久化 | 已采纳 |
+| [ADR-0043](0043-object-storage-and-expiring-media-access.md) | 对象存储与临时媒体访问 | 单写入目标、定位持久化、过期刷新、云端恢复、限定历史清理 | 波形读取由0045更新，其余已采纳 |
+| [ADR-0044](0044-wide-image-ratios-at-one-k.md) | 图片1K宽屏比例 | 三个合法预设、21:9标签、切档保持、旧尺寸与任务保留 | 已采纳，显示顺序由0045补充 |
+| [ADR-0045](0045-same-origin-waveforms-and-ratio-order.md) | 同源波形与比例排序 | 认证JSON / 有界缓存，成对数值顺序到21:9，旧尺寸保持 | 已采纳 |
+| [ADR-0046](0046-dependency-backed-whole-node-loading.md) | 整节点Loading依赖 | 全节点Beam / Orb，宿主主题与暂停，后续Loading选型询问 | 已采纳 |
+| [ADR-0047](0047-zoom-aware-loading-resolution.md) | 缩放下的Loading分辨率 | 依赖密度补丁、整数档位、实际Store / DPR、原动画与媒体保持 | 已采纳 |
+| [ADR-0048](0048-banana-native-image-protocol.md) | Nano Banana原生图片协议 | 四模型双渠道、Header隔离、Base64与实际尺寸、复用OSS结果恢复 | Model Link由0049修正，其余已采纳 |
+| [ADR-0049](0049-modellink-banana-generate-content.md) | Model Link使用generateContent | REST路径与JSON / 返回、独立协议、不回落重提、旧任务保留 | 已采纳 |
+| [ADR-0050](0050-submission-history-and-expanded-result-ports.md) | 按提交堆叠历史与展开逐素材端点 | 立即卡片、同节点多任务、确切回执核对、独立Loading / 引用、仅索引升级 | 已采纳；多次提交替代0026 |
+| [ADR-0051](0051-readonly-submission-inspection.md) | 展开只读记录与收起最新编辑 | 持久快照、迟到读取取消、无写入查看、最新输入恢复、原引用身份 | 已采纳；替代0050展开编辑条款 |
+| [ADR-0052](0052-position-and-content-render-isolation.md) | 节点位置与内容更新隔离 | 全字段共享、所属节点投影、几何测量、编辑器实时图写入、不改持久格式 | 已采纳 |
 
 ## 如何使用
 

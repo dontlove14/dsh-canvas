@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { GenerationParams, PublicModel } from '../shared/contracts'
-import { chooseResolution, paramsSummary, sizeChoices } from './generationParams'
+import { chooseResolution, paramsSummary, ratioChoices, sizeChoices } from './generationParams'
 import { UiButton, UiSlider } from './ui'
 
 export function GenerationParameters({ model, params, disabled, onChange }: { model: PublicModel; params: GenerationParams; disabled: boolean; onChange: (params: GenerationParams) => void }) {
@@ -45,12 +45,20 @@ export function GenerationParameters({ model, params, disabled, onChange }: { mo
           onClick={() => onChange({ ...params, size: chooseResolution(choices, params.size, resolution) })}>{resolution}</UiButton>)}
       </div></fieldset>
       <fieldset><legend>比例</legend><div className="dc-ratio-options">
-        {[...new Map(choices.filter((choice) => choice.resolution === current?.resolution).map((choice) => [choice.ratio, choice])).values()].map((choice) =>
+        {ratioChoices(choices, current?.resolution).map((choice) =>
           <UiButton key={choice.ratio} aria-pressed={params.size === choice.size} title={choice.size} onClick={() => onChange({ ...params, size: choice.size })}>
             <span className="dc-ratio-shape" style={{ width: Math.max(7, Math.round(18 * Math.min(1, choice.width / choice.height))), height: Math.max(7, Math.round(18 * Math.min(1, choice.height / choice.width))) }} />
             {choice.ratio}
           </UiButton>)}
       </div></fieldset>
+      {model.capabilities.backgrounds && <fieldset><legend>背景</legend><div className="dc-param-options">
+        {model.capabilities.backgrounds.map((option) => <UiButton key={option.value} aria-pressed={(params.background ?? 'auto') === option.value}
+          onClick={() => onChange({ ...params, background: option.value as GenerationParams['background'] })}>{option.label}</UiButton>)}
+      </div></fieldset>}
+      {model.capabilities.qualities && <fieldset><legend>画质</legend><div className="dc-param-options">
+        {model.capabilities.qualities.map((option) => <UiButton key={option.value} aria-pressed={(params.quality ?? 'auto') === option.value}
+          onClick={() => onChange({ ...params, quality: option.value as GenerationParams['quality'] })}>{option.label}</UiButton>)}
+      </div></fieldset>}
       <fieldset><legend>生成数量</legend>
         <UiSlider label="生成数量" value={params.n} values={model.capabilities.counts} showStops showLabels disabled={disabled}
           formatValue={(count) => `${count}${model.kind === 'image' ? '张' : '条'}`} onChange={(n) => onChange({ ...params, n })} />

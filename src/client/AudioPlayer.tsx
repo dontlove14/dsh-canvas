@@ -5,6 +5,8 @@ import { CanvasApi } from './api'
 import { UiButton } from './ui'
 import { createMediaPlayback, formatMediaTime, type VideoPlaybackState } from './videoPlayback'
 import { createAudioPlayhead } from './audioPlayhead'
+import { useMediaUrl, useRefreshingSource } from './SignedMedia'
+import { NodeLoading, useNodeMediaLoading } from './NodeLoading'
 
 const audioTime = (value: number) => formatMediaTime(value).padStart(5, '0')
 export function AudioWaveform({ peaks, time, duration, onSeek, onToggle, media }: {
@@ -72,6 +74,11 @@ export const AudioPlayer = memo(function AudioPlayer({ asset, api, workspace, la
   const [state, setState] = useState<VideoPlaybackState>({ time: 0, duration: 0, paused: true, error: null })
   const [waveform, setWaveform] = useState<WaveformData | null>(null)
   const [waveError, setWaveError] = useState(false)
+  const [readyAsset, setReadyAsset] = useState('')
+  const media = useMediaUrl(api, workspace, asset.id)
+  const pending = !media.error && state.error !== 'unavailable' && (readyAsset !== asset.id || (!waveform && !waveError))
+  const inNode = useNodeMediaLoading(pending)
+  useRefreshingSource(audio, media.url)
   useEffect(() => {
     const controller = new AbortController()
     setWaveform(null); setWaveError(false)
@@ -89,15 +96,17 @@ export const AudioPlayer = memo(function AudioPlayer({ asset, api, workspace, la
   const duration = state.duration || waveform?.duration || asset.duration || 0
   const time = Math.min(state.time, duration || state.time)
   const toggle = () => {
+    void media.ensure()
     if (state.paused) { onPlay?.(); void playback.current?.play() }
     else { playback.current?.pause(); onStop?.() }
   }
   return <div className="dc-audio-player nopan" onDoubleClick={(event) => event.stopPropagation()}
     onKeyDown={(event) => { if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation() }}>
-    <audio ref={audio} src={api.media(workspace, asset.id)} preload="metadata" aria-label={label} onEnded={onStop} />
+    <audio ref={audio} preload="metadata" aria-label={label} onEnded={onStop} onError={() => media.retry()}
+      onLoadedMetadata={() => setReadyAsset(asset.id)} />
     <div className="dc-audio-wave-area">
       {waveform ? <AudioWaveform peaks={waveform.peaks} time={time} duration={duration} media={audio} onSeek={(value) => playback.current?.seek(value)} onToggle={toggle} />
-        : <div className="dc-audio-wave-message" role={waveError ? 'status' : undefined}>{waveError ? '波形暂不可用，仍可播放' : '正在读取音频波形…'}</div>}
+        : <div className="dc-audio-wave-message" role={waveError ? 'status' : undefined}>{waveError ? '波形暂不可用，仍可播放' : <span className="dc-sr-only">正在读取音频波形</span>}</div>}
     </div>
     <div className="dc-audio-controls" role="group" aria-label="音频播放控制">
       <span>{audioTime(time)}</span>
@@ -111,5 +120,7 @@ export const AudioPlayer = memo(function AudioPlayer({ asset, api, workspace, la
       <span>{audioTime(duration)}</span>
     </div>
     {state.error && <span className="dc-audio-play-message" role="alert">{state.error === 'unavailable' ? '音频暂不可播放，可下载原文件' : '请点击播放音频'}</span>}
+    {media.error && <span className="dc-audio-play-message" role="alert">{media.error}</span>}
+    {!inNode && <NodeLoading mediaLoading={pending} title={label} />}
   </div>
 })

@@ -1,12 +1,12 @@
 # 数据与 HTTP 接口参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-27。契约 / Schema / 路由变更时复核。
+文档类型：参考；负责人：项目维护者；最近核对：2026-10-28。契约 / Schema / 路由变更时复核。
 
 可执行事实：[contracts](../src/shared/contracts.ts)、[v2](../src/shared/v2.ts)、[schema.sql](../src/host/persistence/schema.sql)、[service](../src/host/service.ts)。业务行为见[业务参考](business.md)，配置限额见[运行指南](operations.md)。
 
 ## 对象与身份
 
-新目录 / 节点 / 模型 / 素材 / 本地任务 / 边使用 UUID；迁移画布 ID 保留长度 1–512 的旧字符串。名称 trim / NFC 后 1–160；模型名最长 120。时间为毫秒数。图 / 宿主投影 DTO 保留 version 1，不表示维护另一套画布模式；SQLite `user_version=2`，API 使用 v2。
+新目录 / 节点 / 模型 / 素材 / 本地任务 / 边使用UUID；画布ID契约允许长度1–512。名称trim / NFC后1–160；模型名最长120。时间为毫秒数。图 / 宿主投影DTO保留version 1，不表示维护另一套画布模式；SQLite `user_version=3`，API使用v2。0.2.37媒体存储契约改为对象定位，旧schema拒绝且不自动导入；以下其他功能版本的“DDL不变”描述只针对其当时改动。
 
 | 对象 | 字段 |
 | --- | --- |
@@ -17,13 +17,15 @@
 | CanvasGraph | version、nodes、edges、viewport x/y 有限、zoom 0.05–4 |
 | Asset | id、kind、filename、mime、bytes、nodeId/null、taskId/null、createdAt；可选 width / height / duration |
 | TaskSnapshot | model、prompt、params、referenceIds；不含 Key，SQL references 另存 file_hash |
-| TaskSummary | id、workspaceId、nodeId、status、progress?、resultIds、createdAt、updatedAt；无 snapshot / providerTaskId / error |
+| TaskSummary | id、workspaceId、nodeId、status、progress?、resultIds、createdAt、updatedAt、requestId?；无 snapshot / providerTaskId / error |
 | CanvasSnapshot | version、workspaceId、graphRevision、graph、assets、任务摘要、updatedAt、commitHash、hashes nodes/edges/viewport |
 | TaskDetail | kind、task（生成完整 DTO，导入为 null）、phase、externalTaskId、externalCompletedAt、successAt、failureStage / Code / Message、attempts |
 
 图校验拒绝重复 ID、悬空端点 / 素材、非生成目标、错误来源归属、重复参考与环；资源类型 / 结果归属和未结束任务删除另验。生成参数按[协议能力](providers.md)校验，参考文件 hash 在发送前复核。所有 assets / tasks 由宿主维护，不接受客户端全量回写。
 
-GenerationParams仍为size≤32、n整数1–10、seconds可选整数。0.2.17只将n上限由4放宽到10；secondsRange={min,max,step}为可选派生ModelCapabilities，优先于seconds固定列表，不进入ModelRecord / CanvasNode / TaskSnapshot或SQLite新字段。生成校验按范围 / 步长或固定值检查并要求视频时长>0，图草稿允许0秒。存量结构及内容保持；新存n>4不能由旧上限4版本直接读取，回退条件见[ADR-0029](adr/0029-generation-sliders-and-audio-wheel.md)。
+GenerationParams为size≤32、n整数1–10、seconds可选整数；0.2.30新增可选background=auto/opaque/transparent、quality=auto/low/medium/high/xhigh/max，旧参数原样读取。sizePresets / backgrounds / qualities为派生ModelCapabilities，不写入ModelRecord，映射规则见[ADR-0037](adr/0037-fixed-provider-image-models.md)。secondsRange={min,max,step}优先于seconds固定列表；生成校验要求视频时长>0，图草稿允许0秒。无DDL / user_version或图结构变化，新字段仅新节点保存，不回填旧数据。
+
+0.2.42增量加入`gemini-image`协议与8个固定Banana模型 / 渠道记录；capabilities新增可选defaultSize，Banana默认1024x1024且counts=[1]。已有params.size映射为供应商比例 / 档位；实际输出宽高仍写入原资产字段。PublicModel只提供has_api_key与掩码，Base64不进入图 / 任务数据库，原模型UUID、schema 3 / DDL及增量DTO保持，见[ADR-0048](adr/0048-banana-native-image-protocol.md)。0.2.43只在适配器内部更正Model Link为generateContent，无新持久协议枚举或节点字段，见[ADR-0049](adr/0049-modellink-banana-generate-content.md)。
 
 0.2.18新增领域kind=`tts-generation`，modelId / assetId必须null，params为 `{type:"tts",reference_id:最长512文字,speed:有限正数,volume:有限数}`，默认空音色ID / 1 / 0，prompt复用文字字段。无输入连线；输出仍绑定该节点任务的具体音频assetId。TTS快照model为固定kind=audio、name=FishTTS、model_id / protocol=fish-tts、服务身份UUID和完整api_base；params为TTS参数，referenceIds空，无Key。SQLite **DDL / user_version不变**：只将TTS领域kind编码到已有audio-asset行，严格TTS参数的type标记用于加载还原；hash / 回执使用领域对象，旧行不重写。旧版不支持新TTS参数 / 快照，见[ADR-0030](adr/0030-fish-tts-nodes-and-streamed-audio.md)。
 
@@ -33,21 +35,29 @@ GenerationParams仍为size≤32、n整数1–10、seconds可选整数。0.2.17�
 
 ## SQLite 表与索引
 
-当前 **21 表、39 条显式索引**；SQLite PK / UNIQUE 自动索引另外计。完整列 / CHECK / FK 以 schema 为准，提案仅解释设计，不冒充实际 DDL。
+当前 **23表、39条显式索引**；SQLite PK / UNIQUE自动索引另外计。完整列 / CHECK / FK以schema为准，提案仅解释设计。
 
 | 表族 | 实际表 |
 | --- | --- |
-| 目录 / 存储 | storage_roots、owner_settings、folders、canvases、canvas_storage_locations |
-| 图 / 素材 | canvas_assets、canvas_nodes、canvas_edges、edge_node_relations、canvas_state |
+| 目录 / 存储 | storage_providers、owner_settings、folders、canvases、canvas_storage_locations、storage_targets |
+| 图 / 素材 | canvas_assets、asset_variants、canvas_nodes、canvas_edges、edge_node_relations、canvas_state |
 | 回执 | canvas_mutations、catalog_mutations |
 | 任务 | task_catalog、task_details、task_attempts、task_references、task_outputs |
 | 上传 / 文件 / 迁移 | upload_sessions、file_operations、file_operation_items、migration_imports |
 
 task_catalog 只存归属、种类、title 摘要、queue_seq、status、progress 和时间。详情 1:1，存 request_id/hash、snapshot_json、credential_ref、phase、due / lease、submit_issued、external_task_id / status / completed_at、success_at、failure 字段、私有 outputs_json / import_json。
 
-目录任务 status：queued、running、external_wait、saving、succeeded、failed、needs_attention、save_failed、abandoned。图摘要分别映射 submitted、generating、queued、saving、completed、failed、unknown、save_failed、abandoned。task_active_node 部分唯一索引包含未结束与需要处理状态。
+目录任务 status：queued、running、external_wait、saving、succeeded、failed、needs_attention、save_failed、abandoned。图摘要分别映射 submitted、generating、queued、saving、completed、failed、unknown、save_failed、abandoned。0.2.44将task_active_node从部分唯一索引改为同列 / 同谓词的非唯一查询索引，允许同节点多个活动任务；Worker启动事务内检测并升级。仍为schema 3、23表 / 39显式索引，列与业务行保持。
+
+0.2.44的TaskSummary.requestId为可选公开关联ID，由已有task_details.request_id投影；202与快照均提供，用于确切替换临时提交卡片，不新增持久字段。历史按既有tasks / resultIds派生；展开端点result:assetId仅属于ReactFlow界面，存储边仍是source / target / assetId。收起禁止新连接，既有边保留不可见锚点。单次批量主图规则保持，多次提交使用[ADR-0050](adr/0050-submission-history-and-expanded-result-ports.md)。
+
+历史检查沿用认证GET taskDetail中的task.snapshot，校验任务 / 节点 / 画布 / 类型，并按实际任务ID在会话内缓存；不向图摘要添加快照。展开查看没有写入请求；收起后重新点击才恢复最新提交，只更新既有prompt / modelId / params，按原referenceIds恢复已识别UUID标记，不调整边。未接受 / 读取失败不开放生成。无路由、DDL或持久DTO变化，见[ADR-0051](adr/0051-readonly-submission-inspection.md)。
 
 边的两端在 edge_node_relations（source / target），复合 FK 保证端点 / 素材同画布。任务历史不以 node FK 绑定已删除节点。素材 ready 要求实际位置、MIME、字节与 hash 齐全。CAS / FK 失败整批回滚，runtime token 拒绝过期写者。
+
+storage_providers保存不变配置与credential_ref、可轮换read_credential_ref；owner_settings.active_storage_provider_id唯一指定新写入目标。canvas_storage_locations.root_id为providerId，relative_dir为object前缀。canvas_assets保存object_key / etag / version_id / file_hash，asset_variants保存preview / waveform locator_json；task_references固定locator_json，storage_targets固定接受时输出位置。file_operation_items.source_path现在是对象定位JSON，保留列名不表示本地路径。migration_imports仅保留空表，无旧源导入执行器。
+
+ObjectLocator为 `{providerId,objectKey,bytes,mime,sha256,etag?,versionId?,credentialRef?}`；公开Asset DTO不泄露内部凭据引用。任何表均不持久保存OSS签名URL / expiresAt。
 
 ## 任务搜索与分页
 
@@ -82,14 +92,14 @@ POST graph：
 
 | 方法 / 后缀 | 输入 | 返回 |
 | --- | --- | --- |
-| GET / POST models | POST ModelInput | `{models}` |
+| GET / POST models | POST ModelInput，新的配置仅允许内置目录身份 / 固定地址 | `{models}`；包含目录占位，PublicModel新增可选configurable，密钥仅掩码 |
 | POST model-delete | query id | `{models}` |
 | GET catalog | 无 | `{folders,canvases}`，包括修订 / hash / 搬移状态 |
 | POST catalog | requestId、operation；按动作 id/name/folderId/revision | `{id}`；folder-create/rename/delete，canvas-create/rename/move/delete |
 | GET graph | canvas；可选 afterRevision | CanvasSnapshot 或增量页 |
 | POST graph | 增量批次 | 当前 snapshot + mutation 回执 |
 | POST generate | requestId、nodeId、revision | 202 TaskSummary；目录 / 详情已提交 |
-| POST mock-generate | requestId、nodeId、revision | 202 TaskSummary；仅允许内置Mock模型，图片 / 视频UI调用此入口 |
+| POST mock-generate | requestId、nodeId、revision | 保留旧适配器 / 协议回归入口；当前画布不调用，只提交真实generate / tts-generate |
 | POST tts-generate | requestId、nodeId、revision | 202 TaskSummary；仅语音节点，hash含tts:true、缺配置TTS_NOT_CONFIGURED |
 | GET / POST tts-settings | POST endpoint、revision、api_key? | 公开endpoint、revision、configured、has_api_key、api_key_mask；缺api_key保留，空串清除；修订冲突SETTINGS_CONFLICT |
 | GET tasks | canvas、cursor queue_seq，默认0 | `{items,nextCursor}`，每页50个目录摘要 |
@@ -98,19 +108,21 @@ POST graph：
 | POST task | id、action retry-save/resume-query/abandon | `{ok:true}` |
 | POST upload-start | requestId、filename、kind、position | 201 `{id,nodeId}`，资源占位已保存 |
 | POST upload | canvas、id 会话、kind；原始字节流、URL编码 x-canvas-filename | 202 `{taskId,nodeId}`，完整接收后导入任务已提交 |
-| GET / HEAD media | canvas、id；download 可选；variant=preview&v=1 或 variant=waveform&v=1 可选 | 原文件 / WebP封面200/206、音频波形JSON200，HEAD无body；不可用404 |
-| GET / POST storage | POST requestId、path Host绝对路径、revision | `{path,revision,moving,failed}` |
+| GET / HEAD media | canvas、id；download可选；variant=original/preview/waveform、v=1可选 | original / preview为307到对应方法签名URL；waveform为200同源JSON，HEAD无正文；均no-store |
+| GET / POST storage | POST StorageInput：requestId、revision、id?、type=aliyun-oss、name、region、bucket、endpoint、prefix、accessKeyId?、accessKeySecret? | ObjectStorageSettings：configured、activeProviderId、revision、providers、moving、failed；AK仅掩码 |
+| POST storage-test | 同StorageInput，仅测试不切换 | `{ok:true}` |
+| POST media-urls | canvas；items 1–100个 `{assetId,variant?}`、force默认false | `{items:[{assetId,variant,url,expiresAt}或{assetId,variant,error}]}`；逐项隔离失败 |
 | POST storage-retry | 无 | `{ok:true}`，失败清单重新排队 |
 
-旧 `/api/canvas/workspace` 仅 GET 投影保留，旧 mutation 接口不再写入；服务内 legacy models alias 兼容，但 Harness 仅注册新 models 路由。旧 JSON / 媒体仍作为只读迁移来源，不双写。
+共19个注册路径（18个v2路径和旧workspace GET）。旧 `/api/canvas/workspace`仅GET投影保留，旧mutation不写入；服务内legacy models alias保留，Harness仅注册新models。旧JSON / 媒体不扫描、不导入。
 
-Mock模型来自[固定共享定义](../src/shared/mockModels.ts)，不写入models.json，不需要凭据。任务快照仍是严格ModelRecord，只有身份 / 名称 / 协议 / 地址全部匹配内置记录时才允许无凭据本地执行。mock-generate的幂等hash包含mock:true，与generate不可共用requestId。输出ID由任务ID和序号确定，写入同一task_outputs / canvas_assets，复用既有尺寸 / 时长字段；不新增表、节点、边或任务DTO字段。0.2.11起只渲染当前主图的默认输入 / 输出端点，移除result:assetId逐结果端点；展开状态不进入增量DTO。已有边的assetId保留，新连接仅使用主图；不迁移或删除历史引用。
+Mock模型来自[固定共享定义](../src/shared/mockModels.ts)，不写入models.json，不需要凭据。任务快照仍是严格ModelRecord，只有身份 / 名称 / 协议 / 地址全部匹配内置记录时才允许无凭据本地执行。mock-generate的幂等hash包含mock:true，与generate不可共用requestId。输出ID由任务ID和序号确定，写入同一task_outputs / canvas_assets，复用既有尺寸 / 时长字段；不新增表、节点、边或持久任务DTO字段。0.2.11的主图默认端点规则仍用于单次批量，0.2.44多次提交展开时派生逐素材端点；展开状态不进入增量DTO，旧边assetId保持。
 
 上传为 streaming，不是 multipart / Base64 控制请求。按实际流检查大小与格式，不能以 MIME / 声明长度跳过检查。202 不代表任务成功，接收中断没有可恢复后台导入承诺。
 
-原媒体 / 封面返回 MIME、nosniff、Accept-Ranges、私有缓存和 UTF-8 Content-Disposition。原媒体不可变缓存；preview仅图片 / 视频，返回image/webp、private/max-age=3600。版本缺省1，其他版本或variant拒绝；原文件下载使用不含variant的路径。归属和原文件路径检查在派生处理前执行。原媒体 / 封面只支持单段bytes Range，非法 / 多段416。文件指针或缓存发生外部符号链接替换拒绝；路径不可用返回JSON错误。没有ETag或条件请求。
+media-urls校验当前画布素材归属，不接受任意key。Host缓存最多2048项，签名方法 / 用途 / 版本 / 凭据纳入身份；默认GET 3600秒，剩余不足300秒刷新；force绕开缓存。graph读取不签名，JSON与307均no-store。HEAD独立签名；下载携带UTF-8 Content-Disposition签名参数。OSS应配置私有Bucket、CORS GET / HEAD和Range所需头；真实响应行为需用户验收。
 
-waveform仅音频，返回 `{version:1,duration:实际解码秒数,peaks:96项0–1幅度}`，application/json、private/max-age=3600、nosniff；HEAD含同一Content-Length但无body，不支持Range / download。JSON是派生缓存，不新增DTO字段 / 表，失败422或503 `WAVEFORM_UNAVAILABLE`，原文件读取仍独立。算法 / 限额见[ADR-0028](adr/0028-audio-waveforms-and-compact-prompts.md)。
+preview仅图片 / 视频，image/webp；waveform仅音频，JSON为 `{version:1,duration:实际解码秒数,peaks:96项0–1幅度}`。独立串行解码队列最多32身份，30秒失败冷却，临时解码后发布OSS并登记asset_variants；失败不影响原文件 / 付费任务。waveform通过认证Host读取云端JSON，校验bytes / SHA / schema，最多8192字节；内存2048项 / 1小时TTL，同身份合并，32不同身份读取上限、128项失败 / 30秒冷却。GET / HEAD为200、Content-Type / Length、nosniff且no-store，HEAD无正文；不要求浏览器fetch跨域OSS。见[ADR-0045](adr/0045-same-origin-waveforms-and-ratio-order.md)，算法仍见[ADR-0028](adr/0028-audio-waveforms-and-compact-prompts.md)。
 
 ## 文件与凭据布局
 
@@ -122,17 +134,19 @@ dataDir/
   model-bindings.json          modelId → credentialRef
   tts-settings.json            FishTTS endpoint / revision / service ID / credentialRef，无Key
   vault/                       仅开发 LocalVault 明文版本文件
-  staging/                     上传 / 输出暂存，当前保留
-  previews/                    派生WebP封面，无数据库字段；停机后可删除重建
-    waveforms/                 派生音频幅度JSON，同样可停机删除重建
-  workspaces/ tasks/ credentials.json  若存在：旧只读来源
-mediaRoot/画布安全名称/资源安全名称__身份后缀.png|mp4|...
+  staging/                     未完成上传 / 输出恢复暂存，成功清理
+系统临时目录/dsh-canvas-decode-*/   解码临时文件，完成清理
+私有OSS/
+  prefix/文件夹名称__ID/画布名称__ID/资源名称__ID.ext
+  prefix/未归档/画布名称__ID/_derived/assetId/preview或waveform-v1-hash.webp|json
 ```
 
 新建目录0700、文件0600。Harness Key 存于 ctx.credentials 提供方，备份须同时备份其持久记录；dataDir 单独复制不包含这些 Key。模型配置仍 JSON，凭据与 SQL 不跨介质原子。
 
 ## 主要错误
 
+0.2.47只改变客户端不可变快照的内存共享：按ID与全部JSON字段复用相同记录，保留顺序并识别字段移除。图修订未变仍检测任务 / 资产变化；冲突时草稿保持。位置 / 内容隔离、只读显示投影和实时图写入见[ADR-0052](adr/0052-position-and-content-render-isolation.md)。HTTP、CanvasGraph、SQLite DDL与已有hash / receipt语义保持。
+
 错误 JSON `{error,code}` 脱敏并不缓存；认证层另行处理。常用：400 INVALID_REQUEST；404 NOT_FOUND / MODEL_NOT_FOUND / MEDIA_MISSING；409 GRAPH_CONFLICT / HASH_MISMATCH / REQUEST_REUSED / CATALOG_CONFLICT / STORAGE_CONFLICT / NAME_EXISTS / FOLDER_NOT_EMPTY / NODE_BUSY / CANVAS_BUSY / TASK_CREDENTIALS_MISSING / UNSAFE_PATH / SNAPSHOT_REQUIRED / MEDIA_CHANGED；413 MEDIA_TOO_LARGE；415 UNSUPPORTED_MEDIA；422或503 PREVIEW_UNAVAILABLE / WAVEFORM_UNAVAILABLE（原文件仍走原接口）；429 QUEUE_FULL；503 WRITER_FENCED。
 
-STORE_LOCKED / MIGRATION_SOURCE_CHANGED 属启动失败。普通 OS / SQL 异常可能使用400通用错误；没有宣称所有异常均有独立业务 code。owner 范围是整个实例，当前没有多用户 ACL / 跨设备同步。
+存储常用错误：409 STORAGE_NOT_CONFIGURED / STORAGE_CONFLICT / STORAGE_CREDENTIALS_MISSING / OBJECT_CHANGED / STAGING_CHANGED；502 STORAGE_UNAVAILABLE / STORAGE_PROBE_FAILED；422 VARIANT_UNAVAILABLE。旧schema与STORE_LOCKED属启动失败。普通OS / SQL异常可能使用400通用错误；owner范围为整个实例，当前无多用户ACL / 跨设备同步。

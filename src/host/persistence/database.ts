@@ -13,7 +13,7 @@ export class Database {
   private pending = new Map<number, { resolve: (v: any[]) => void; reject: (e: Error) => void }>()
   async open(path: string): Promise<void> {
     this.worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { path } })
-    await new Promise<void>((resolve, reject) => {
+    try { await new Promise<void>((resolve, reject) => {
       this.worker!.on('message', (message) => {
         if (message.ready) { resolve(); return }
         const callback = this.pending.get(message.id)
@@ -33,7 +33,12 @@ export class Database {
         for (const callback of this.pending.values()) callback.reject(error)
         this.pending.clear()
       })
-    })
+    }) } catch (error) {
+      const worker = this.worker
+      this.worker = undefined
+      await worker?.terminate()
+      throw error
+    }
   }
   batch(steps: Statement[], write = true, claim = false): Promise<any[]> {
     const id = ++this.sequence

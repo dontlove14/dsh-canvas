@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, rm, readFile, stat } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { CanvasService } from '../src/host/service'
+import { fakeFactory, initialize, cloudPath, remoteBody, storageInput } from './support/objectStorage'
 import { Store } from '../src/host/store'
 import { apply } from '../src/host/index'
 import { assetToken } from '../src/shared/promptMentions'
@@ -23,12 +24,19 @@ async function stub(handler: Parameters<typeof createServer>[0]) {
   return `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`
 }
 async function service(dataDir?: string) {
-  const instance = new CanvasService({ dataDir: dataDir ?? await temp(), maxConcurrentTasks: 2, pollIntervalMs: 50, requestTimeoutMs: 1500, maxMediaBytes: 1024 * 1024, maxReferenceBytes: 256 * 1024 })
-  await instance.init(); cleanup.push(() => instance.close()); return instance
+  const root = dataDir ?? await temp()
+  const instance = new CanvasService({ dataDir: root, maxConcurrentTasks: 2, pollIntervalMs: 50, requestTimeoutMs: 1500, maxMediaBytes: 1024 * 1024, maxReferenceBytes: 256 * 1024 }, undefined, fakeFactory(root))
+  await initialize(instance, true); cleanup.push(() => instance.close()); return instance
 }
 async function model(instance: CanvasService, base: string, kind: 'image' | 'video' = 'image', key = 'secret-test-key') {
-  const input: ModelInput = { kind, name: `${kind} model`, model_id: kind === 'image' ? 'gpt-image-1' : 'sora-2', protocol: kind === 'image' ? 'openai-image' : 'openai-video', api_base: base, api_key: key }
-  return (await instance.store.saveModel(input))[0]
+  // Seed a retained pre-catalog configuration to exercise legacy task protocols.
+  // New user configuration goes through the fixed catalog, tested in imageModels.
+  const record = { id: randomUUID(), kind, name: `${kind} model`, model_id: kind === 'image' ? 'gpt-image-1' : 'sora-2', protocol: kind === 'image' ? 'openai-image' as const : 'openai-video' as const, api_base: base }
+  const store = instance.store as any
+  store.models.push(record); store.bindings[record.id] = await store.vault.put(key); store.keys[record.id] = key
+  await writeFile(join(instance.config.dataDir, 'models.json'), JSON.stringify(store.models), { mode: 0o600 })
+  await writeFile(join(instance.config.dataDir, 'model-bindings.json'), JSON.stringify(store.bindings), { mode: 0o600 })
+  return instance.store.listModels().find((item) => item.id === record.id)!
 }
 function node(kind: CanvasNode['kind'] = 'image-generation'): CanvasNode {
   return { id: randomUUID(), kind, title: '测试节点', position: { x: 0, y: 0 }, modelId: null, prompt: 'a tree', params: null, assetId: null, selectedResultId: null }
@@ -73,14 +81,14 @@ describe('local configuration and graph writes', () => {
     const response = await (await instance.handle(request('models'))).text()
     expect(response).not.toContain('secret-test-key')
     expect(response).toContain('••••••••')
-    await instance.store.saveModel({ id: config.id, kind: config.kind, name: 'edited', model_id: config.model_id, api_base: config.api_base, protocol: config.protocol })
+    await instance.store.saveModel({ id: config.id, kind: config.kind, name: config.name, model_id: config.model_id, api_base: config.api_base, protocol: config.protocol })
     expect(instance.store.model(config.id).key).toBe('secret-test-key')
     const contents = await readFile(join(instance.config.dataDir, 'models.json'), 'utf8')
     expect(contents).not.toContain('secret-test-key')
     const binding = instance.store.model(config.id).credentialRef
     expect((await stat(join(instance.config.dataDir, 'vault', `${binding}.json`))).mode & 0o777).toBe(0o600)
     expect(await instance.store.db.get("SELECT COUNT(*) AS count FROM task_details WHERE credential_ref LIKE '%secret%'")).toMatchObject({ count: 0 })
-    await instance.store.saveModel({ id: config.id, kind: config.kind, name: 'edited', model_id: config.model_id, api_base: config.api_base, protocol: config.protocol, api_key: '' })
+    await instance.store.saveModel({ id: config.id, kind: config.kind, name: config.name, model_id: config.model_id, api_base: config.api_base, protocol: config.protocol, api_key: '' })
     expect(instance.store.model(config.id).key).toBe('')
   })
   it('rejects stale graph saves and retains the committed graph', async () => {
@@ -118,12 +126,13 @@ describe('generation protocol and task state', () => {
     })
     const instance = await service()
     const { generator, state } = await addGenerator(instance, base)
-    const task = await instance.generate('w', generator.id, state.graphRevision)
-    await expect(instance.generate('w', generator.id, state.graphRevision)).rejects.toMatchObject({ code: 'NODE_BUSY' })
+    const requestId = randomUUID()
+    const task = await instance.generate('w', generator.id, state.graphRevision, requestId)
+    expect((await instance.generate('w', generator.id, state.graphRevision, requestId)).id).toBe(task.id)
     await expect(instance.store.deleteModel(generator.modelId!)).rejects.toMatchObject({ code: 'MODEL_IN_USE' })
     const completed = await waitFor(instance, task.id, 'completed')
     expect(calls).toBe(1); expect(completed.resultIds).toHaveLength(1)
-    expect(await readFile(instance.store.mediaPath(completed.resultIds[0]))).toEqual(png)
+    expect(await instance.store.readMedia(completed.resultIds[0], 1024)).toEqual(png)
     await instance.saveGraph('w', state.graph, state.graphRevision)
     expect(instance.store.state('w').assets).toHaveLength(1)
     expect(instance.store.state('w').tasks[0].status).toBe('completed')
@@ -132,6 +141,73 @@ describe('generation protocol and task state', () => {
     expect(detail.successAt).toBeGreaterThan(0)
     expect(detail.phase).toBe('completed')
     expect(JSON.stringify(detail)).not.toContain('secret-test-key')
+  })
+  it.each(['image', 'video'] as const)('accepts another %s while the first is running and preserves both results when the newest finishes first', async (kind) => {
+    let posts = 0, finishFirst = () => {}
+    const base = await stub(async (req: any, res: any) => {
+      if (req.method === 'POST') {
+        posts++
+        let body = ''; for await (const chunk of req) body += chunk
+        const first = JSON.parse(body).prompt === 'a tree'
+        const finish = () => res.end(JSON.stringify(kind === 'image' ? { data: [{ b64_json: png.toString('base64') }] }
+          : { id: first ? 'first-video' : 'second-video', status: 'queued' }))
+        if (first) finishFirst = finish
+        else finish()
+      } else if (req.url.endsWith('/content')) res.end(mp4)
+      else res.end(JSON.stringify({ id: req.url.includes('first-video') ? 'first-video' : 'second-video', status: 'completed' }))
+    })
+    const instance = await service(); const { generator, state } = await addGenerator(instance, base, kind)
+    const requestId = randomUUID()
+    const first = await instance.generate('w', generator.id, state.graphRevision, requestId)
+    await waitFor(instance, first.id, 'generating')
+    const current = instance.store.state('w')
+    const saved = await instance.saveGraph('w', { ...current.graph, nodes: current.graph.nodes.map((node) => ({ ...node, prompt: 'a mountain' })) }, current.graphRevision)
+    const second = await instance.generate('w', generator.id, saved.graphRevision)
+    const completedSecond = await waitFor(instance, second.id, 'completed')
+    expect(instance.store.state('w').tasks.find((task) => task.id === first.id)?.status).toBe('generating')
+    await expect(instance.saveGraph('w', emptyGraph(), instance.store.state('w').graphRevision)).rejects.toMatchObject({ code: 'NODE_BUSY' })
+    expect((await instance.generate('w', generator.id, state.graphRevision, requestId)).id).toBe(first.id)
+    finishFirst()
+    const completedFirst = await waitFor(instance, first.id, 'completed')
+    expect(posts).toBe(2)
+    expect(completedFirst.snapshot.prompt).toBe('a tree'); expect(completedSecond.snapshot.prompt).toBe('a mountain')
+    expect(new Set([...completedFirst.resultIds, ...completedSecond.resultIds]).size).toBe(2)
+    const snapshot = await instance.store.snapshot('w')
+    expect(snapshot.tasks.map((task) => task.id)).toEqual([first.id, second.id])
+    expect(snapshot.tasks[0].requestId).toBe(requestId)
+    expect(snapshot.assets.map((asset) => asset.taskId).sort()).toEqual([first.id, second.id].sort())
+  })
+  it.each(['image', 'video'] as const)('pins each queued %s snapshot, model key, reference and storage target separately', async (kind) => {
+    const instance = await service(); const { generator } = await addGenerator(instance, 'http://127.0.0.1:1/v1', kind)
+    const imported = await (await upload(instance, png)).json()
+    const reference = await waitImport(instance, imported.taskId)
+    await instance.runtime.close()
+    const ddl = await instance.store.db.all("SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+    const current = instance.store.state('w')
+    const source = current.graph.nodes.find((node) => node.id === imported.nodeId)!
+    const edge = { id: randomUUID(), source: source.id, target: generator.id, assetId: reference.id }
+    const saved = await instance.saveGraph('w', { ...current.graph, edges: [edge] }, current.graphRevision)
+    const oldTarget = (await instance.store.storage()).activeProviderId
+    const first = await instance.generate('w', generator.id, saved.graphRevision)
+    const config = await model(instance, 'http://127.0.0.1:2/v1', kind, 'second-model-key')
+    const revision = (await instance.store.storage()).revision
+    await instance.store.setStorage(storageInput(revision, 'new-task-bucket'))
+    const graph = instance.store.state('w')
+    const secondInput = await instance.saveGraph('w', { ...graph.graph, edges: [], nodes: graph.graph.nodes.map((node) =>
+      node.id === generator.id ? { ...node, modelId: config.id, params: { ...defaultParams(config), size: kind === 'image' ? '1536x1024' : '1280x720' }, prompt: 'new prompt' } : node) }, graph.graphRevision)
+    const requestId = randomUUID()
+    const [second, replay] = await Promise.all([instance.generate('w', generator.id, secondInput.graphRevision, requestId), instance.generate('w', generator.id, secondInput.graphRevision, requestId)])
+    expect(second.id).toBe(replay.id)
+    expect(first.snapshot).toMatchObject({ prompt: 'a tree', model: { id: generator.modelId }, referenceIds: [reference.id] })
+    expect(second.snapshot).toMatchObject({ prompt: 'new prompt', model: { id: config.id }, referenceIds: [] })
+    expect((await instance.store.taskPrivate(first.id)).key).toBe('secret-test-key')
+    expect((await instance.store.taskPrivate(second.id)).key).toBe('second-model-key')
+    const targetSql = 'SELECT l.root_id FROM storage_targets t JOIN canvas_storage_locations l ON l.canvas_id=t.canvas_id AND l.id=t.storage_id WHERE t.task_id=?'
+    expect(await instance.store.db.get(targetSql, [first.id])).toEqual({ root_id: oldTarget })
+    expect(await instance.store.db.get(targetSql, [second.id])).toEqual({ root_id: (await instance.store.storage()).activeProviderId })
+    await instance.store.update('w', (state) => { state.tasks.find((task) => task.id === second.id)!.status = 'failed' })
+    await expect(instance.saveGraph('w', emptyGraph(), instance.store.state('w').graphRevision)).rejects.toMatchObject({ code: 'NODE_BUSY' })
+    expect(await instance.store.db.all("SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")).toEqual(ddl)
   })
   it('uses multipart edits for image references without rebinding old edges', async () => {
     let multipart = ''
@@ -176,8 +252,8 @@ describe('generation protocol and task state', () => {
     const completed = await waitFor(instance, task.id, 'completed')
     expect(posts).toBe(1); expect(polls).toBe(2)
     const response = await instance.handle(new Request(`http://localhost/api/canvas/v2/media?canvas=w&id=${completed.resultIds[0]}`, { headers: { range: 'bytes=4-11' } }))
-    expect(response.status).toBe(206); expect(response.headers.get('content-range')).toBe(`bytes 4-11/${mp4.length}`)
-    expect(Buffer.from(await response.arrayBuffer())).toEqual(mp4.subarray(4, 12))
+    expect(response.status).toBe(307)
+    expect((await remoteBody(instance.store, response)).subarray(4, 12)).toEqual(mp4.subarray(4, 12))
   })
   it('marks ambiguous submissions unknown and does not automatically submit again', async () => {
     let calls = 0

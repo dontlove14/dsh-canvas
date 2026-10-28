@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
-import { stat } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import type { Store } from '../store'
 import { CanvasError } from '../store'
 import { hash, sql } from '../persistence/database'
@@ -16,15 +16,17 @@ export class Uploads {
     const node: CanvasNode = { id: randomUUID(), kind: `${input.kind}-asset`, title, position: input.position, modelId: null, prompt: '', params: null, assetId: null, selectedResultId: null }
     const requestHash = hash({ canvas, ...input })
     let result = { id: input.requestId, nodeId: node.id }; let replay = false
+    let storage = ''
     await this.store.update(canvas, async (state) => {
       const existing = await this.store.db.get('SELECT request_hash,result_json FROM catalog_mutations WHERE owner_id=? AND request_id=?', [this.store.owner, input.requestId])
       if (existing) {
         if (existing.request_hash !== requestHash) throw new CanvasError('上传请求 ID 已用于其他内容', 409, 'REQUEST_REUSED')
         result = JSON.parse(existing.result_json); replay = true; return
       }
+      storage = await this.store.currentStorageTarget(canvas)
       state.graph.nodes.push(node); state.graphRevision++
     }, () => replay ? [] : [
-      sql("INSERT INTO upload_sessions(id,canvas_id,node_id,state,stage_file,created_at,updated_at) VALUES(?,?,?,'receiving',?,?,?)", [input.requestId, canvas, node.id, `${input.requestId}.upload`, Date.now(), Date.now()]),
+      sql("INSERT INTO upload_sessions(id,canvas_id,node_id,state,stage_file,storage_id,created_at,updated_at) VALUES(?,?,?,'receiving',?,?,?,?)", [input.requestId, canvas, node.id, `${input.requestId}.upload`, storage, Date.now(), Date.now()]),
       sql('INSERT INTO catalog_mutations VALUES(?,?,?,?,?,?,?,?)', [this.store.owner, input.requestId, 'upload-start', 'upload', input.requestId, requestHash, JSON.stringify(result), Date.now()]),
     ])
     return result
@@ -53,6 +55,7 @@ export class Uploads {
         await this.store.db.batch([
           sql("INSERT INTO task_catalog(id,canvas_id,node_id,kind,title,queue_seq,status,created_at,updated_at) VALUES(?,?,?,'import',?,(SELECT COALESCE(MAX(queue_seq),0)+1 FROM task_catalog),'queued',?,?)", [taskId, canvas, session.node_id, node.title, Date.now(), Date.now()]),
           sql("INSERT INTO task_details(task_id,request_id,request_hash,phase,import_json,updated_at) VALUES(?,?,?,'import',?,?)", [taskId, id, hash({ kind, filename, ...info }), JSON.stringify(descriptor), Date.now()]),
+          sql('INSERT INTO storage_targets VALUES(?,?,?)', [taskId, canvas, session.storage_id]),
           sql("UPDATE upload_sessions SET state='received',bytes=?,file_hash=?,task_id=?,updated_at=? WHERE id=? AND state='receiving'", [info.bytes, info.fileHash, taskId, Date.now(), id], 'run', 1),
         ])
       })
@@ -70,8 +73,9 @@ export class Uploads {
       try {
         await this.store.db.batch([sql("UPDATE task_catalog SET status='saving',updated_at=? WHERE id=?", [Date.now(), task.id])])
         const path = this.store.stagePath(descriptor.stageFile)
-        if (await fileHash(path, signal) !== descriptor.fileHash) throw new CanvasError('上传暂存文件校验失败')
-        const asset = await this.store.publish(task.canvas_id, descriptor, path, descriptor, signal)
+        const existing = await this.store.publishedAsset(task.canvas_id, descriptor.id)
+        if (!existing && await fileHash(path, signal) !== descriptor.fileHash) throw new CanvasError('上传暂存文件校验失败')
+        const asset = existing ?? await this.store.publish(task.canvas_id, descriptor, path, descriptor, signal)
         await this.store.update(task.canvas_id, (state) => {
           if (!state.assets.some((a) => a.id === asset.id)) state.assets.push(asset)
           const node = state.graph.nodes.find((n) => n.id === task.node_id)
@@ -82,6 +86,7 @@ export class Uploads {
           sql("UPDATE task_catalog SET status='succeeded',progress=100,finished_at=?,updated_at=? WHERE id=?", [Date.now(), Date.now(), task.id]),
           sql("UPDATE task_details SET success_at=?,phase='completed',updated_at=? WHERE task_id=?", [Date.now(), Date.now(), task.id]),
         ])
+        await rm(path, { force: true })
       } catch (error) {
         if (signal?.aborted) throw error
         await this.store.db.batch([

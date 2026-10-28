@@ -1,6 +1,7 @@
 import { isGeneration, nodeResults, validateGraph, type Asset, type CanvasGraph, type ModelCapabilities, type Task } from '../shared/contracts'
 import { assetToken, referenceLabel } from '../shared/promptMentions'
 import { connectionAsset } from './generationLayout'
+import { hasGenerationHistory } from './generationHistory'
 
 export interface PromptReference {
   assetId: string; sourceId: string; token: string; label: string; name: string; kind: Asset['kind']; connected: boolean
@@ -34,7 +35,7 @@ export function promptCandidates(graph: CanvasGraph, targetId: string, assets: r
   const pending = [targetId]
   while (pending.length) for (const id of adjacency.get(pending.pop()!) ?? []) if (!downstream.has(id)) { downstream.add(id); pending.push(id) }
   for (const node of graph.nodes) {
-    if (downstream.has(node.id)) continue
+    if (downstream.has(node.id) || hasGenerationHistory(node, tasks)) continue
     const asset = connectionAsset(node, assets, nodeResults(node.id, tasks, assets), null)
     if (!asset || seen.has(asset.id) || !compatible(asset, caps)) continue
     seen.add(asset.id)

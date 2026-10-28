@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CanvasService } from '../src/host/service'
+import { fakeFactory, initialize } from './support/objectStorage'
 import { sql } from '../src/host/persistence/database'
 import { parseTaskSearchParams } from '../src/shared/v2'
 
@@ -12,8 +13,8 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'canvas-task-search-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
-  const service = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 50, requestTimeoutMs: 1000, maxMediaBytes: 1024, maxReferenceBytes: 1024 })
-  await service.store.init(); cleanup.push(() => service.close())
+  const service = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 50, requestTimeoutMs: 1000, maxMediaBytes: 1024, maxReferenceBytes: 1024 }, undefined, fakeFactory(root))
+  await initialize(service); cleanup.push(() => service.close())
   const store = service.store
   const folder = await store.catalogCommand({ operation: 'folder-create', name: '文件夹%_素材', requestId: randomUUID() })
   const main = await store.catalogCommand({ operation: 'canvas-create', name: '画布%_测试', folderId: folder.id, requestId: randomUUID() })

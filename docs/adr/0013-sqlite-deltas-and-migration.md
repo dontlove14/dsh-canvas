@@ -2,6 +2,10 @@
 
 状态：已采纳
 
+2026-10-28更新：[ADR-0043](0043-object-storage-and-expiring-media-access.md)替代下文旧源自动导入部分；当前schema 3拒绝旧库且不扫描旧JSON。SQLite / hash / CAS原则保留，旧表数与迁移测试描述为历史记录。
+
+0.2.44更新：[ADR-0050](0050-submission-history-and-expanded-result-ports.md)仅将task_active_node旧唯一部分索引升级为非唯一；schema 3、23表 / 39显式索引身份、表字段和业务行保持。
+
 文档类型：解释；负责人：项目维护者；最近核对：2026-10-26。
 记录日期：2026-10-26。替代 [ADR-0003](0003-local-single-writer-store.md)、[ADR-0007](0007-autosave-and-revision-conflicts.md) 的存储和保存实现。
 

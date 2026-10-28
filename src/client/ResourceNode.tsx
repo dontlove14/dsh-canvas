@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Position, NodeToolbar, useUpdateNodeInternals } from '@xyflow/react'
 import type { Asset, CanvasNode } from '../shared/contracts'
+import type { TaskSummary } from '../shared/v2'
 import { CanvasApi } from './api'
 import { UiButton } from './ui'
 import { mediaFrame } from './mediaLayout'
@@ -8,6 +9,9 @@ import { VideoPlayer } from './VideoPlayer'
 import { CanvasHandle } from './CanvasHandle'
 import { NodeTitle } from './NodeTitle'
 import { useNodeActions } from './CanvasSelection'
+import { NODE_OVERLAY_STYLE } from './nodeOverlayLayout'
+import { SignedImage } from './SignedMedia'
+import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
 
 function ActionIcon({ action }: { action: 'rotate' | 'download' | 'expand' }) {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -16,8 +20,10 @@ function ActionIcon({ action }: { action: 'rotate' | 'download' | 'expand' }) {
         : <><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" /><path d="m4 4 6 6m10-6-6 6M4 20l6-6m10 6-6-6" /></>}
   </svg>
 }
-export const ResourceNode = memo(function ResourceNode({ node, asset, selected, api, workspace, rotation, playing, onRename, onRotate, onPlay, onStop, onOpen, onFocus, onSize }: {
-  node: CanvasNode; asset: Asset; selected: boolean; api: CanvasApi; workspace: string
+export const ResourceNode = memo((props: Parameters<typeof ResourceNodeBody>[0]) =>
+  <NodeLoadingBoundary><ResourceNodeBody {...props} /></NodeLoadingBoundary>)
+function ResourceNodeBody({ node, asset, task, selected, api, workspace, rotation, playing, onRename, onRotate, onPlay, onStop, onOpen, onFocus, onSize }: {
+  node: CanvasNode; asset: Asset; task?: TaskSummary; selected: boolean; api: CanvasApi; workspace: string
   rotation: number; playing: boolean
   onRename: (id: string, title: string) => void; onRotate: (id: string, assetId: string) => void
   onPlay: (id: string) => void; onStop: (id: string) => void; onOpen: (asset: Asset) => void; onSize: (id: string, width: number, height: number) => void
@@ -27,6 +33,7 @@ export const ResourceNode = memo(function ResourceNode({ node, asset, selected, 
   const actionsVisible = useNodeActions(node.id, selected)
   const [visible, setVisible] = useState(false)
   const [missing, setMissing] = useState(false)
+  useNodeMediaLoading(!visible && !missing)
   const [dimensions, setDimensions] = useState({ id: asset.id, width: asset.width ?? 16, height: asset.height ?? 9 })
   const updateInternals = useUpdateNodeInternals()
   const currentDimensions = dimensions.id === asset.id ? dimensions : { width: asset.width ?? 16, height: asset.height ?? 9 }
@@ -50,7 +57,7 @@ export const ResourceNode = memo(function ResourceNode({ node, asset, selected, 
   }, [node.id, size.width, size.height, onSize, updateInternals])
   return <article className={`dc-node dc-resource-node ${selected ? 'selected' : ''} ${node.kind}`} style={{ width: size.width, height: size.height }}>
     <NodeTitle node={node} onRename={onRename} />
-    <NodeToolbar position={Position.Top} align="end" offset={42} isVisible={actionsVisible}>
+    <NodeToolbar position={Position.Top} align="end" offset={42} isVisible={actionsVisible} style={NODE_OVERLAY_STYLE}>
       <div className="dc-resource-toolbar nodrag nopan nowheel" role="toolbar" aria-label={asset.kind === 'image' ? '图片操作' : '视频操作'}>
         {asset.kind === 'image' && <UiButton title="顺时针旋转 90°" aria-label="顺时针旋转 90°" onClick={() => onRotate(node.id, asset.id)}><ActionIcon action="rotate" /></UiButton>}
         <UiButton title="下载原文件" aria-label="下载原文件" onClick={() => {
@@ -67,12 +74,13 @@ export const ResourceNode = memo(function ResourceNode({ node, asset, selected, 
         onFocus(node.id)
       }}>
       {missing ? <div className="dc-missing">封面暂不可用<small>可通过顶部操作栏查看原文件</small></div>
-        : visible && <img src={api.preview(workspace, asset.id)} alt={node.title} draggable={false} decoding="async"
+        : visible && <SignedImage api={api} canvas={workspace} assetId={asset.id} alt={node.title} draggable={false} decoding="async"
           style={{ width: size.imageWidth, height: size.imageHeight, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
           onLoad={(event) => setDimensions({ id: asset.id, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
           onError={() => setMissing(true)} />}
-      {play && <VideoPlayer key={asset.id} src={api.media(workspace, asset.id)} poster={api.preview(workspace, asset.id)} autoPlay label={`循环播放 ${node.title}`} />}
+      {play && <VideoPlayer key={asset.id} src={api.media(workspace, asset.id)} api={api} canvas={workspace} assetId={asset.id} autoPlay label={`循环播放 ${node.title}`} />}
     </div>
+    <NodeLoading task={task} title={node.title} />
     <CanvasHandle type="source" />
   </article>
-})
+}

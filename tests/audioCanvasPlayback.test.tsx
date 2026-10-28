@@ -5,7 +5,7 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CanvasWorkspace } from '../src/client/Canvas'
 import { CanvasApi } from '../src/client/api'
-import { defaultTtsParams, emptyGraph, type Asset, type CanvasNode } from '../src/shared/contracts'
+import { defaultTtsParams, emptyGraph, FISH_TTS_ENDPOINT, type Asset, type CanvasNode } from '../src/shared/contracts'
 import type { CanvasSnapshot } from '../src/shared/v2'
 
 // Stand in only for canvas layout/gestures. Workspace selection and playback,
@@ -32,7 +32,7 @@ afterEach(() => {
   act(() => { for (const root of roots.splice(0)) root.unmount() })
   document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
-async function setup(tts = false) {
+async function setup(tts = false, history = false) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('IntersectionObserver', class {
     constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
@@ -56,14 +56,24 @@ async function setup(tts = false) {
     createdAt: 1, nodeId: node.id, taskId: null,
   }))
   if (tts) for (const node of nodes) { node.kind = 'tts-generation'; node.assetId = null; node.params = defaultTtsParams(); node.prompt = '(happy) 你好' }
+  if (history) assets.push({ ...assets[0], id: crypto.randomUUID(), nodeId: nodes[0].id })
   const snapshot: CanvasSnapshot = {
     version: 1, workspaceId: 'w', graphRevision: 1, graph: { ...emptyGraph(), nodes }, assets, tasks: tts ? nodes.map((node, index) => ({
       id: crypto.randomUUID(), nodeId: node.id, workspaceId: 'w', status: 'completed' as const, resultIds: [assets[index].id], createdAt: 1, updatedAt: 1,
     })) : [],
     updatedAt: 1, commitHash: 'a'.repeat(64), hashes: { nodes: {}, edges: {}, viewport: '' },
   }
+  if (history) snapshot.tasks.push({ id: crypto.randomUUID(), nodeId: nodes[0].id, workspaceId: 'w', status: 'completed',
+    resultIds: [assets[2].id], createdAt: 2, updatedAt: 2 })
   const api = new CanvasApi()
   vi.spyOn(api, 'state').mockResolvedValue(snapshot)
+  vi.spyOn(api, 'models').mockResolvedValue([])
+  vi.spyOn(api, 'ttsSettings').mockResolvedValue({ endpoint: FISH_TTS_ENDPOINT, revision: 0, configured: false, has_api_key: false, api_key_mask: '' })
+  vi.spyOn(api, 'taskDetail').mockImplementation(async (_canvas, id) => {
+    const task = snapshot.tasks.find((task) => task.id === id)!
+    return { task: { ...task, snapshot: { model: { id: crypto.randomUUID(), kind: 'audio', name: 'FishTTS', model_id: 'fish-tts',
+      protocol: 'fish-tts', api_base: FISH_TTS_ENDPOINT }, prompt: '(happy) 你好', params: defaultTtsParams(), referenceIds: [] } } } as any
+  })
   vi.spyOn(api, 'waveform').mockResolvedValue({ version: 1, duration: 10, peaks: Array(96).fill(.5) })
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container); roots.push(root)
@@ -84,6 +94,52 @@ async function setup(tts = false) {
   return { container, cards, audio, click, pause, play, show, api }
 }
 describe('canvas-owned audio playback', () => {
+  it('plays one expanded TTS history result at a time and stops on collapse or hiding without losing historical audio', async () => {
+    const { container, cards, click, show } = await setup(true, true)
+    click(0)
+    act(() => cards[0].querySelector<HTMLButtonElement>('button[title="展开提交记录"]')!.click())
+    const audio = [...cards[0].querySelectorAll<HTMLAudioElement>('audio')]
+    expect(audio).toHaveLength(2)
+    act(() => {
+      for (const element of audio) {
+        Object.defineProperties(element, { duration: { value: 10, configurable: true }, currentTime: { value: 0, configurable: true, writable: true } })
+        element.dispatchEvent(new Event('loadedmetadata'))
+      }
+    })
+    const buttons = [...cards[0].querySelectorAll<HTMLButtonElement>('.dc-audio-toggle')]
+    act(() => buttons[0].click()); expect(audio[0].paused).toBe(false)
+    act(() => buttons[1].click()); expect(audio[0].paused).toBe(true); expect(audio[1].paused).toBe(false)
+    expect(cards[0].querySelectorAll('.react-flow__handle.source')).toHaveLength(2)
+    expect(cards[0].textContent).not.toContain('设为主图')
+    await show(false)
+    expect(audio[1].paused).toBe(true); expect(cards[0].querySelectorAll('audio')).toHaveLength(2)
+    await show(true)
+    expect(audio.every((element) => element.paused)).toBe(true)
+    act(() => buttons[1].click()); expect(audio[1].paused).toBe(false)
+    await act(async () => [...cards[0].querySelectorAll<HTMLButtonElement>('.dc-group-actions button')].find((button) => button.textContent === '收起')!.click())
+    expect(audio[1].paused).toBe(true)
+    expect(cards[0].querySelectorAll('audio')).toHaveLength(1)
+    expect(container.querySelector('.dc-editor')).toBeNull()
+    await act(async () => cards[0].querySelector<HTMLElement>('.dc-history-card')!.click())
+    expect(container.querySelector('.dc-tts-editor')).toBeTruthy()
+  })
+  it('loads FishTTS readiness into the actual editor and refreshes it when the retained canvas becomes visible', async () => {
+    const { container, click, show, api } = await setup(true)
+    click(0)
+    const textBefore = container.querySelector('[role="textbox"]')!.textContent
+    expect(container.querySelector('.dc-tts-configuration')!.textContent).toBe('请前往设置页面配置模型')
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(true)
+    vi.mocked(api.ttsSettings).mockResolvedValue({ endpoint: FISH_TTS_ENDPOINT, revision: 1, configured: true, has_api_key: true, api_key_mask: '••••••••' })
+    await show(false); await show(true)
+    expect(container.querySelector('.dc-tts-configuration')).toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(false)
+    vi.mocked(api.ttsSettings).mockResolvedValue({ endpoint: FISH_TTS_ENDPOINT, revision: 2, configured: true, has_api_key: false, api_key_mask: '' })
+    await show(false); await show(true)
+    expect(container.querySelector('.dc-tts-configuration')!.textContent).toBe('请前往设置页面配置模型')
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.disabled).toBe(true)
+    expect(container.querySelector('[role="textbox"]')!.textContent).toBe(textBefore)
+    expect(api.state).toHaveBeenCalledTimes(1)
+  })
   it.each([false, true])('pauses a hidden retained sidebar (TTS=%s), keeps selection and audio DOM, and does not reload the graph or autoplay on return', async (tts) => {
     const { container, cards, audio, click, show, api } = await setup(tts)
     click(0)

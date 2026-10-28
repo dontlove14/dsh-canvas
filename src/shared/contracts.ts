@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { resolvePrompt } from './promptMentions'
+import { GPT_IMAGE_SIZES, IMAGE_BACKGROUNDS, IMAGE_QUALITIES, isGptImage25, bananaSizePresets, type ImageSizePreset } from './modelCatalog'
 
 export const PLUGIN_ID = 'dsh-canvas'
 export const API_ROOT = 'api/canvas'
@@ -11,7 +12,7 @@ export const MediaKindSchema = z.enum(['image', 'video', 'audio'])
 export type MediaKind = z.infer<typeof MediaKindSchema>
 export const ModelKindSchema = z.enum(['image', 'video'])
 export type ModelKind = z.infer<typeof ModelKindSchema>
-export const ProtocolSchema = z.enum(['openai-image', 'openai-dalle-3', 'openai-dalle-2', 'openai-video'])
+export const ProtocolSchema = z.enum(['openai-image', 'openai-dalle-3', 'openai-dalle-2', 'openai-video', 'gemini-image'])
 export type Protocol = z.infer<typeof ProtocolSchema>
 
 const ApiBaseSchema = z.string().trim().url().max(2048).refine((value) => {
@@ -40,6 +41,10 @@ export type ModelInput = z.infer<typeof ModelInputSchema>
 
 export interface ModelCapabilities {
   sizes: readonly string[]
+  sizePresets?: readonly ImageSizePreset[]
+  defaultSize?: string
+  backgrounds?: readonly { value: string; label: string }[]
+  qualities?: readonly { value: string; label: string }[]
   counts: readonly number[]
   seconds: readonly number[]
   /** Derived model metadata; not a persisted model or graph field. */
@@ -52,6 +57,8 @@ export interface PublicModel extends ModelRecord {
   has_api_key: boolean
   api_key_mask: string
   capabilities: ModelCapabilities
+  /** Legacy configuration is retained for historical tasks, not listed for new nodes. */
+  configurable?: boolean
 }
 
 export const ProtocolLabels: Record<Protocol, string> = {
@@ -59,11 +66,22 @@ export const ProtocolLabels: Record<Protocol, string> = {
   'openai-dalle-3': 'OpenAI 兼容图片 · DALL-E 3',
   'openai-dalle-2': 'OpenAI 兼容图片 · DALL-E 2',
   'openai-video': 'OpenAI 视频 · Sora',
+  'gemini-image': 'Gemini 图片 · Nano Banana',
 }
 
 export function capabilitiesFor(model: Pick<ModelRecord, 'protocol' | 'model_id'>): ModelCapabilities {
   const noVideo = { seconds: [], supportsAudioToggle: false } as const
+  if (isGptImage25(model)) return {
+    ...noVideo, sizes: GPT_IMAGE_SIZES.map((item) => item.size), sizePresets: GPT_IMAGE_SIZES,
+    counts: Array.from({ length: 10 }, (_, i) => i + 1), referenceKinds: ['image'], maxReferences: 16,
+    backgrounds: IMAGE_BACKGROUNDS, qualities: IMAGE_QUALITIES,
+  }
   switch (model.protocol) {
+    case 'gemini-image': {
+      const sizePresets = bananaSizePresets(model.model_id)
+      return { ...noVideo, sizes: sizePresets.map((preset) => preset.size), sizePresets, defaultSize: '1024x1024',
+        counts: [1], referenceKinds: ['image'], maxReferences: model.model_id === 'gemini-3.1-flash-lite-image' ? 1 : 14 }
+    }
     case 'openai-image':
       return { ...noVideo, sizes: ['1024x1024', '1536x1024', '1024x1536'], counts: [1, 2, 4], referenceKinds: ['image'], maxReferences: 16 }
     case 'openai-dalle-3':
@@ -84,6 +102,8 @@ export const GenerationParamsSchema = z.object({
   size: z.string().max(32),
   n: z.number().int().min(1).max(10),
   seconds: z.number().int().optional(),
+  background: z.enum(['auto', 'opaque', 'transparent']).optional(),
+  quality: z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
 }).strict()
 export type GenerationParams = z.infer<typeof GenerationParamsSchema>
 export const TtsParamsSchema = z.object({
@@ -96,6 +116,7 @@ export type TtsParams = z.infer<typeof TtsParamsSchema>
 export function defaultTtsParams(): TtsParams { return { type: 'tts', reference_id: '', speed: 1, volume: 0 } }
 export function isTtsParams(params: GenerationParams | TtsParams | null): params is TtsParams { return !!params && 'type' in params && params.type === 'tts' }
 export const FISH_TTS_ENDPOINT = 'https://api.modellink.online/fish/v1/tts'
+export const FISH_TTS_MODEL = 's1'
 export const TtsSettingsInputSchema = z.object({
   endpoint: ApiBaseSchema,
   revision: z.number().int().nonnegative(),
@@ -107,7 +128,8 @@ export function defaultParams(model: Pick<ModelRecord, 'protocol' | 'model_id'> 
   const caps = model.capabilities ?? capabilitiesFor(model)
   const range = caps.secondsRange
   const seconds = range ? range.min > 0 ? range.min : range.min + (Math.floor(-range.min / range.step) + 1) * range.step : caps.seconds[0]
-  return { size: caps.sizes[0], n: caps.counts[0], ...(seconds !== undefined ? { seconds } : {}) }
+  return { size: caps.defaultSize ?? caps.sizes[0], n: caps.counts[0], ...(seconds !== undefined ? { seconds } : {}),
+    ...(caps.backgrounds ? { background: 'auto' as const } : {}), ...(caps.qualities ? { quality: 'auto' as const } : {}) }
 }
 
 export function supportsVideoDuration(caps: ModelCapabilities, seconds: number | undefined): boolean {
@@ -266,6 +288,8 @@ export function validateWithCapabilities(snapshot: TaskSnapshot, assets: readonl
   resolvePrompt(snapshot.prompt, snapshot.referenceIds, assets)
   if (!caps.sizes.includes(snapshot.params.size)) throw new Error('请选择当前模型支持的尺寸')
   if (!caps.counts.includes(snapshot.params.n)) throw new Error('当前模型不支持这个生成数量')
+  if (snapshot.params.background && !caps.backgrounds?.some((item) => item.value === snapshot.params.background)) throw new Error('当前模型不支持这个背景')
+  if (snapshot.params.quality && !caps.qualities?.some((item) => item.value === snapshot.params.quality)) throw new Error('当前模型不支持这个画质')
   if (snapshot.model.kind === 'video') {
     if (!supportsVideoDuration(caps, snapshot.params.seconds)) throw new Error('请选择当前模型支持的视频时长')
     if (snapshot.params.seconds! <= 0) throw new Error('视频时长需大于 0 秒')

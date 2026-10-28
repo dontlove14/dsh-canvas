@@ -3,9 +3,11 @@ import { mkdir, writeFile, readFile, copyFile, rm } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { ensureThinkingOrbsPatch } from './patch-thinking-orbs.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 process.chdir(root)
+await ensureThinkingOrbsPatch()
 await rm('lib', { recursive: true, force: true })
 await mkdir('lib', { recursive: true })
 const shared = ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', 'zod', '@deepseek-ai/dsh-client-ui-primitives']

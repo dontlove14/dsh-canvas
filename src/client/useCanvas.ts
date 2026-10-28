@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { emptyGraph, type CanvasGraph } from '../shared/contracts'
 import { browserHash, type CanvasSnapshot, type GraphMutation } from '../shared/v2'
 import { ApiError, CanvasApi } from './api'
+import { shareCanvasSnapshot } from './canvasSharing'
 
 export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   const [graph, setGraph] = useState<CanvasGraph>(emptyGraph)
@@ -10,6 +11,13 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
   const graphRef = useRef(graph)
+  const snapshotRef = useRef<CanvasSnapshot | null>(null)
+  const acceptSnapshot = useCallback((response: CanvasSnapshot) => {
+    const shared = shareCanvasSnapshot(snapshotRef.current, response)
+    snapshotRef.current = shared
+    if (mounted.current) setState(shared)
+    return shared
+  }, [])
   const baseline = useRef(graph)
   const revision = useRef(0)
   const hashes = useRef<CanvasSnapshot['hashes']>({ nodes: {}, edges: {}, viewport: '' })
@@ -21,6 +29,7 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   const report = useCallback((failure: unknown) => { if (mounted.current) setError(failure instanceof Error ? failure.message : String(failure)) }, [])
   const edit = useCallback((change: CanvasGraph | ((graph: CanvasGraph) => CanvasGraph)) => {
     const next = typeof change === 'function' ? change(graphRef.current) : change
+    if (next === graphRef.current) return
     graphRef.current = next; setGraph(next); setSaveStatus(blocked.current ? '保存冲突 · 草稿保留' : '待保存')
   }, [])
   const flush = useCallback(async (): Promise<number> => {
@@ -52,14 +61,14 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
         }
         const accepted = pending.current
         if (mounted.current) setSaveStatus('保存中')
-        const response = await api.save(workspace, accepted.mutation)
+        const response = acceptSnapshot(await api.save(workspace, accepted.mutation))
         revision.current = response.graphRevision; hashes.current = response.hashes
         baseline.current = accepted.graph; pending.current = null
         if (graphRef.current === accepted.graph) {
           graphRef.current = response.graph; baseline.current = response.graph
           if (mounted.current) setGraph(response.graph)
         }
-        if (mounted.current) { setState(response); setSaveStatus(baseline.current === graphRef.current ? '已保存到本机' : '待保存') }
+        if (mounted.current) setSaveStatus(baseline.current === graphRef.current ? '已保存到本机' : '待保存')
       })()
       saving.current = promise
       try { await promise }
@@ -71,11 +80,11 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     }
     if (mounted.current) setSaveStatus('已保存到本机')
     return revision.current
-  }, [api, workspace, report])
+  }, [api, workspace, report, acceptSnapshot])
   const refresh = useCallback(async () => {
-    const response = await api.state(workspace)
+    const received = await api.state(workspace)
     if (!mounted.current) return
-    setState(response)
+    const response = acceptSnapshot(received)
     if (!saving.current && response.graphRevision !== revision.current) {
       if (baseline.current === graphRef.current && !pending.current) {
         revision.current = response.graphRevision; hashes.current = response.hashes
@@ -85,14 +94,15 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
         report(new Error('画布已更新，请导出当前草稿后重新载入'))
       }
     }
-  }, [api, workspace, report])
+  }, [api, workspace, report, acceptSnapshot])
   const reload = useCallback(async () => {
-    const response = await api.state(workspace)
+    const received = await api.state(workspace)
     if (!mounted.current) return
+    const response = acceptSnapshot(received)
     graphRef.current = response.graph; baseline.current = response.graph; revision.current = response.graphRevision; hashes.current = response.hashes
     ready.current = true; blocked.current = false; pending.current = null
     setGraph(response.graph); setState(response); setConflict(false); setError(''); setSaveStatus('已保存到本机')
-  }, [api, workspace])
+  }, [api, workspace, acceptSnapshot])
   useEffect(() => {
     mounted.current = true
     let polling = false

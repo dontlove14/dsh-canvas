@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { stat } from 'node:fs/promises'
+import { Readable } from 'node:stream'
 import { Store } from './store'
 import { Providers, ProviderFailure, type ProviderResult } from './providers'
 import { BUSY_STATUSES, TRACKED_STATUSES, isTtsSnapshot, type Task, type TaskStatus } from '../shared/contracts'
@@ -7,6 +7,7 @@ import { sql, type Statement } from './persistence/database'
 import { Uploads } from './media/uploads'
 import { isMockModel } from '../shared/mockModels'
 import { renderMock } from './mockGeneration'
+import { isBananaImage } from '../shared/modelCatalog'
 
 export interface RuntimeConfig { maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; maxMediaBytes: number; maxReferenceBytes: number }
 /** Long-lived host lifecycle. Neither a request signal nor a Peer owns this controller. */
@@ -65,7 +66,7 @@ export class CanvasRuntime {
         }
         const message = this.store.redact(error instanceof Error ? error.message : '任务执行失败', [data?.key ?? ''])
         const saving = !!data?.outputs || current.status === 'saving'
-        let status: TaskStatus = saving ? 'save_failed' : isMockModel(current.snapshot.model) || error instanceof ProviderFailure && error.definitive ? 'failed' : 'unknown'
+        let status: TaskStatus = saving ? 'save_failed' : !data?.issued || isMockModel(current.snapshot.model) || error instanceof ProviderFailure && error.definitive ? 'failed' : 'unknown'
         if (current.providerTaskId && !data?.outputs && !saving) status = error instanceof ProviderFailure && error.definitive ? 'unknown' : current.status
         await this.patch(current, { status, error: message }, [sql("UPDATE task_details SET failure_stage=?,failure_code=?,failure_message=?,next_run_at=? WHERE task_id=?", [saving ? 'storage' : current.providerTaskId ? 'poll' : 'submit', error instanceof ProviderFailure ? 'PROVIDER_ERROR' : 'TRANSPORT_OR_STORAGE_ERROR', message, Date.now() + this.config.pollIntervalMs, task.id])])
       }).catch(() => {}).finally(async () => {
@@ -107,10 +108,11 @@ export class CanvasRuntime {
       else {
         if (data.issued) { await this.patch(task, { status: 'unknown', error: '之前的提交结果无法确认，不会自动重提' }); return }
         await this.store.verifyReferences(task.id)
+        const prepared = await this.attempt(task, 'prepare-references', () => this.providers.prepare(task.snapshot, task.id))
         data.issued = true
         await this.store.writeTaskPrivate(task.id, data)
-        if (isTtsSnapshot(task.snapshot)) await this.patch(task, { status: 'generating' })
-        result = await this.attempt(task, 'submit', () => this.providers.submit(task.snapshot, data.key))
+        await this.patch(task, { status: 'generating' })
+        result = await this.attempt(task, 'submit', () => this.providers.submit(task.snapshot, data.key, prepared))
       }
       await this.patch(task, { ...(result.id ? { providerTaskId: result.id } : {}), status: result.outputs ? 'saving' : result.status, progress: result.progress, error: result.error ? this.store.redact(result.error, [data.key]) : undefined }, [
         sql('UPDATE task_details SET external_status=?,next_run_at=? WHERE task_id=?', [result.status, Date.now() + this.config.pollIntervalMs, task.id]),
@@ -124,21 +126,35 @@ export class CanvasRuntime {
       if (result.status === 'failed' || !data.outputs) return
     }
     await this.patch(task, { status: 'saving', error: undefined })
+    const saveErrors: string[] = []
     for (const output of data.outputs!) {
-      const existing = await this.store.publishedAsset(task.workspaceId, output.id)
-      const asset = existing ?? await this.attempt(task, 'publish', async () => {
-        const source = await this.providers.outputStream(output, task.snapshot, data.key)
-        const [width, height] = isTtsSnapshot(task.snapshot) ? [] : task.snapshot.params.size.split('x').map(Number)
-        const dimensions = !isTtsSnapshot(task.snapshot) && isMockModel(task.snapshot.model) ? { width, height, ...(task.snapshot.model.kind === 'video' ? { duration: task.snapshot.params.seconds } : {}) } : {}
-        return this.store.saveMedia(source, { id: output.id, kind: task.snapshot.model.kind, filename: output.filename, createdAt: Date.now(), nodeId: task.nodeId, taskId: task.id, ...dimensions }, this.config.maxMediaBytes, task.snapshot.model.kind, this.controller.signal)
-      })
-      await this.store.update(task.workspaceId, (state) => {
-        if (!state.assets.some((a) => a.id === asset.id)) state.assets.push(asset)
-        const current = state.tasks.find((t) => t.id === task.id)!
-        if (!current.resultIds.includes(asset.id)) current.resultIds.push(asset.id)
-      })
+      try {
+        const existing = await this.store.publishedAsset(task.workspaceId, output.id)
+        const asset = existing ?? await this.attempt(task, 'publish', async () => {
+          const staged = await this.store.db.get('SELECT id FROM canvas_assets WHERE canvas_id=? AND id=?', [task.workspaceId, output.id])
+          const source = staged ? Readable.from([]) : await this.providers.outputStream(output, task.snapshot, data.key)
+          const [width, height] = isTtsSnapshot(task.snapshot) ? [] : task.snapshot.params.size.split('x').map(Number)
+          const dimensions = !isTtsSnapshot(task.snapshot) && isMockModel(task.snapshot.model) ? { width, height, ...(task.snapshot.model.kind === 'video' ? { duration: task.snapshot.params.seconds } : {}) }
+            : isBananaImage(task.snapshot.model) && output.width && output.height ? { width: output.width, height: output.height } : {}
+          return this.store.saveMedia(source, { id: output.id, kind: task.snapshot.model.kind, filename: output.filename, createdAt: Date.now(), nodeId: task.nodeId, taskId: task.id, ...dimensions }, this.config.maxMediaBytes, task.snapshot.model.kind, this.controller.signal)
+        })
+        await this.store.update(task.workspaceId, (state) => {
+          if (!state.assets.some((a) => a.id === asset.id)) state.assets.push(asset)
+          const current = state.tasks.find((t) => t.id === task.id)!
+          if (!current.resultIds.includes(asset.id)) current.resultIds.push(asset.id)
+        })
+      } catch (error) {
+        if (this.controller.signal.aborted) throw error
+        saveErrors.push(this.store.redact(error instanceof Error ? error.message : '保存失败', [data.key]))
+      }
     }
-    await this.patch(task, { status: 'completed', progress: 100, error: undefined })
+    if (saveErrors.length) throw new Error(`${saveErrors.length} 份结果保存失败：${saveErrors[0]}`)
+    const expected = !isTtsSnapshot(task.snapshot) && task.snapshot.model.kind === 'image' ? task.snapshot.params.n : data.outputs!.length
+    const partial = data.outputs!.length !== expected
+    const error = partial ? `部分失败：请求 ${expected} 张，已保存 ${data.outputs!.length} 张；未自动重提` : undefined
+    await this.patch(task, { status: partial ? 'failed' : 'completed', progress: 100, error }, partial ? [
+      sql("UPDATE task_details SET phase='failed',failure_stage='provider',failure_code='PARTIAL_RESULT',failure_message=? WHERE task_id=?", [error!, task.id]),
+    ] : [])
     await this.store.removeTaskPrivate(task.id)
   }
   async close(): Promise<void> {

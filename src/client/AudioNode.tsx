@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { NodeToolbar, Position, useUpdateNodeInternals } from '@xyflow/react'
-import { TRACKED_STATUSES, TaskStatusLabels, type Asset, type CanvasNode } from '../shared/contracts'
+import { type Asset, type CanvasNode } from '../shared/contracts'
 import type { TaskSummary } from '../shared/v2'
 import { TtsIcon } from './TtsIcon'
 import { CanvasApi } from './api'
@@ -9,8 +9,12 @@ import { CanvasHandle } from './CanvasHandle'
 import { NodeTitle } from './NodeTitle'
 import { UiButton } from './ui'
 import { useNodeActions } from './CanvasSelection'
+import { NODE_OVERLAY_STYLE } from './nodeOverlayLayout'
+import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
 
-export const AudioNode = memo(function AudioNode({ node, asset, api, workspace, selected, playing, task, onPlay, onStop, onRename, onSize }: {
+export const AudioNode = memo((props: Parameters<typeof AudioNodeBody>[0]) =>
+  <NodeLoadingBoundary><AudioNodeBody {...props} /></NodeLoadingBoundary>)
+function AudioNodeBody({ node, asset, api, workspace, selected, playing, task, onPlay, onStop, onRename, onSize }: {
   node: CanvasNode; asset: Asset; api: CanvasApi; workspace: string; selected: boolean; playing: boolean
   onPlay: (id: string) => void; onStop: (id: string) => void
   onRename: (id: string, title: string) => void; onSize: (id: string, width: number, height: number) => void
@@ -19,6 +23,7 @@ export const AudioNode = memo(function AudioNode({ node, asset, api, workspace, 
   const frame = useRef<HTMLElement>(null)
   const actionsVisible = useNodeActions(node.id, selected)
   const [visible, setVisible] = useState(false)
+  useNodeMediaLoading(!visible)
   const updateInternals = useUpdateNodeInternals()
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '160px' })
@@ -35,7 +40,7 @@ export const AudioNode = memo(function AudioNode({ node, asset, api, workspace, 
   return <article ref={frame} className={`dc-node dc-audio-node ${node.kind === 'tts-generation' ? 'dc-tts-audio-node' : ''} ${selected ? 'selected' : ''}`}>
     <NodeTitle node={node} onRename={onRename} />
     {node.kind === 'tts-generation' && <span className="dc-tts-audio-badge" title="FishTTS"><TtsIcon size={20} /></span>}
-    <NodeToolbar position={Position.Top} align="end" offset={42} isVisible={actionsVisible}>
+    <NodeToolbar position={Position.Top} align="end" offset={42} isVisible={actionsVisible} style={NODE_OVERLAY_STYLE}>
       <div className="dc-resource-toolbar nodrag nopan nowheel" role="toolbar" aria-label="音频操作">
         <UiButton title="下载原音频" aria-label="下载原音频" onClick={() => {
           const link = document.createElement('a'); link.href = api.media(workspace, asset.id, true); link.download = asset.filename; link.click()
@@ -44,7 +49,7 @@ export const AudioNode = memo(function AudioNode({ node, asset, api, workspace, 
     </NodeToolbar>
     {visible ? <AudioPlayer asset={asset} api={api} workspace={workspace} label={node.title} active={playing}
       onPlay={() => onPlay(node.id)} onStop={() => onStop(node.id)} /> : <div className="dc-audio-wave-message">音频</div>}
-    {task && TRACKED_STATUSES.has(task.status) && <div className="dc-task-overlay"><span className="dc-spinner" /><span>{TaskStatusLabels[task.status]}</span></div>}
+    <NodeLoading task={task} title={node.title} />
     <CanvasHandle type="source" />
   </article>
-})
+}
