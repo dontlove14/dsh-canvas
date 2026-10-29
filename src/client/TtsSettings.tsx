@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { FISH_TTS_ENDPOINT, TtsSettingsInputSchema, type PublicTtsSettings } from '../shared/contracts'
 import { CanvasApi } from './api'
 import { TtsIcon } from './TtsIcon'
-import { UiButton, UiCheckbox, UiInput } from './ui'
+import { UiButton, UiCheckbox } from './ui'
+import { SecretInput } from './SecretField'
 
 export function TtsSettings({ api, onChanged }: { api: CanvasApi; onChanged?: () => void }) {
   const [settings, setSettings] = useState<PublicTtsSettings | null>(null)
@@ -27,10 +28,11 @@ export function TtsSettings({ api, onChanged }: { api: CanvasApi; onChanged?: ()
   return <form className="dc-tts-settings dc-model-form" aria-label="FishTTS 服务设置" onSubmit={(event) => { event.preventDefault(); void save() }}>
     <h3><TtsIcon size={24} /> FishTTS 语音服务</h3>
     <p className="dc-muted">供应商：Model Link。语音服务密钥独立配置。</p>
-    <label>API Key<UiInput type="password" aria-label="FishTTS API Key" value={key} autoComplete="new-password" disabled={!settings || clear || busy}
+    <label>API Key<SecretInput key={settings?.revision} label="FishTTS API Key" aria-label="FishTTS API Key" value={key} disabled={!settings || clear || busy}
+      savedMask={settings?.api_key_mask} load={settings?.has_api_key ? (signal) => api.settingSecret({ scope: 'tts', field: 'api_key' }, signal) : undefined}
       placeholder={settings?.has_api_key ? `${settings.api_key_mask} · 留空保留原密钥` : '输入 ModelLink API Key'}
       onChange={(event) => setKey(event.target.value)} /></label>
-    {settings?.has_api_key && <UiCheckbox label="清除 FishTTS 已有密钥" checked={clear} onChange={setClear} />}
+    {settings?.has_api_key && <UiCheckbox label="清除 FishTTS 已有密钥" checked={clear} disabled={busy} onChange={setClear} />}
     <div className="dc-form-actions"><UiButton variant="primary" type="submit" disabled={!settings || busy}>{busy ? '保存中…' : '保存语音服务'}</UiButton></div>
     {error && <p className="dc-error" role="alert">{error}</p>}{message && <p className="dc-success" role="status">{message}</p>}
   </form>

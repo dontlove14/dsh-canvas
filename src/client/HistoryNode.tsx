@@ -13,6 +13,7 @@ import { SignedImage } from './SignedMedia'
 import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
 import { useNodeActions } from './CanvasSelection'
 import { UiButton } from './ui'
+import { ReviewBadges, ReviewButton } from './ReviewControls'
 
 const noop = () => {}
 
@@ -41,7 +42,7 @@ export const HistoryNode = memo(function HistoryNode({ node, cards, connectedAss
   }, [node.id, onStop])
   return <article className={`dc-node dc-generation-node dc-history-node has-result ${selected ? 'selected' : ''} ${expanded ? 'expanded' : 'stacked'}`}
     style={{ width: size.width, height: size.height }}>
-    <NodeTitle node={node} onRename={onRename} />
+    <NodeTitle node={node} onRename={onRename} assetId={!expanded ? cards[0]?.results[0]?.id : undefined} />
     {!audio && <CanvasHandle type="target" />}
     {!expanded && connectedAssets.map((id) => <CanvasHandle key={id} type="source" id={resultHandle(id)} disabled hidden />)}
     {!expanded && cards.slice(1, 3).reverse().map((card, index, layers) =>
@@ -68,11 +69,16 @@ export const HistoryNode = memo(function HistoryNode({ node, cards, connectedAss
                   playing={playing && selected && playingAsset === asset.id} onPlay={() => { setPlayingAsset(asset.id); onPlay(node.id) }} onStop={() => onStop(node.id)} />
                   : <ResultMedia asset={asset} api={api} workspace={workspace} playing={playing && selected && playingAsset === asset.id}
                     onPlay={() => { setPlayingAsset(asset.id); onPlay(node.id) }} onStop={() => onStop(node.id)} onOpen={() => onOpen(asset)} onDimensions={noop} />}
+                {expanded && <div className="dc-history-review-label nodrag nopan" onClick={(event) => event.stopPropagation()}>
+                  <span title={asset.filename}>{asset.filename}</span><ReviewBadges assetId={asset.id} />
+                </div>}
                 {expanded && <CanvasHandle type="source" id={resultHandle(asset.id)} />}
                 {actionsVisible && <div className="dc-group-actions nodrag nopan nowheel" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+                  <ReviewButton asset={asset} />
                   <UiButton title="下载原文件" aria-label="下载原文件" onClick={() => {
                     const link = document.createElement('a'); link.href = api.media(workspace, asset.id, true); link.download = asset.filename; link.click()
                   }}>↓</UiButton>
+                  {!expanded && <UiButton title="展开提交记录" aria-label={`展开 ${cards.length} 次提交`} onClick={() => onExpand(node.id)}><ExpandGlyph /><span>{cards.length}</span></UiButton>}
                   {expanded && index === shown.length - 1 && resultIndex === 0 && <UiButton onClick={() => onExpand(node.id)}><ExpandGlyph collapse />收起</UiButton>}
                 </div>}
               </div>)}
@@ -83,7 +89,7 @@ export const HistoryNode = memo(function HistoryNode({ node, cards, connectedAss
                 <span className="dc-sr-only" role="status">{TaskStatusLabels[card.task.status]}</span></>}
           </div>}
           <NodeLoading task={card.task} title={node.title} />
-          {actionsVisible && !expanded && <div className="dc-group-actions dc-history-toggle nodrag nopan nowheel">
+          {actionsVisible && !expanded && !card.results.length && <div className="dc-group-actions dc-history-toggle nodrag nopan nowheel">
             <UiButton title="展开提交记录" aria-label={`展开 ${cards.length} 次提交`} onClick={() => onExpand(node.id)}><ExpandGlyph /><span>{cards.length}</span></UiButton>
           </div>}
           {actionsVisible && expanded && !card.results.length && index === shown.length - 1 && <div className="dc-group-actions nodrag nopan nowheel">

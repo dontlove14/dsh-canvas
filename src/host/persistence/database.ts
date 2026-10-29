@@ -8,11 +8,13 @@ export const sql = (text: string, params: SqlValue[] = [], mode: Statement['mode
 export const hash = (value: unknown): string => createHash('sha256').update(canonical(value)).digest('hex')
 export class Database {
   readonly token = randomUUID()
+  constructor(private workerUrl = new URL('./worker.mjs', import.meta.url), private extraWorkerData: Record<string, unknown> = {},
+    private beforeWrite?: () => void) {}
   private worker?: Worker
   private sequence = 0
   private pending = new Map<number, { resolve: (v: any[]) => void; reject: (e: Error) => void }>()
   async open(path: string): Promise<void> {
-    this.worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { path } })
+    this.worker = new Worker(this.workerUrl, { workerData: { path, ...this.extraWorkerData } })
     try { await new Promise<void>((resolve, reject) => {
       this.worker!.on('message', (message) => {
         if (message.ready) { resolve(); return }
@@ -41,6 +43,7 @@ export class Database {
     }
   }
   batch(steps: Statement[], write = true, claim = false): Promise<any[]> {
+    if (write) this.beforeWrite?.()
     const id = ++this.sequence
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })

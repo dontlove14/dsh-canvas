@@ -58,9 +58,9 @@ async function wait(instance: CanvasService, id: string, status: TaskStatus) {
 
 describe('Nano Banana model catalog and per-model parameters', () => {
   it('adds all four exact identities with two independent channels and preserves the four GPT UUIDs', () => {
-    expect(BUILTIN_MODELS).toHaveLength(12); expect(models).toHaveLength(8)
+    expect(BUILTIN_MODELS).toHaveLength(30); expect(models).toHaveLength(8)
     expect(models.map((model) => [model.model_id, model.name])).toEqual(BANANA_MODELS.flatMap((model) => [[model.id, model.name], [model.id, model.name]]))
-    expect(new Set(BUILTIN_MODELS.map((model) => model.id)).size).toBe(12)
+    expect(new Set(BUILTIN_MODELS.map((model) => model.id)).size).toBe(30)
     expect(BUILTIN_MODELS.slice(0, 4).map((model) => model.id)).toEqual([1, 2, 3, 4].map((id) => `00000000-0000-4000-b000-00000000000${id}`))
     expect(models.map((model) => providerFor(model)?.id)).toEqual(Array(4).fill(['model-link', 'gemini']).flat())
   })
@@ -244,7 +244,7 @@ describe('Nano Banana durable canvas tasks', () => {
     const fetch = vi.fn(async () => Response.json({ error: { message: 'request failed banana-secret-0' } }, { status })); vi.stubGlobal('fetch', fetch)
     const instance = await service(), node = await generator(instance)
     const accepted = await instance.generate('w', node.id, 1)
-    const task = await wait(instance, accepted.id, status === 401 ? 'failed' : 'unknown')
+    const task = await wait(instance, accepted.id, 'failed')
     expect(task.error).not.toContain('banana-secret-0'); expect(fetch).toHaveBeenCalledTimes(1)
   })
   it('preserves a definitively failed gateway task after restart instead of submitting it with the new endpoint', async () => {

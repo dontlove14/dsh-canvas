@@ -2,15 +2,18 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { GenerationParams, PublicModel } from '../shared/contracts'
 import { chooseResolution, paramsSummary, ratioChoices, sizeChoices } from './generationParams'
-import { UiButton, UiSlider } from './ui'
+import { UiButton, UiSlider, UiCheckbox } from './ui'
+import { useCanvasTextSelectionScope } from './canvasTextSelection'
 
 export function GenerationParameters({ model, params, disabled, onChange }: { model: PublicModel; params: GenerationParams; disabled: boolean; onChange: (params: GenerationParams) => void }) {
+  const textScope = useCanvasTextSelectionScope()
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const popup = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: 0, top: 0 })
   const id = useId()
-  const choices = sizeChoices(model)
+  const choices = sizeChoices(model).filter((choice) => model.protocol !== 'seedance-video' || !model.model_id.includes('-2-5-')
+    || params.videoMode !== 'frames' || choice.ratio === 'adaptive')
   const current = choices.find((choice) => choice.size === params.size)
   useEffect(() => { setOpen(false) }, [model.id, disabled])
   useEffect(() => {
@@ -37,7 +40,7 @@ export function GenerationParameters({ model, params, disabled, onChange }: { mo
   return <>
     <UiButton ref={trigger} className="dc-params-trigger" disabled={disabled} aria-label={`生成参数：${paramsSummary(model, params)}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={() => setOpen((value) => !value)}><span className="dc-ratio-mini" aria-hidden="true" />{paramsSummary(model, params)}<span aria-hidden="true">{open ? '⌃' : '⌄'}</span></UiButton>
-    {open && createPortal(<div ref={popup} id={id} role="dialog" aria-label="生成参数" className="dc-overlay-scope dc-generation-params nodrag nopan nowheel"
+    {open && createPortal(<div ref={popup} id={id} role="dialog" aria-label="生成参数" className={`dc-overlay-scope dc-generation-params nodrag nopan nowheel ${textScope}`}
       style={position} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()} onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}>
       <fieldset><legend>分辨率</legend><div className="dc-param-options">
@@ -48,7 +51,7 @@ export function GenerationParameters({ model, params, disabled, onChange }: { mo
         {ratioChoices(choices, current?.resolution).map((choice) =>
           <UiButton key={choice.ratio} aria-pressed={params.size === choice.size} title={choice.size} onClick={() => onChange({ ...params, size: choice.size })}>
             <span className="dc-ratio-shape" style={{ width: Math.max(7, Math.round(18 * Math.min(1, choice.width / choice.height))), height: Math.max(7, Math.round(18 * Math.min(1, choice.height / choice.width))) }} />
-            {choice.ratio}
+            {choice.ratio === 'adaptive' ? '自动' : choice.ratio}
           </UiButton>)}
       </div></fieldset>
       {model.capabilities.backgrounds && <fieldset><legend>背景</legend><div className="dc-param-options">
@@ -68,6 +71,10 @@ export function GenerationParameters({ model, params, disabled, onChange }: { mo
           {...model.capabilities.secondsRange} values={model.capabilities.secondsRange ? undefined : model.capabilities.seconds}
           showStops={!model.capabilities.secondsRange} showLabels={!model.capabilities.secondsRange} disabled={disabled}
           formatValue={(seconds) => `${seconds}秒`} onChange={(seconds) => onChange({ ...params, seconds })} />
+      </fieldset>}
+      {model.capabilities.supportsAudioToggle && <fieldset><legend>音频</legend>
+        <UiCheckbox label="生成同步音频" checked={params.generateAudio ?? true} disabled={disabled}
+          onChange={(generateAudio) => onChange({ ...params, generateAudio })} />
       </fieldset>}
     </div>, document.body)}
   </>

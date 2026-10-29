@@ -11,6 +11,7 @@ import { UiButton } from './ui'
 import { useNodeActions } from './CanvasSelection'
 import { NODE_OVERLAY_STYLE } from './nodeOverlayLayout'
 import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
+import { ReviewButton } from './ReviewControls'
 
 export const AudioNode = memo((props: Parameters<typeof AudioNodeBody>[0]) =>
   <NodeLoadingBoundary><AudioNodeBody {...props} /></NodeLoadingBoundary>)
@@ -38,10 +39,11 @@ function AudioNodeBody({ node, asset, api, workspace, selected, playing, task, o
     return () => { document.removeEventListener('visibilitychange', hide); onStop(node.id) }
   }, [node.id, onStop])
   return <article ref={frame} className={`dc-node dc-audio-node ${node.kind === 'tts-generation' ? 'dc-tts-audio-node' : ''} ${selected ? 'selected' : ''}`}>
-    <NodeTitle node={node} onRename={onRename} />
+    <NodeTitle node={node} onRename={onRename} assetId={asset.id} />
     {node.kind === 'tts-generation' && <span className="dc-tts-audio-badge" title="FishTTS"><TtsIcon size={20} /></span>}
     <NodeToolbar position={Position.Top} align="end" offset={42} isVisible={actionsVisible} style={NODE_OVERLAY_STYLE}>
       <div className="dc-resource-toolbar nodrag nopan nowheel" role="toolbar" aria-label="音频操作">
+        <ReviewButton asset={asset} />
         <UiButton title="下载原音频" aria-label="下载原音频" onClick={() => {
           const link = document.createElement('a'); link.href = api.media(workspace, asset.id, true); link.download = asset.filename; link.click()
         }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4" /></svg></UiButton>

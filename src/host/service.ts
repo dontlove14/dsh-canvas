@@ -16,6 +16,12 @@ import { TtsSettingsInputSchema, TtsParamsSchema, TtsTaskSnapshotSchema, isTtsPa
 import { StorageInputSchema, MediaUrlsSchema, MediaVariantSchema } from '../shared/objectStorage'
 import type { StorageFactory } from './object-storage/types'
 import { DerivedAssets } from './object-storage/derived'
+import { seedanceGenerationParams, seedanceReferenceLimit, validateSeedanceConnections } from '../shared/seedance'
+import { SettingSecretRequestSchema } from '../shared/settingSecrets'
+import { ReviewSettingsInputSchema, ReviewProviderSchema, ReviewSubmitSchema, ReviewActionSchema } from '../shared/seedanceReview'
+import { ReviewStore, publicReview } from './review/store'
+import { ReviewRuntime } from './review/runtime'
+import { OfficialReviewTransport, type ReviewTransport } from './review/provider'
 
 export interface CanvasConfig {
   dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number
@@ -23,6 +29,13 @@ export interface CanvasConfig {
 }
 export const routeDefinitions = [
   { suffix: 'models', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'settings-secret', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'seedance-review-settings', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'seedance-review-settings-test', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'asset-reviews', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'asset-review', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'asset-review-action', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'review-groups', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'model-delete', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'catalog', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'graph', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
@@ -52,20 +65,25 @@ export class CanvasService {
   readonly previews: PreviewCache
   readonly waveforms: WaveformCache
   readonly derived: DerivedAssets
+  readonly reviews: ReviewStore
+  readonly reviewRuntime: ReviewRuntime
   private closing = false
-  constructor(readonly config: CanvasConfig, vault?: CredentialVault, factory?: StorageFactory) {
+  constructor(readonly config: CanvasConfig, vault?: CredentialVault, factory?: StorageFactory, reviewTransport?: ReviewTransport) {
     this.store = new Store(config.dataDir, vault, factory)
-    this.runtime = new CanvasRuntime(this.store, config)
+    this.reviews = new ReviewStore(this.store, reviewTransport ?? new OfficialReviewTransport(config.requestTimeoutMs))
+    this.reviewRuntime = new ReviewRuntime(this.reviews)
+    this.runtime = new CanvasRuntime(this.store, config, (id, snapshot) => this.reviews.referenceUris(id, snapshot))
     this.previews = new PreviewCache(config.dataDir)
     this.waveforms = new WaveformCache(config.dataDir)
     this.derived = new DerivedAssets(this.store, config.maxMediaBytes)
   }
   async init(): Promise<void> {
     await this.store.init()
-    try { await this.runtime.start() } catch (error) { await this.close(); throw error }
+    try { await this.reviews.init(); await this.reviewRuntime.start(); await this.runtime.start() } catch (error) { await this.close(); throw error }
   }
   private async validate(state: WorkspaceState, graph: CanvasGraph): Promise<void> {
     validateGraph(graph, state.assets, state.tasks)
+    const models = new Map(this.store.listModels().map((model) => [model.id, model]))
     for (const previous of state.graph.nodes) if (!graph.nodes.some((n) => n.id === previous.id) && await this.store.hasUnfinished(state.workspaceId, previous.id)) throw new CanvasError('节点仍有未结束任务或上传', 409, 'NODE_BUSY')
     for (const node of graph.nodes) {
       NameSchema.parse(node.title)
@@ -74,6 +92,12 @@ export class CanvasService {
         if (isGeneration(node.kind) || !asset || asset.kind !== nodeMediaKind(node.kind)) throw new CanvasError('资源节点素材类型不一致')
       }
       if (node.selectedResultId && !state.tasks.some((t) => t.nodeId === node.id && t.resultIds.includes(node.selectedResultId!))) throw new CanvasError('选中的生成结果不属于这个节点')
+      const model = node.modelId ? models.get(node.modelId) : undefined
+      if (model?.protocol === 'seedance-video' && node.params && !isTtsParams(node.params)) {
+        const references = graph.edges.filter((edge) => edge.target === node.id)
+        validateSeedanceConnections(seedanceGenerationParams(node.params, references.map((edge) => edge.assetId)),
+          references.map((edge) => state.assets.find((asset) => asset.id === edge.assetId)!), model.model_id)
+      }
     }
   }
   async saveGraph(canvas: string, graph: CanvasGraph, revision: number): Promise<WorkspaceState> {
@@ -145,16 +169,22 @@ export class CanvasService {
         const model = mock ? mockRecord(node.modelId) : this.store.model(node.modelId).model
         if (model.kind !== nodeMediaKind(node.kind)) throw new CanvasError('模型类型与节点不一致')
         snapshot = { model, prompt: node.prompt.trim(), params: node.params, referenceIds: state.graph.edges.filter((e) => e.target === nodeId).map((e) => e.assetId) }
+        if (model.protocol === 'seedance-video') snapshot.params = seedanceGenerationParams(snapshot.params, snapshot.referenceIds)
         if (mock) validateMockGeneration(snapshot, state.assets)
         else validateGeneration(snapshot, state.assets)
         snapshot.prompt = resolvePrompt(snapshot.prompt, snapshot.referenceIds, state.assets)
       }
       let bytes = 0
       for (const id of snapshot.referenceIds) {
-        bytes += (await this.store.locator(canvas, id)).bytes
-        if (bytes > this.config.maxReferenceBytes) throw new CanvasError('参考素材总大小超过限制', 413)
+        const locator = await this.store.locator(canvas, id)
+        bytes += locator.bytes
+        if (snapshot.model.protocol === 'seedance-video') {
+          const asset = state.assets.find((asset) => asset.id === id)!
+          if (locator.bytes > seedanceReferenceLimit(asset.kind)) throw new CanvasError('Seedance 参考素材超过单文件大小限制', 413)
+        } else if (bytes > this.config.maxReferenceBytes) throw new CanvasError('参考素材总大小超过限制', 413)
       }
       if ((await this.store.db.get("SELECT COUNT(*) AS count FROM task_catalog WHERE status IN ('queued','running','external_wait','saving')")).count >= 1000) throw new CanvasError('任务队列已满，请稍后再提交', 429, 'QUEUE_FULL')
+      if (!mock && snapshot.model.protocol === 'seedance-video') await this.reviews.pin(canvas, requestId, requestHash, snapshot as import('../shared/contracts').TaskSnapshot)
       const task: Task = { id: randomUUID(), nodeId, workspaceId: canvas, snapshot, status: 'submitted', resultIds: [], createdAt: Date.now(), updatedAt: Date.now() }
       state.tasks.push(task)
       acceptedTaskId = task.id
@@ -216,6 +246,44 @@ export class CanvasService {
         if (request.method === 'POST') return json({ models: await this.store.saveModel(ModelInputSchema.parse(await request.json())) })
       }
       if (!isV2) throw new CanvasError('请使用 v2 接口', 410, 'API_RETIRED')
+      if (suffix === 'settings-secret' && request.method === 'POST') {
+        if (url.search) throw new CanvasError('凭据查看不接受查询参数')
+        const input = SettingSecretRequestSchema.parse(await request.json())
+        return json({ value: input.scope === 'seedance-review' ? await this.reviews.secret(input.provider, input.field) : await this.store.settingSecret(input) })
+      }
+      if (suffix === 'seedance-review-settings') {
+        if (request.method === 'GET') return json(await this.reviews.settings())
+        if (request.method === 'POST') {
+          const result = await this.reviews.saveSettings(ReviewSettingsInputSchema.parse(await request.json()))
+          this.reviewRuntime.wake(); return json(result)
+        }
+      }
+      if (suffix === 'seedance-review-settings-test' && request.method === 'POST') {
+        const input = z.object({ provider: ReviewProviderSchema }).strict().parse(await request.json())
+        await this.reviewRuntime.test(input.provider); return json({ ok: true })
+      }
+      if (suffix === 'asset-reviews') {
+        const id = await requireCanvas()
+        if (request.method === 'GET') {
+          const ids = url.searchParams.has('assetIds') ? z.array(IdSchema).max(100).parse(url.searchParams.get('assetIds')!.split(',')) : undefined
+          return json(await this.reviews.page(id, ids))
+        }
+        if (request.method === 'POST') {
+          const job = await this.reviews.submit(id, ReviewSubmitSchema.parse(await request.json()))
+          this.reviewRuntime.wake(); return json(job, 202)
+        }
+      }
+      if (suffix === 'asset-review' && request.method === 'GET')
+        return json(publicReview(await this.reviews.job(await requireCanvas(), IdSchema.parse(url.searchParams.get('id')))))
+      if (suffix === 'asset-review-action' && request.method === 'POST') {
+        const id = await requireCanvas(), jobId = IdSchema.parse(url.searchParams.get('id'))
+        return json(await this.reviewRuntime.action(id, jobId, ReviewActionSchema.parse(await request.json())))
+      }
+      if (suffix === 'review-groups' && request.method === 'GET') {
+        const id = await requireCanvas(), provider = ReviewProviderSchema.parse(url.searchParams.get('provider'))
+        const token = z.string().min(1).max(4096).optional().parse(url.searchParams.get('nextToken') ?? undefined)
+        return json(await this.reviewRuntime.groups(id, provider, token))
+      }
       if (suffix === 'tts-settings') {
         if (request.method === 'GET') return json(this.store.ttsSettings())
         if (request.method === 'POST') return json(await this.store.saveTtsSettings(TtsSettingsInputSchema.parse(await request.json())))
@@ -223,7 +291,15 @@ export class CanvasService {
       if (suffix === 'model-delete' && request.method === 'POST') return json({ models: await this.store.deleteModel(IdSchema.parse(url.searchParams.get('id'))) })
       if (suffix === 'catalog') {
         if (request.method === 'GET') return json(await this.store.catalog())
-        if (request.method === 'POST') return json(await this.store.catalogCommand(CatalogCommand.parse(await request.json())))
+        if (request.method === 'POST') {
+          const input = CatalogCommand.parse(await request.json())
+          const result = await this.store.catalogCommand(input)
+          if (input.operation === 'canvas-create') {
+            await this.reviews.ensureCanvas(result.id).catch(() => {})
+            this.reviewRuntime.wake()
+          }
+          return json(result)
+        }
       }
       if (suffix === 'graph') {
         const id = await requireCanvas()
@@ -296,7 +372,7 @@ export class CanvasService {
       return json({ error: '接口不存在', code: 'NOT_FOUND' }, 404)
     } catch (error) {
       const message = error instanceof z.ZodError ? error.issues[0]?.message ?? '输入无效' : error instanceof SyntaxError ? '请求内容格式错误' : error instanceof Error ? error.message : '操作失败'
-      return Response.json({ error: this.store.redact(message), code: error instanceof CanvasError ? error.code : 'INVALID_REQUEST' }, { status: error instanceof CanvasError ? error.status : 400, headers: { 'Cache-Control': 'no-store' } })
+      return Response.json({ error: await this.reviews.redactPublic(message).catch(() => this.store.redact(message)), code: error instanceof CanvasError ? error.code : 'INVALID_REQUEST' }, { status: error instanceof CanvasError ? error.status : 400, headers: { 'Cache-Control': 'no-store' } })
     }
   }
   private async media(request: Request, canvas: string, id: string): Promise<Response> {
@@ -320,7 +396,8 @@ export class CanvasService {
   async close(): Promise<void> {
     if (this.closing) return
     this.closing = true
-    await Promise.all([this.derived.close(), this.previews.close(), this.waveforms.close(), this.runtime.close()])
+    await Promise.all([this.derived.close(), this.previews.close(), this.waveforms.close(), this.runtime.close(), this.reviewRuntime.close()])
+    await this.reviews.close()
     await this.store.close()
   }
 }

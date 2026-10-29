@@ -1,13 +1,15 @@
 import { useViewport } from '@xyflow/react'
-import { isTtsSnapshot, type AnyTaskSnapshot } from '../shared/contracts'
-import { providerFor } from '../shared/modelCatalog'
+import { isTtsSnapshot, type AnyTaskSnapshot, type Asset } from '../shared/contracts'
+import { providerFor, SEEDANCE_VIDEO_MODES } from '../shared/modelCatalog'
 import type { CanvasApi } from './api'
 import { SignedImage } from './SignedMedia'
 import { nodeEditorPosition } from './nodeOverlayLayout'
+import { MediaIcon } from './MediaIcon'
 
 /** Immutable task inputs: no graph, upload, parameter or submission callbacks. */
-export function GenerationSnapshotEditor({ api, workspace, snapshot, error, anchor, restoring = false }: {
+export function GenerationSnapshotEditor({ api, workspace, snapshot, assets = [], error, anchor, restoring = false }: {
   api: CanvasApi; workspace: string; snapshot?: AnyTaskSnapshot; error?: string; restoring?: boolean
+  assets?: readonly Asset[]
   anchor: { position: { x: number; y: number }; size: { width: number; height: number } }
 }) {
   const viewport = useViewport()
@@ -20,15 +22,24 @@ export function GenerationSnapshotEditor({ api, workspace, snapshot, error, anch
     {error ? <p role="alert">{error}</p> : !snapshot ? <p role="status">正在读取生成记录…</p> : <>
       {!!snapshot.referenceIds.length && <div className="dc-reference-row">
         {snapshot.referenceIds.map((id, index) => <div className="dc-reference" key={id}>
-          <SignedImage api={api} canvas={workspace} assetId={id} alt={`参考素材 ${index + 1}`} /><small>{index + 1}</small>
+          {assets.find((asset) => asset.id === id)?.kind && assets.find((asset) => asset.id === id)!.kind !== 'image'
+            ? <span className="dc-reference-placeholder"><MediaIcon kind={assets.find((asset) => asset.id === id)!.kind} size={28} /></span>
+            : <SignedImage api={api} canvas={workspace} assetId={id} alt={`参考素材 ${index + 1}`} />}
+          <small className={snapshot.model.protocol === 'seedance-video' && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames' ? 'dc-frame-label' : ''}>{
+            snapshot.model.protocol === 'seedance-video' && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames'
+              ? snapshot.params.firstFrameId === id ? '首帧' : '尾帧' : index + 1}</small>
         </div>)}
       </div>}
-      <div className="dc-snapshot-prompt" role="textbox" aria-label={tts ? '文字内容' : '提示词'} aria-readonly="true" contentEditable={false} tabIndex={0}>{snapshot.prompt}</div>
+      <div className="dc-snapshot-prompt" data-dc-text-selectable="true" role="textbox" aria-label={tts ? '文字内容' : '提示词'} aria-readonly="true" contentEditable={false} tabIndex={0}>{snapshot.prompt}</div>
       <div className="dc-snapshot-model"><strong>{snapshot.model.name}</strong><small>{providerFor(snapshot.model)?.label ?? snapshot.model.model_id}</small></div>
       <dl className="dc-snapshot-params">
         {Object.entries(snapshot.params).filter(([key]) => key !== 'type').map(([key, value]) => <div key={key}>
           <dt>{{ size: '尺寸', n: '生成数量', seconds: '时长（秒）', background: '背景', quality: '画质',
-            audio: '音频', reference_id: '音色 ID', speed: '语速', volume: '音量' }[key] ?? key}</dt><dd>{String(value)}</dd>
+            videoMode: '生成模式', firstFrameId: '首帧', lastFrameId: '尾帧', generateAudio: '同步音频',
+            audio: '音频', reference_id: '音色 ID', speed: '语速', volume: '音量' }[key] ?? key}</dt><dd data-dc-text-selectable="true">{
+              key === 'videoMode' ? SEEDANCE_VIDEO_MODES.find((mode) => mode.value === value)?.label ?? String(value)
+                : key === 'firstFrameId' || key === 'lastFrameId' ? `图片 ${snapshot.referenceIds.indexOf(String(value)) + 1}`
+                  : typeof value === 'boolean' ? value ? '开启' : '关闭' : String(value)}</dd>
         </div>)}
       </dl>
     </>}

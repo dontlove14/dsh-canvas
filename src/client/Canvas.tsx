@@ -5,22 +5,23 @@ import {
 } from '@xyflow/react'
 import {
   NodeLabels, defaultParams, isGeneration, nodeMediaKind, nodeResults, latestTask,
-  TaskStatusLabels, TRACKED_STATUSES, validateGraph, defaultTtsParams, isTtsParams,
+  TaskStatusLabels, validateGraph, defaultTtsParams, isTtsParams,
   validateGeneration, ModelRecordSchema,
-  type CanvasNode, type CanvasGraph, type NodeKind, type Asset, type PublicModel, type MediaKind, type TaskAction,
+  type CanvasNode, type CanvasGraph, type NodeKind, type Asset, type PublicModel, type MediaKind, type TaskAction, type GenerationParams,
 } from '../shared/contracts'
 import { type CanvasChoice, type TaskSummary, type TaskDetail } from '../shared/v2'
 import { CanvasApi } from './api'
+import { modelConfigured } from '../shared/modelCatalog'
 import { useCanvas } from './useCanvas'
 import { useGpuCapability } from './useGpu'
 import { useViewportCompositing } from './useViewportCompositing'
-import { CanvasSettings } from './Settings'
+import { CanvasSettings, type SettingsTab } from './Settings'
 import { SignedImage } from './SignedMedia'
 import { MediaIcon } from './MediaIcon'
 import { ProjectList } from './ProjectList'
 import { ResourceNode } from './ResourceNode'
 import { UiActionMenu, UiButton, UiInput, UiModal as Modal, UiMediaModal, UiSelect } from './ui'
-import { canvasScrollGestures } from './gestures'
+import { canvasScrollGestures, useCanvasActionBarGestures } from './gestures'
 import { VideoPlayer } from './VideoPlayer'
 import { mockRecord, validateMockGeneration } from '../shared/mockModels'
 import { isMockModel } from '../shared/mockModels'
@@ -52,6 +53,12 @@ import { useHistoryInspection, type HistoryInspection } from './useHistoryInspec
 import { GenerationSnapshotEditor } from './GenerationSnapshotEditor'
 import { sameFields, sameNodeContent, shareEditorGraph, shareItems } from './canvasSharing'
 import { createCanvasProjection, EMPTY_PROJECTION } from './canvasProjection'
+import { normalizeSeedanceGraphReferences, seedanceGenerationParams, seedanceFrameParams, seedanceInputCapabilities, validateSeedanceConnections } from '../shared/seedance'
+import { SeedanceFrameRole } from './SeedanceFrameRoles'
+import { CanvasReviewState, ReviewContext } from './reviewState'
+import { SeedanceReviewDialog } from './SeedanceReviewDialog'
+import { CanvasTextSelectionProvider } from './canvasTextSelection'
+import { useNodeDeleteConfirmation } from './useNodeDeleteConfirmation'
 
 const EMPTY_TASKS: TaskSummary[] = []
 const EMPTY_ASSETS: Asset[] = []
@@ -137,12 +144,15 @@ function downloadJson(name: string, data: unknown) {
 export function CanvasWorkspace({ api, workspace, title, onBack, active = true }: { api: CanvasApi; workspace: string; title: string; onBack: () => void; active?: boolean }) {
   const canvas = useCanvas(api, workspace, active)
   const gpu = useGpuCapability()
-  const { graph, state, edit, report } = canvas
+  const { graph, state, edit: editGraph, report } = canvas
   const [configuredModels, setConfiguredModels] = useState<PublicModel[]>([])
   const [ttsConfigured, setTtsConfigured] = useState<boolean | null>(null)
   const [ttsConfigurationError, setTtsConfigurationError] = useState(false)
   const configurationLoad = useRef(0)
   const models = useMemo(() => selectableModels(configuredModels.filter((model) => builtinDefinition(model))), [configuredModels])
+  const edit = useCallback((change: CanvasGraph | ((graph: CanvasGraph) => CanvasGraph)) => {
+    editGraph((previous) => normalizeSeedanceGraphReferences(previous, typeof change === 'function' ? change(previous) : change, configuredModels))
+  }, [editGraph, configuredModels])
   const [selected, setSelected] = useState<string[]>([])
   const [selectedEdges, setSelectedEdges] = useState<string[]>([])
   const selectMarquee = useCallback((value: { nodes: string[]; edges: string[] }) => {
@@ -150,6 +160,10 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   }, [])
   const marquee = useMarqueeSelection(selected, selectedEdges, selectMarquee)
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden')
+  const reviewState = useMemo(() => new CanvasReviewState(api, workspace), [api, workspace])
+  const [reviewAsset, setReviewAsset] = useState<Asset>()
+  const reviewEnvironment = useMemo(() => ({ state: reviewState, open: setReviewAsset }), [reviewState])
+  useEffect(() => { reviewState.setActive(active && pageVisible); return () => reviewState.setActive(false) }, [reviewState, active, pageVisible])
   const loadingRoot = useRef<HTMLDivElement>(null)
   const loadingEnvironment = useNodeLoadingEnvironment(loadingRoot, active && pageVisible)
   const flowStore = useStoreApi()
@@ -171,6 +185,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [panning, setPanning] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('storage')
   const [preview, setPreview] = useState<Asset | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -181,6 +196,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   const importIntent = useRef<{ kind: MediaKind; target?: string } | null>(null)
   const flow = useReactFlow<FlowNode, RelationshipFlowEdge>()
   useViewportCompositing(container, gpu.enabled && active)
+  useCanvasActionBarGestures(container, active && pageVisible)
   const loadModels = useCallback(() => {
     const request = ++configurationLoad.current
     const current = () => configurationLoad.current === request
@@ -235,6 +251,9 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   const assets = state?.assets ?? EMPTY_ASSETS
   const { tasks, submitting, generate } = useGenerationSubmission({
     api, workspace, tasks: state?.tasks ?? EMPTY_TASKS, flush: canvas.flush, refresh: canvas.refresh, report,
+  })
+  const nodeDeletion = useNodeDeleteConfirmation<FlowNode, RelationshipFlowEdge>({
+    active, pageVisible, workspace, submitting, tasks, nodes: graph.nodes, container, report,
   })
   const history = useHistoryInspection({ api, workspace, active: active && pageVisible, node: activeNode,
     expanded: !!activeNode && !!expandedGroups[activeNode.id], tasks, authoritative: state?.tasks ?? EMPTY_TASKS, patchNode })
@@ -342,17 +361,26 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     if (asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime)) {
       report(new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')); return
     }
-    if (model && (!model.capabilities.referenceKinds.includes(asset.kind) || graph.edges.filter((edge) => edge.target === target.id).length >= model.capabilities.maxReferences)) {
+    const previousReferenceIds = graph.edges.filter((edge) => edge.target === target.id).map((edge) => edge.assetId)
+    const params = target.params && !isTtsParams(target.params) && model?.protocol === 'seedance-video'
+      ? seedanceGenerationParams(target.params, previousReferenceIds) : target.params
+    const caps = model && seedanceInputCapabilities(model, !isTtsParams(params) ? params : null)
+    if (caps && (!caps.referenceKinds.includes(asset.kind) || graph.edges.filter((edge) => edge.target === target.id).length >= caps.maxReferences)) {
       report(new Error('当前模型不支持这份素材，或引用数量已达上限')); return
     }
     if (!model && asset.kind !== 'image') { report(new Error('请先选择支持这类素材的模型')); return }
     const next = { ...graph, edges: [...graph.edges, { id: crypto.randomUUID(), source: source.id, target: target.id, assetId: asset.id }] }
-    try { validateGraph(next, assets, tasks); edit(next) } catch (error) { report(error) }
+    try {
+      if (model?.protocol === 'seedance-video' && target.params && !isTtsParams(target.params))
+        validateSeedanceConnections(seedanceGenerationParams(params as GenerationParams, [...previousReferenceIds, asset.id]),
+          next.edges.filter((edge) => edge.target === target.id).map((edge) => assets.find((asset) => asset.id === edge.assetId)!), model.model_id)
+      validateGraph(next, assets, tasks); edit(next)
+    } catch (error) { report(error) }
   }, [graph, assets, tasks, models, expandedGroups, edit, report])
   const addNode = (kind: NodeKind) => {
     const rect = container.current?.getBoundingClientRect()
     const position = flow.screenToFlowPosition({ x: (rect?.left ?? 0) + (rect?.width ?? 900) / 2 - 150, y: (rect?.top ?? 0) + (rect?.height ?? 600) / 2 - 150 })
-    const model = models.find((model) => model.kind === nodeMediaKind(kind) && model.has_api_key)
+    const model = models.find((model) => model.kind === nodeMediaKind(kind) && modelConfigured(model))
     const node: CanvasNode = {
       id: crypto.randomUUID(), kind, title: `${NodeLabels[kind]} ${graph.nodes.filter((node) => node.kind === kind).length + 1}`,
       position, modelId: isGeneration(kind) ? model?.id ?? null : null,
@@ -383,6 +411,13 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
           const resource = response.graph.nodes.find((n) => n.id === result.nodeId)
           if (resource?.assetId) {
             await canvas.refresh()
+            const currentTarget = response.graph.nodes.find((node) => node.id === target.id), model = models.find((model) => model.id === currentTarget?.modelId)
+            if (model?.protocol === 'seedance-video' && currentTarget?.params && !isTtsParams(currentTarget.params)) {
+              const references = response.graph.edges.filter((edge) => edge.target === target.id)
+              const params = seedanceGenerationParams(currentTarget.params, references.map((edge) => edge.assetId))
+              validateSeedanceConnections(seedanceGenerationParams(params, [...references.map((edge) => edge.assetId), resource.assetId]),
+                [...references.map((edge) => response.assets.find((asset) => asset.id === edge.assetId)!), response.assets.find((asset) => asset.id === resource.assetId)!], model.model_id)
+            }
             edit((current) => ({ ...current, edges: [...current.edges, { id: crypto.randomUUID(), source: result.nodeId, target: target.id, assetId: resource.assetId! }] }))
             break
           }
@@ -405,12 +440,12 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     } catch (error) { report(error); setLeaving(false) }
   }
   const selectionEnvironment = useMemo(() => ({ selecting: marquee.selecting, selectedIds: selected }), [marquee.selecting, selected])
-  return <LoadingResolutionContext.Provider value={loadingResolution}><NodeLoadingContext.Provider value={loadingEnvironment}><CanvasSelectionContext.Provider value={selectionEnvironment}><div className="dc-root" ref={loadingRoot}>
+  return <ReviewContext.Provider value={reviewEnvironment}><LoadingResolutionContext.Provider value={loadingResolution}><NodeLoadingContext.Provider value={loadingEnvironment}><CanvasSelectionContext.Provider value={selectionEnvironment}><div className="dc-root" ref={loadingRoot}>
     <header className="dc-header"><UiButton className="dc-ui-back" autoFocus={active} disabled={uploading || submitting || leaving} title={uploading ? '请等待文件接收完成' : submitting ? '请等待任务提交完成' : '保存并返回项目列表'} onClick={() => void returnToProjects()}>← <span>{leaving ? '保存中…' : '项目列表'}</span></UiButton>
       <div className="dc-title dc-workspace-title"><div><strong title={title}>{title}</strong><small>无限画布</small></div></div>
-      <div className="dc-header-actions"><span className={`dc-save-status ${canvas.conflict ? 'warning' : ''}`}>{canvas.saveStatus}</span><UiButton variant="outline" onClick={() => setShowTasks(true)}>任务</UiButton><UiButton variant="outline" onClick={() => setShowSettings(true)}>⚙ 设置</UiButton></div>
+      <div className="dc-header-actions"><span className={`dc-save-status ${canvas.conflict ? 'warning' : ''}`}>{canvas.saveStatus}</span><UiButton variant="outline" onClick={() => setShowTasks(true)}>任务</UiButton><UiButton variant="outline" onClick={() => { setSettingsTab('storage'); setShowSettings(true) }}>⚙ 设置</UiButton></div>
     </header>
-    <div className="dc-canvas-area" ref={container} tabIndex={-1} data-gpu-compositing={gpu.enabled ? 'enabled' : 'disabled'} data-gpu-reason={gpu.reason}
+    <CanvasTextSelectionProvider><div className="dc-canvas-area" ref={container} tabIndex={-1} data-gpu-compositing={gpu.enabled ? 'enabled' : 'disabled'} data-gpu-reason={gpu.reason}
       data-marquee-selecting={marquee.selecting}
       onPointerDownCapture={(event) => {
         if (event.target instanceof HTMLElement && event.target.closest('.react-flow__pane')) event.currentTarget.focus({ preventScroll: true })
@@ -445,24 +480,17 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
           if (node.data.asset?.kind === 'video') setPlayingNode(node.id); else if (node.data.asset?.kind !== 'audio') setPlayingNode(null)
           if (!expandedGroups[node.id] && node.data.cards.length > 1) history.beginEditing(node.id)
         }}
-        onBeforeDelete={async ({ nodes: removedNodes, edges: removedEdges }) => {
-          if (!active || !container.current?.contains(document.activeElement)) return false
-          if (submitting && removedNodes.length) { report(new Error('任务正在提交，请稍后删除')); return false }
-          const locked = removedNodes.filter((node) => tasks.some((task) => task.nodeId === node.id && TRACKED_STATUSES.has(task.status)))
-          if (locked.length) { report(new Error('选中的节点有未结束任务，请先处理任务')); return false }
-          if (removedNodes.length && !window.confirm(`删除 ${removedNodes.length} 个节点，并解除相关连线？本地媒体和下游结果会保留。`)) return false
-          return { nodes: removedNodes, edges: removedEdges }
-        }}
+        onBeforeDelete={nodeDeletion.onBeforeDelete}
         selectionOnDrag={!panning} selectionMode={SelectionMode.Full} panOnDrag={panning ? true : [1, 2]} selectionKeyCode={active ? 'Shift' : null} deleteKeyCode={active ? ['Backspace', 'Delete'] : null}
         {...canvasScrollGestures}
-        onlyRenderVisibleElements proOptions={{ hideAttribution: false }}
+        onlyRenderVisibleElements proOptions={{ hideAttribution: true }}
         ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': '放大', 'controls.zoomOut.ariaLabel': '缩小', 'controls.fitView.ariaLabel': '适应画布' }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="var(--dc-grid)" />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable nodeColor="var(--dc-accent)" maskColor="var(--dc-minimap-mask)" />
         {active && pageVisible && !marquee.selecting && activeNode && (inspectionAnchor || history.restoring) &&
-          <GenerationSnapshotEditor api={api} workspace={workspace} snapshot={history.snapshot} error={history.error} restoring={history.restoring}
+          <GenerationSnapshotEditor api={api} workspace={workspace} snapshot={history.snapshot} assets={assets} error={history.error} restoring={history.restoring}
             anchor={inspectionAnchor ?? { position: activeNode.position, size: mediaSizes[activeNode.id] ?? { width: 320, height: 180 } }} />}
         {active && !marquee.selecting && activeNode && !history.restoring && nodeEditorVisible(activeNode, previewFor(activeNode), !!expandedGroups[activeNode.id]) && <FloatingEditor node={activeNode} graph={graph} assets={assets} tasks={tasks} models={models} api={api} workspace={workspace}
           ttsConfigured={ttsConfigured} ttsConfigurationError={ttsConfigurationError}
@@ -481,9 +509,12 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
       <div className="dc-hint">左键拖动框选 · 空格 + 左键拖动平移 · 滚轮 / 双指移动平移 · ⌘ / Ctrl + 滚轮缩放 · Delete 删除</div>
       {canvas.error && <div className="dc-toast" role="alert"><span>{canvas.error}</span><UiButton aria-label="关闭提示" onClick={canvas.clearError}>×</UiButton></div>}
       {canvas.conflict && <div className="dc-conflict"><strong>画布保存冲突，当前草稿仍保留</strong><UiButton variant="outline" onClick={() => downloadJson('canvas-draft.json', graph)}>导出草稿</UiButton><UiButton variant="outline" onClick={() => { if (window.confirm('重新载入将替换当前未保存草稿，请先导出。')) void canvas.reload().catch(report) }}>重新载入</UiButton></div>}
-    </div>
+    </div></CanvasTextSelectionProvider>
     <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = [...event.target.files ?? []]; void (async () => { for (const file of files) await uploadFile(file) })() }} />
-    {active && showSettings && <Modal label="无限画布" onClose={() => { setShowSettings(false); loadModels() }}><CanvasSettings api={api} onChanged={loadModels} /></Modal>}
+    {nodeDeletion.modal}
+    {active && showSettings && <Modal label="无限画布" onClose={() => { setShowSettings(false); loadModels(); void reviewState.refresh() }}><CanvasSettings api={api} initialTab={settingsTab} onChanged={() => { loadModels(); void reviewState.refresh() }} /></Modal>}
+    {active && reviewAsset && <SeedanceReviewDialog key={reviewAsset.id} asset={reviewAsset} onClose={() => setReviewAsset(undefined)}
+      onSettings={() => { setReviewAsset(undefined); setSettingsTab('review'); setShowSettings(true) }} />}
     {active && showTasks && <TaskDialog api={api} onClose={() => setShowTasks(false)} />}
     {active && preview && (preview.kind === 'audio'
       ? <Modal label={preview.filename} onClose={() => setPreview(null)} wide><Media asset={preview} api={api} workspace={workspace} /></Modal>
@@ -491,7 +522,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
         {preview.kind === 'image' ? <SignedImage className="dc-preview-image" api={api} canvas={workspace} assetId={preview.id} variant="original" alt={preview.filename} draggable={false} />
           : <VideoPlayer key={preview.id} src={api.media(workspace, preview.id)} api={api} canvas={workspace} assetId={preview.id} autoPlay preview label={preview.filename} />}
       </UiMediaModal>)}
-  </div></CanvasSelectionContext.Provider></NodeLoadingContext.Provider></LoadingResolutionContext.Provider>
+  </div></CanvasSelectionContext.Provider></NodeLoadingContext.Provider></LoadingResolutionContext.Provider></ReviewContext.Provider>
 }
 
 interface EditorProps {
@@ -528,19 +559,24 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
   const generation = isGeneration(node.kind)
   const model = models.find((item) => item.id === node.modelId)
   const references = graph.edges.filter((edge) => edge.target === node.id)
+  const referenceAssets = references.map((edge) => assets.find((asset) => asset.id === edge.assetId)).filter((asset): asset is Asset => !!asset)
+  const referenceIds = references.map((edge) => edge.assetId)
+  const params = node.params && !isTtsParams(node.params) && model?.protocol === 'seedance-video' ? seedanceGenerationParams(node.params, referenceIds) : node.params
+  const inputCaps = model && seedanceInputCapabilities(model, !isTtsParams(params) ? params : null)
   const promptReferences = useMemo(() => connectedPromptReferences(graph, node.id, assets), [graph, node.id, assets])
-  const candidates = useMemo(() => model ? promptCandidates(graph, node.id, assets, tasks, model.capabilities) : [], [graph, node.id, assets, tasks, model])
+  const candidates = useMemo(() => inputCaps ? promptCandidates(graph, node.id, assets, tasks, inputCaps) : [], [graph, node.id, assets, tasks, model, node.params])
   const task = latestTask(node.id, tasks)
   if (node.kind === 'tts-generation') return <TtsEditor node={node} task={task} submitting={submitting} configured={props.ttsConfigured} configurationError={props.ttsConfigurationError}
       patchNode={patchNode} generate={generate} onError={report} />
   let reason = ''
   if (generation) {
     if (!model || !node.params || isTtsParams(node.params)) reason = '请选择模型'
-    else if (!isMockModel(model) && !model.has_api_key) reason = '请先在设置中配置该模型供应商的 API Key'
+    else if (!isMockModel(model) && !modelConfigured(model)) reason = '请前往设置页面配置模型'
     else try {
       const snapshot = { model: isMockModel(model) ? mockRecord(model.id) : ModelRecordSchema.parse({
         id: model.id, kind: model.kind, name: model.name, model_id: model.model_id, api_base: model.api_base, protocol: model.protocol,
-      }), prompt: node.prompt, params: node.params, referenceIds: references.map((edge) => edge.assetId) }
+        ...(model.endpoint_id ? { endpoint_id: model.endpoint_id } : {}),
+      }), prompt: node.prompt, params: params as GenerationParams, referenceIds }
       if (isMockModel(model)) validateMockGeneration(snapshot, assets)
       else validateGeneration(snapshot, assets)
     } catch (error) { reason = error instanceof Error ? error.message : '输入无效' }
@@ -550,14 +586,17 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
     {!generation && <div className="dc-editor-title"><label><UiInput value={node.title} aria-label="节点名称" maxLength={160} onChange={(event) => patchNode(node.id, { title: event.target.value || NodeLabels[node.kind] })} /></label><span>{NodeLabels[node.kind]}</span></div>}
     {generation ? <>
       <div className="dc-generation-actions">
-        <UiButton variant="outline" disabled={uploading || submitting || (!!model && !model.capabilities.referenceKinds.includes('image')) || (!!model && references.length >= model.capabilities.maxReferences)} onClick={() => askImport('image', node.id)}>{uploading ? '导入中…' : '＋ 上传'}</UiButton>
+        <UiButton variant="outline" disabled={uploading || submitting || (!!inputCaps && !inputCaps.referenceKinds.includes('image')) || (!!inputCaps && references.length >= inputCaps.maxReferences)} onClick={() => askImport('image', node.id)}>{uploading ? '导入中…' : '＋ 上传'}</UiButton>
       </div>
       <div className="dc-reference-row">
         {references.map((edge, index) => {
           const reference = assets.find((item) => item.id === edge.assetId)
           return <div className="dc-reference" key={edge.id} title={reference?.filename ?? '素材不可用'}>
             {reference?.kind === 'image' ? <SignedImage api={api} canvas={workspace} assetId={reference.id} alt={`参考图 ${index + 1}`} onClick={() => onOpen(reference)} /> : <span className="dc-reference-placeholder">{reference ? <MediaIcon kind={reference.kind} size={28} /> : '？'}</span>}
-            <small>{index + 1}</small><UiButton disabled={submitting} className="dc-ui-remove-reference" aria-label={`移除引用 ${index + 1}`} onClick={() => edit((current) => ({ ...current, edges: current.edges.filter((item) => item.id !== edge.id) }))}>×</UiButton>
+            {model?.protocol === 'seedance-video' && params && !isTtsParams(params) && params.videoMode === 'frames'
+              ? <SeedanceFrameRole assetId={edge.assetId} index={index} referenceIds={referenceIds} params={params} disabled={submitting}
+                onChange={(params) => patchNode(node.id, { params })} /> : <small>{index + 1}</small>}
+            <UiButton disabled={submitting} className="dc-ui-remove-reference" aria-label={`移除引用 ${index + 1}`} onClick={() => edit((current) => ({ ...current, edges: current.edges.filter((item) => item.id !== edge.id) }))}>×</UiButton>
           </div>
         })}
         {!references.length && <small className="dc-muted">也可从素材节点拖入连线</small>}
@@ -568,15 +607,35 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
         onChange={(prompt) => patchNode(node.id, { prompt })} onError={report}
         onChoose={(item, prompt) => {
           if (!model || submitting) throw new Error('请先选择可用模型')
-          const inserted = insertPromptReference(props.getCurrentGraph(), node.id, item, prompt, assets, tasks, model.capabilities)
+          const inserted = insertPromptReference(props.getCurrentGraph(), node.id, item, prompt, assets, tasks, inputCaps!)
+          if (model.protocol === 'seedance-video' && params && !isTtsParams(params))
+            validateSeedanceConnections(seedanceGenerationParams(params, inserted.graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.assetId)),
+              inserted.graph.edges.filter((edge) => edge.target === node.id).map((edge) => assets.find((asset) => asset.id === edge.assetId)!), model.model_id)
           edit(inserted.graph)
           return inserted.reference
         }} />
       {reason && reason !== '请选择模型' && <small className="dc-validation">{reason}</small>}
       <div className="dc-editor-bottom">
         <ModelPicker disabled={submitting} value={node.modelId} models={models.filter((item) => item.kind === nodeMediaKind(node.kind))}
-          onChange={(next) => patchNode(node.id, { modelId: next.id, params: next.model_id === model?.model_id ? node.params : defaultParams(next) })} />
-        {model && node.params && !isTtsParams(node.params) && <GenerationParameters key={node.id} model={model} params={node.params} disabled={submitting} onChange={(params) => patchNode(node.id, { params })} />}
+          onChange={(next) => patchNode(node.id, { modelId: next.id, params: next.model_id === model?.model_id ? node.params
+            : { ...defaultParams(next), ...(next.protocol === 'seedance-video' && references.length ? { videoMode: 'reference' as const } : {}) } })} />
+        {model?.capabilities.videoModes && params && !isTtsParams(params) && (references.length ? <UiSelect className="dc-video-mode" label="视频生成模式"
+          value={params.videoMode ?? 'reference'} options={model.capabilities.videoModes.filter((mode) => mode.value !== 'text')} disabled={submitting} side="top"
+          onChange={(mode) => {
+            if (mode !== 'reference' && mode !== 'frames') return
+            if ((params.videoMode ?? 'text') === mode) return
+            const { firstFrameId: _first, lastFrameId: _last, ...rest } = params
+            const next = seedanceFrameParams({ ...rest, videoMode: mode as GenerationParams['videoMode'],
+              ...(mode === 'frames' && model.model_id.includes('-2-5-') ? { size: `${params.size.split('/')[0]}/adaptive` } : {}) }, referenceIds)
+            try { validateSeedanceConnections(next, referenceAssets, model.model_id); patchNode(node.id, { params: next }) }
+            catch (error) { report(error) }
+          }} /> : <span className="dc-video-mode-auto" aria-label="视频生成模式：文生视频">文生视频</span>)}
+        {model && params && !isTtsParams(params) && <GenerationParameters key={node.id} model={model} params={params} disabled={submitting} onChange={(params) => {
+          try {
+            if (model.protocol === 'seedance-video') validateSeedanceConnections(params, referenceAssets, model.model_id)
+            patchNode(node.id, { params })
+          } catch (error) { report(error) }
+        }} />}
         <UiButton variant="primary" className="dc-ui-generate dc-generate-arrow" aria-label="生成" disabled={!!reason || submitting || uploading} title={reason || '生成'} onClick={() => { try { promptEditor.current?.flush(); void generate(node) } catch (error) { report(error) } }}>{submitting ? <span className="dc-spinner" /> : <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>}</UiButton>
       </div>
     </> : <div className="dc-asset-editor"><p>{asset ? `${asset.filename} · ${formatBytes(asset.bytes)}` : '选择本地文件，素材会复制到插件的本机存储。'}</p><UiButton variant="outline" disabled={uploading} onClick={() => askImport(nodeMediaKind(node.kind))}>{uploading ? '导入中…' : '上传为新资源节点'}</UiButton></div>}

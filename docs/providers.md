@@ -1,10 +1,14 @@
 # 模型协议与媒体参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-28。复核周期和触发条件见[文档导航](index.md)。
+文档类型：参考；负责人：项目维护者；最近核对：2026-10-29。复核周期和触发条件见[文档导航](index.md)。
 
 本页描述[已实现的适配器](../src/host/providers.ts)与[能力定义](../src/shared/contracts.ts)，不是对任何厂商当前线上 API 的兼容认证。真实账户联调仍见[验证记录](verification.md)。
 
-图片UI已接入GPT Image 2.5 Sunburst / Flare和四款Nano Banana，TTS使用下述真实FishTTS协议，真实视频待后续接入。画布只显示有Key的具体模型与供应商组合，未配置渠道隐藏，不提供Mock候选或后备项；无配置时显示前往设置提示。配置表单保留完整目录，旧Mock节点、媒体与历史任务只读 / 恢复保留，见[ADR-0040](adr/0040-configured-provider-combinations-only.md)。
+Seedance官方预审独立使用AK/SK，Bytedance `ark.cn-beijing.volcengineapi.com` / cn-beijing，BytePlus `ark.ap-southeast-1.byteplusapi.com` / ap-southeast-1，Service ark / Version 2024-01-01。固定官方签名模块1.36.2及离线向量，保留来源与许可证；CreateAssetGroup / CreateAsset / GetAssetGroup / GetAsset / ListAssetGroups / ListAssets，列表Filter.GroupType为单值，Result.Items / NextToken分页。BytePlus送Default，Bytedance不传Moderation。预审Active的可信ID替代对应image_url / video_url / audio_url中的url为`asset://ID`，顺序和role保持；其他来源继续URL。Model Link不使用官方Asset URI。
+
+预审独立格式限制：图片小于30MiB，宽高严格大于300 / 小于6000、比例严格在0.4–2.5；视频最多200MiB，MP4/MOV、2–30秒、480p–4K、24–60FPS；音频最多15MiB，MP3/WAV、2–30秒。实际原字节 / hash / 格式重新读取验证，支持类型仍受现有上传格式限制，模型引用的更窄限制另行验证。真人必须选择该供应商项目已认证LivenessFace组。生成EP与预审ProjectName需用户在官方账户配置为同项目；插件不从API Key推断账户，真实权限需手动联调。详见[ADR-0059](adr/0059-seedance-asset-review-and-frozen-generation-references.md)。
+
+图片UI已接入GPT Image 2.5 Sunburst / Flare、四款Nano Banana和四款Seedream 5.0，视频接入八款Seedance，TTS使用下述真实FishTTS协议。画布只显示完整配置的具体模型与供应商组合，未配置渠道隐藏，不提供Mock候选或后备项；无配置时显示前往设置提示。配置表单保留完整目录，旧Mock节点、媒体与历史任务只读 / 恢复保留，见[ADR-0040](adr/0040-configured-provider-combinations-only.md)。
 
 0.2.17全部Mock的counts为1–10。原Mock Video保留seconds=[4,8,12]；新增Mock Video · 区间使用secondsRange={min:0,max:12,step:1}，默认1秒。区间优先于固定列表，UI不显示区间断点；0秒可保存草稿但提交拒绝。真实协议表中的数量 / 时长保持原限制，派生能力不写入模型记录，见[ADR-0029](adr/0029-generation-sliders-and-audio-wheel.md)。
 
@@ -33,7 +37,59 @@
 
 1K名义宽高依比例顺序为1024x1024、848x1264、1264x848、896x1200、1200x896、928x1152、1152x928、768x1376、1376x768、1584x672。2K / 4K分别乘2 / 4；0.5K乘0.5，21:9为792x168。size仍存于既有节点params，请求从预设取比例与档位；返回资产按实际文件尺寸保存，不能把名义预设当作服务端尺寸保证。
 
-以下表格为保留的旧适配器协议，不代表新配置可任意使用这些模型。旧配置与快照仍能读取和恢复，新的设置页只提供已接入目录。视频真实接入按用户后续文档进行。
+### Seedream能力与供应商
+
+0.2.48新增 `seedream-image`，仅接入文生图 / 图生图，每次1张。Dola为用户指定的NSFW版本，与标准版分开配置，不共享Key / EP。
+
+| Model ID | 名称 | 供应商 | 分辨率 | 最大参考图 |
+| --- | --- | --- | --- | --- |
+| `doubao-seedream-5-0-260128` | Seedream 5.0 Lite | Model Link / ByteDance | 2K / 3K / 4K | 14 |
+| `doubao-seedream-5-0-pro-260628` | Seedream 5.0 Pro | Model Link / ByteDance | 1K / 1.5K / 2K | 10 |
+| `dola-seedream-5-0-260128` | Dola Seedream 5.0 Lite | BytePlus | 2K / 3K / 4K | 14 |
+| `dola-seedream-5-0-pro-260628` | Dola Seedream 5.0 Pro | BytePlus | 1K / 1.5K / 2K | 10 |
+
+固定Base：ByteDance `https://ark.cn-beijing.volces.com/api/v3`，BytePlus `https://ark.ap-southeast.bytepluses.com/api/v3`，Model Link `https://api.modellink.online/v1`。全部Bearer；官方必须配置EP，请求model发送EP，Model Link发送上表Model ID，无EP配置。设置以外始终显示逻辑name / model_id，不显示EP。旧十二模型UUID保持，新六组合追加。
+
+默认2048x2048 / 2K / 1:1，无背景 / 画质选择。八比例顺序1:1、2:3、3:2、3:4、4:3、9:16、16:9、21:9；每档宽高采用[明确表](../src/shared/modelCatalog.ts)，不是把档位当作最长边。Pro自定义总像素范围921600–4624220；Lite3686400–16777216，界面仅提供24个预设。
+
+文字与参考图均`POST images/generations` JSON，字段model、prompt、size、response_format=b64_json、output_format=png。文字省略image；单参考image为data URL字符串，多参考为有序数组；不使用images/edits或multipart。Lite发送sequential_image_generation=disabled，Pro省略；不发n / stream / 扩展能力参数。
+
+参考PNG / JPEG / WebP单份≤30MiB、宽高>14、总像素≤3600万、比例1:16至16:1，另受默认20MiB总参考限额。结果Base64按实际MIME / 扩展名 / 尺寸保存OSS，不信任响应size；URL回退下载不传Bearer。拒绝、超时 / 无有效单图均为本地failed，无自动重提 / 换供应商。已接受任务固定EP和Key版本，OSS发布失败只重试原输出。依据见[ADR-0053](adr/0053-seedream-endpoint-routing-and-model-identity.md)和[状态更正](adr/0054-no-result-submission-failure-and-seedream-id-correction.md)，真实联调206–213。
+
+### Seedance能力与供应商
+
+八型号 / 十二组合独立配置，UUID追加在原十八组合之后。官方Key和EP按型号配置，Model Link只填Key；画布、只读历史和任务中心显示名称 / Model ID，不显示EP。
+
+| Model ID | 名称 | 供应商 | 分辨率 | 输出时长 |
+| --- | --- | --- | --- | --- |
+| `doubao-seedance-2-0-260128` | Doubao Seedance 2.0 | Model Link / ByteDance | 480p / 720p / 1080p / 4k | 4–15秒 |
+| `doubao-seedance-2-0-mini-260615` | Doubao Seedance 2.0 mini | Model Link / ByteDance | 480p / 720p | 4–15秒 |
+| `doubao-seedance-2-0-fast-260128` | Doubao Seedance 2.0 fast | Model Link / ByteDance | 480p / 720p | 4–15秒 |
+| `doubao-seedance-2-5-260628` | Doubao Seedance 2.5 | Model Link / ByteDance | 480p / 720p / 1080p | 4–30秒 |
+| `dreamina-seedance-2-0-260128` | Dreamina Seedance 2.0 | BytePlus（NSFW） | 480p / 720p / 1080p / 4k | 4–15秒 |
+| `dreamina-seedance-2-0-mini-260615` | Dreamina Seedance 2.0 mini | BytePlus（NSFW） | 480p / 720p | 4–15秒 |
+| `dreamina-seedance-2-0-fast-260128` | Dreamina Seedance 2.0 fast | BytePlus（NSFW） | 480p / 720p | 4–15秒 |
+| `dreamina-seedance-2-5-260628` | Dreamina Seedance 2.5 | BytePlus（NSFW） | 480p / 720p / 1080p | 4–30秒 |
+
+默认720p / 16:9 / 5秒 / 单条，音频开关默认开启；不模拟批量请求。比例为1:1、3:4、4:3、9:16、16:9、21:9及自动；2.5首尾帧仅自动跟随首帧。2.0 4k与2.5 1080p可能使用H.265 / 10-bit，浏览器可播放性需用户验证。
+
+无引用自动文生视频，不提供手动text选项；连线 / @ / 上传接入首份素材自动reference。有引用时节点底部下拉仅参考生视频 / 首尾帧，frames只手动切换；部分移除保留frames，清空切text并清除角色，重接默认reference。参考模式支持混合输入，2.0系列最多9图 / 3视频 / 3音频，音频必须搭配图或视频；2.5最多30图 / 10视频 / 10音频，允许纯音频参考。首尾帧最多两图，默认连接顺序首 / 尾，图上角色可交换，剩一图仅首帧；不允许视频 / 音频。已连接不兼容素材时拒绝切frames，见[ADR-0056](adr/0056-seedance-mode-inference-from-references.md)。新提交按当前引用推导，已接受任务保持原模式。
+
+参考图PNG / JPEG / WebP≤30MiB，宽高300–6000、比例2:5至5:2；视频MP4 / MOV≤200MiB、H.264 / H.265、24–60 FPS，像素总数407696–8295044，音轨AAC / MP3；音频WAV / MP3≤15MiB。音视频各自单文件时长至少2秒、总时长2.0不超过15秒 / 2.5不超过30秒。提交前Host对固定OSS字节逐份hash及实际元数据校验；生成视频参考绕开图片maxReferenceBytes聚合预算，原上传maxMediaBytes仍有效。
+
+| 供应商 | 固定Base | model字段 | 鉴权 |
+| --- | --- | --- | --- |
+| ByteDance | `https://ark.cn-beijing.volces.com/api/v3` | 配置EP | Bearer |
+| BytePlus | `https://ark.ap-southeast.bytepluses.com/api/v3` | 配置EP | Bearer |
+| Model Link | `https://api.modellink.online/seedance/api/v3` | Model ID | Bearer |
+
+三渠道POST `contents/generations/tasks`，JSON为model、content、resolution、ratio、duration、generate_audio、watermark=false；content先文字，再按referenceIds顺序发送image_url / video_url / audio_url及reference_image / reference_video / reference_audio，首尾帧role改为first_frame / last_frame。2.5参考模式额外发送omni_reference_task_type=reference，不接入edit、modify、extend或draft。
+
+所有引用完成检查后重新签名24小时URL，不使用页面缓存、不写入快照。创建返回id；GET `contents/generations/tasks/{id}`，至少间隔3秒。queued / running等待，succeeded读取content.video_url，failed / cancelled / expired结束失败；不匹配ID或无效返回不自动重提。结果下载不转发模型Key，随后暂存 → OSS；重启固定原ID / EP / Key，保存失败只恢复原结果。
+
+来源与研究边界见[ADR-0055](adr/0055-seedance-video-modes-and-independent-provider-routing.md)，真实三渠道 / 八型号权限与效果待[用户验收](manual-tests.md)214–219。
+
+以下表格为保留的旧适配器协议，不代表新配置可任意使用这些模型。旧配置与快照仍能读取和恢复，新的设置页只提供已接入目录。
 
 | protocol | 类型 | 尺寸 | 数量 / 时长 | 参考输入 |
 | --- | --- | --- | --- | --- |
@@ -42,7 +98,7 @@
 | `openai-dalle-2` | image | 256x256、512x512、1024x1024 | 1 / 2 / 4 张 | 无 |
 | `openai-video` | video | 1280x720、720x1280；sora-2-pro 另有 1792x1024、1024x1792 | 1 条，4 / 8 / 12 秒 | 最多 1 图 |
 
-以上是插件选项，供应商可能额外限制分辨率、格式、数量、权限与参考图尺寸。GPT Image / 视频引用仅 PNG、JPEG、WebP；视频 / 音频资源不作为首批协议输入。
+以上是保留协议选项，供应商可能额外限制分辨率、格式、数量、权限与参考图尺寸。GPT Image / Sora引用仅PNG、JPEG、WebP；Seedance混合参考以本页独立规则为准。
 
 ## 图片请求与返回
 
@@ -50,7 +106,7 @@ GPT Image 2.5无引用时 `POST images/generations`，JSON 为 `model / prompt /
 
 有引用时使用multipart `POST images/edits`，同名参数转换成字符串，每份参考图为重复 `image[]` Blob，顺序与快照referenceIds一致，文件名按UUID与MIME扩展名构造。Runtime在issued前从OSS限额读取并核验固定对象；最多16图，受参考总字节数上限限制。不支持mask或其他厂商编辑协议，不擅自改成URL字段。
 
-图片响应必须有非空data数组（最多10项）。GPT Image返回b64_json，适配器同时保留旧URL结果支持；逐项验证Base64媒体签名、单文件上限或无内嵌凭据的HTTP(S)URL。有效部分先生成固定UUID并私有暂存；成功保存后数量与n不符将任务记录为failed / PARTIAL_RESULT，保留成功resultIds和说明，不自动重提。没有任何有效输出或无法解析时unknown。某份发布失败仍保存其他份，最终save_failed，可重试同次输出描述；不会再次请求模型。
+图片响应必须有非空data数组（最多10项）。GPT Image返回b64_json，适配器同时保留旧URL结果支持；逐项验证Base64媒体签名、单文件上限或无内嵌凭据的HTTP(S)URL。有效部分先生成固定UUID并私有暂存；成功保存后数量与n不符将任务记录为failed / PARTIAL_RESULT，保留成功resultIds和说明，不自动重提。没有任何有效输出或无法解析时failed。某份发布失败仍保存其他份，最终save_failed，可重试同次输出描述；不会再次请求模型。
 
 URL 图片下载不带模型 Bearer，允许跟随重定向；若服务返回的图片链接要求额外鉴权，当前不支持。Base64 / JSON 响应需要整体缓冲与解码，不是全程零拷贝；媒体字节上限与 JSON 大小上限并不等于进程峰值内存限制。
 
@@ -62,7 +118,7 @@ response_format为`{type:"image",delivery:"inline",mime_type:"image/jpeg",aspect
 
 完成响应只提取steps中model_output的image内容，读取`data / mime_type`，不把thought图片当作最终结果。编码长度与字符、单图字节上限、MIME与文件签名一致性、sharp元数据均验证；PNG / JPEG / WebP结果使用实际扩展名、MIME、宽高。Base64先落私有恢复暂存，描述持久化后只保留固定ID / 暂存 / OSS定位，不把Base64放入图或任务表。模型可能返回多份最终图片，沿用数量不符的部分失败记录，已保存结果仍保留。
 
-Gemini的status为failed / cancelled时明确失败；其他非completed状态、没有最终图片或无法识别图片视为unknown。无自动切渠道、重提或通用图片ID查询。save_failed有暂存时只重试同次OSS发布。原接入见[ADR-0048](adr/0048-banana-native-image-protocol.md)。
+Gemini的status为failed / cancelled时明确失败；其他非completed状态、没有最终图片或无法识别图片也标为本地failed。无自动切渠道、重提或通用图片ID查询。save_failed有暂存时只重试同次OSS发布。原接入见[ADR-0048](adr/0048-banana-native-image-protocol.md)，当前分类见ADR-0054。
 
 Model Link按用户更正的[generate-content图片文档](https://ai.google.dev/gemini-api/docs/generate-content/image-generation?hl=zh-cn&authuser=4)使用`POST https://api.modellink.online/v1/models/{model_id}:generateContent`，Bearer鉴权。REST示例路径是`/v1`；模型ID在路径中，不发送Interactions的model / input / store / response_format。请求如下：
 
@@ -81,9 +137,9 @@ Model Link按用户更正的[generate-content图片文档](https://ai.google.dev
 
 无参考图时只有text，参考顺序按referenceIds。imageSize为512 / 1K / 2K / 4K中当前型号允许项，不指定输出MIME、工具、会话历史、candidateCount或流式。读取第一candidate的content.parts，接受inlineData / inline_data与mimeType / mime_type；过滤thought和文本，其他候选不作为额外结果。图片共用原Base64校验、实际尺寸和OSS发布。
 
-promptFeedback明确blockReason或候选明确安全 / 无图finishReason映射failed；非STOP的其他结束原因、空候选 / 无最终图片和无效图片映射unknown。finishReason缺省时仍需有效最终图片，不用思考图凑结果；不自动回落到Interactions或重新请求。原失败任务保留，更新后用户主动生成新的任务。更正与边界见[ADR-0049](adr/0049-modellink-banana-generate-content.md)，真实账户兼容仍由用户联调。
+promptFeedback明确blockReason或候选明确安全 / 无图finishReason映射failed；非STOP的其他结束原因、空候选 / 无最终图片和无效图片也映射本地failed。finishReason缺省时仍需有效最终图片，不用思考图凑结果；不自动回落到Interactions或重新请求。原失败任务保留，更新后用户主动生成新的任务。协议更正见[ADR-0049](adr/0049-modellink-banana-generate-content.md)，状态更正见ADR-0054，真实账户兼容仍由用户联调。
 
-## 视频请求与返回
+## 保留的Sora视频请求与返回
 
 `POST videos` JSON 发送 `model / prompt / size / seconds`，**seconds 为字符串**。单图引用读取文件并编码为：
 
@@ -95,7 +151,7 @@ promptFeedback明确blockReason或候选明确安全 / 无图finishReason映射f
 }
 ```
 
-这是当前实现的 wire 格式；不使用 multipart 视频创建，不支持 video / audio reference。
+这是保留Sora适配器的wire格式；该协议不使用multipart视频创建，不支持video / audio reference。
 
 创建和 `GET videos/:id` 查询都要求非空字符串 `id`（最长 512）与 `status`：
 
@@ -128,11 +184,11 @@ promptFeedback明确blockReason或候选明确安全 / 无图finishReason映射f
 
 所有协议请求使用宿主终止信号和可配置超时；提交 / 查询禁止重定向。非成功响应错误 JSON 最多读取 64 KiB；成功 JSON 上限为 `ceil(maxMediaBytes × 1.4) + 1 MiB`。
 
-HTTP 4xx 除 408 / 409 / 429 外视为明确失败；超时、网络、5xx、上述三种 4xx，以及无法识别的成功响应，都视为不明确。首次提交明确失败会解锁节点；不明确结果进入 unknown。视频已有 ID 时临时错误继续轮询，明确查询错误暂停为 unknown，可以恢复原 ID 查询。此分类是当前保守策略，不代表供应商计费语义保证。
+HTTP 4xx 除 408 / 409 / 429 外为明确拒绝；超时、网络、5xx、上述三种 4xx，以及无法识别的成功响应仍无法证明远端副作用。首次提交无结果 / 可查询ID时统一结束为本地failed并解锁节点，不自动重提。视频已有 ID 时临时错误继续轮询，明确查询错误暂停为 unknown，可以恢复原 ID 查询。此分类不代表供应商计费语义保证，见ADR-0054。
 
 输出描述在下载前保存。恢复保存使用同一描述 / ID / objectKey；已发布对象核验后跳过，存在暂存时只重试OSS发布，不重新下载过期输出。尚未得到暂存时仍依赖原供应商链接；已有视频ID且无描述可重新查询content路径，已有描述不自动刷新供应商URL。图片无通用服务任务查询或幂等协议。
 
-0.2.37新增统一modelReferenceUrl：真正提交URL协议前核验固定对象，生成24小时新签名，不用页面1小时缓存，不持久写入快照。当前图片multipart和视频data URL仍使用字节准备，无参考的FishTTS保持原格式；尚未接入的URL渠道不能声称已实测外部抓取。参考准备失败不置issued或发送付费请求。见[ADR-0043](adr/0043-object-storage-and-expiring-media-access.md)。
+0.2.37新增统一modelReferenceUrl：真正提交URL协议前核验固定对象，生成24小时新签名，不用页面1小时缓存，不持久写入快照。Seedance按固定对象流式检查并签名；图片multipart与保留Sora data URL仍使用字节准备，无参考的FishTTS保持原格式。真实模型抓取待用户验收；参考准备失败不置issued或发送付费请求。见[ADR-0043](adr/0043-object-storage-and-expiring-media-access.md)。
 
 ## 导入与保存格式
 

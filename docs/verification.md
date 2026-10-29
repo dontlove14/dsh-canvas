@@ -1,8 +1,36 @@
 # 验证记录与已知边界
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-28。每次交付 / 实测后更新。
+文档类型：参考；负责人：项目维护者；最近核对：2026-10-29。每次交付 / 实测后更新。
 
 ## 本次自动化
+
+0.2.62将节点删除确认接入Harness Modal / Button，合并0.2.61的视频拖拽 / 双指手势修复。删除专项使用真实CanvasWorkspace / ReactFlowProvider、Delete / Backspace与deleteElements，检查确认 / 取消 / Escape / 关闭、初始取消焦点、输入隔离、多节点连线移除与图保存、媒体 / 下游结果保留、任务在等待期间更新、重复请求及隐藏 / 卸载 / 画布切换。Harness loader采用公开组件契约替身，真实主题与浏览器焦点留待用户258–260；视频继续255–257。全量与双构建、包 / 安装 / 实际preload及两库身份以 `dsh-canvas-0.2.62.manifest.json`最终记录为准，检查未通过不安装；见[ADR-0062](adr/0062-harness-node-delete-confirmation.md)。
+
+0.2.61修复视频播放器打开后禁止节点拖动及播放器区域双指手势失效。修正前4项真实拖拽与2项手势测试复现不动；修正后视频资源、单批生成、历史收起 / 展开随1 / 2倍移动，原视频DOM / 播放时间 / 播放状态保持，按钮与定位隔离，尾随点击不误暂停。真实XYPanZoom覆盖画面 / 时间 / 按钮SVG / 进度条双轴 / 反向 / line-mode、Ctrl捏合与Meta缩放指针中心 / 边界、编辑 / 模态预览隔离与解绑；进一步复现并修正控件聚焦时拦截Meta / Control，真实useKeyPress验证按键传递，不只模拟标志。同现有音频 / 控制器 / 静态媒体UI共30项专项及最终57文件583项全量、类型、77份Markdown / 61条ADR和构建通过。双构建、同包安装 / 实际preload与两库身份最终见 `dsh-canvas-0.2.61.manifest.json`；无依赖 / Host / schema变更，人工255–257，规则更新ADR-0023 / ADR-0024。
+
+0.2.60隐藏 React Flow 署名并将三媒体文件加载改用真实 img-fx ImageGeneration，任务保留 Beam / Orb。30项专项通过：真实组件 / shader主题参数、宿主表面色、共享GPU与帧循环、暂停 / 离屏 / 清理、无WebGL2与初始化错误，以及原图片decode / 视频首帧 / 音频波形等待和媒体DOM保持。新增5项依赖专项仅替换jsdom GPU驱动，不模拟浏览器shader编译或画质。锁定 img-fx0.5.1 / three0.186.1，生产依赖审计0项。55文件577项全量、类型、77份Markdown与61条ADR和构建通过；双构建 / 编译Host、同包安装 / 实际preload与两库身份最终见 `dsh-canvas-0.2.60.manifest.json`；人工251–254，决策见[ADR-0061](adr/0061-dependency-backed-media-pixel-loading.md)。
+
+0.2.59将画布文字改为默认禁止选中、输入 / 可编辑 / 显式复制区域开放；作用域覆盖模型 / 参数 / @候选与公共Menu portal，画布外保持原策略。新增11项专项核对实际CSS与DOM、动态后代、名称自动全选 / Enter / Escape、忙碌提示词 / TTS、原子标签、历史复制和画布内外弹层；相关输入 / 框选 / 拖动专项32项与最终54文件572项全量通过，类型、76份Markdown / 60条ADR检查通过。jsdom不模拟真实鼠标拖选，既有输入法 / 剪贴板 / 撤销及拖拽 / 框选回归继续执行；双构建、同包安装 / 实际preload与两库身份见 `dsh-canvas-0.2.59.manifest.json`。人工验收247–250；决策见[ADR-0060](adr/0060-canvas-text-selection-opt-in.md)。
+
+0.2.58为素材路径新增问号说明并移除虚拟素材常驻说明，沿用公开Tooltip的portal、悬停 / 聚焦与点击阅读能力。仅Client局部展示调整，不新增依赖、请求或任务；使用现有全量回归与类型 / 构建检查，安装实际preload / 两库及配置身份见 `dsh-canvas-0.2.58.manifest.json`。真实悬浮位置、主题和键盘交互由用户246验收。
+
+0.2.57新增预审禁用原因 / 默认下一家 / 全部不可用 / 成功详情移除 / 失败原任务恢复 / 迟到配置与命名弹窗回归；原重复送审requestId与人物组分页保持，自动切供应商重置路径。Harness适配器按公开Modal / Menu / Input契约测试，宿主完整npm入口有仅平台提供的peer，不宣称原生样式或浏览器焦点通过。最终全量、双构建、包 / 实际preload与原23表 / 预审7表 / 配置身份见 `dsh-canvas-0.2.57.manifest.json`；人工验收242–245。
+
+0.2.56新增两项操作栏原生XYPanZoom / D3平移回归：未修正时按钮不平移，修正后按钮 / SVG / 栏背景两轴分数delta、反向 / 惯性和line-mode移动画布且倍率保持；编辑器原滚动不拦截、按钮无误点击。与原四项缩放一起回归，最终全量 / 双构建 / 包 / 安装 / preload和两库身份见 `dsh-canvas-0.2.56.manifest.json`，用户241验收真实触控板行为。
+0.2.55新增3项配置可用性回归、4项原生XYFlow修饰键wheel回归；三媒体历史回归补充折叠同排断言。配置尚未读取 / 未配置无入口与状态 / 组 / 提交调用；任一家配置启用已有画布且不需Group ID，失败 / 隐藏迟到保护；按钮wheel修饰键转交原生处理，浏览器默认阻止、指针与上下界保持，未误点击、未影响编辑器，销毁恢复原行为。最终全量与产物 / 本机加载结果以 `dsh-canvas-0.2.55.manifest.json`为准，不用自动化代替用户238–240视觉 / 真实触控板验收。
+0.2.54预审专项32项通过：两地区官方签名精确字节 / UTC、掩码与单字段读取、主库DDL / fence、原文件hash、重复点击、本地接受 / 明确失败 / unknown、丢回执与重启不重传、分页精确唯一对账、两供应商隔离、真人项目 / 组核验，以及Asset URI / URL混用、接受后冻结、跨项目更换与缺绑定阻断。UI覆盖主图 / 历史逐输出、真实XYFlow三媒体工具栏、独立标记与媒体DOM保持、隐藏轮询 / 迟到取消、真人分页与同requestId重试。最终全量检查、双构建、编译Host / CJS SDK / 两库Worker、包 / 安装 / preload和旧23表 / 配置字节身份以 `dsh-canvas-0.2.54.manifest.json`完成记录为准。新增独立预审库，不改canvas.sqlite DDL；未调用真实账号或浏览器，用户人工验收231–237。
+
+0.2.53新增8项服务与7项显隐UI回归，和模型卡片 / 四系列配置 / TTS / OSS共90项专项通过。覆盖掩码短值、owner单字段 / 当前Key轮换、只读 / 严格输入 / no-store、预览不写草稿、独立EP显隐、取消 / 迟到 / 替换输入 / 隐藏 / 失败重试，并移除模型设置底部说明。最终全量docs / 类型 / 测试、双构建、编译Host / 同包安装 / 实际preload、原配置字节与23表身份见 `dsh-canvas-0.2.53.manifest.json`；人工验收228–230，见[ADR-0058](adr/0058-masked-settings-and-explicit-secret-reveal.md)。
+
+0.2.52新增11项供应商卡片 / 直接编辑回归，与原四系列配置UI共60项专项通过。覆盖五供应商、Model Link三地址合并、精确组合EP / Key修改、留空 / 取消 / 失败 / 清除、供应商限定新增、缺EP补全及焦点 / 重复提交。最终全量docs / 类型 / 测试、双构建、编译Host / 同包安装 / 实际preload、原配置字节和23表身份见 `dsh-canvas-0.2.52.manifest.json`；人工布局、主题及键盘验收224–227，见[ADR-0057](adr/0057-provider-cards-and-direct-model-editing.md)。
+
+0.2.51验证空引用text、首连reference、手动frames / 部分移除、清空重置 / 重连及@新增引用的状态转换，覆盖同次边 / 参数保存、空草稿任务text与幂等回执。原41项Seedance协议 / 12项UI及拖动计数回归扩展；最终docs / 类型 / 全量测试、双构建、编译Host、同包安装 / 实际preload和原23表审计见 `dsh-canvas-0.2.51.manifest.json`完成记录。人工验收220–222替代215 / 217手动文生模式预期，见[ADR-0056](adr/0056-seedance-mode-inference-from-references.md)。
+
+0.2.50 Seedance专项覆盖十二组合三模式wire请求与独立Key / EP、元数据实读、互斥输入 / 默认顺序帧角色与调整、3秒查询下限 / 临时失败、原ID重启 / 凭据轮换、视频不转发Key下载及OSS同输出恢复；UI覆盖八型号配置、菜单隐藏 / 无EP、底部模式下拉 / 图上帧标签、自动帧比例 / 角色交换 / 当前模式保持与只读混合媒体。最终全量检查、双清理构建、编译Host目录、包 / 安装 / 实际preload和全部23表 / DDL身份以 `dsh-canvas-0.2.50.manifest.json`完成记录为准。真实账户 / 模型抓取 / 编码播放由用户按214–219验收，见[ADR-0055](adr/0055-seedance-video-modes-and-independent-provider-routing.md)。
+
+0.2.49：70份Markdown / 54条ADR、TypeScript、44个文件共424项测试与构建通过。覆盖无结果提交failed、重启修正旧unknown且不调用供应商、原外部ID查询和原OSS输出恢复、Lite配置更正保留UUID / Key / EP / 历史快照、失败SVG优先于媒体Loading且释放所有依赖循环。双构建、同包安装 / 实际preload和全部23表审计的最终身份以 `dsh-canvas-0.2.49.manifest.json` 完成记录为准。人工视觉与真实模型验收211–213，见[ADR-0054](adr/0054-no-result-submission-failure-and-seedream-id-correction.md)。
+
+0.2.48：69份Markdown / 53条ADR、TypeScript、44个测试文件共417项测试通过。新增Seedream 28项协议 / 持久任务和11项UI回归，核对六个独立组合、官方EP / Model Link ID、原十二UUID、尺寸和参考图限制、固定EP / Key快照、实际PNG / JPEG / WebP格式及宽高、OSS保存失败重启后复用原输出、错误 / 超时不重提，以及设置EP输入和画布 / 历史 / 任务中心型号显示。原5项拖拽、13项历史只读及24项Loading回归保持。双构建、编译Host离线六组合、包 / 同包安装 / 实际preload与全部23表 / DDL / 原配置的最终身份见 `dsh-canvas-0.2.48.manifest.json`完成记录。真实账户、EP是否匹配所选型号与人工效果待206–210验收；本轮未操作浏览器或付费生成。
 
 0.2.47全量检查通过：68份Markdown / 52条ADR、TypeScript、42个测试文件共378项测试与清理构建。相同15节点拓扑 / 60次单节点位置更新，节点data从900降到60，节点内容更新从900降到0，端点测量请求480降到0，提示词DOM同步60降到0；相同2秒轮询各项为0。新增5项回归检查最后坐标保存、实时坐标引用插入、旧任务进度仅更新所属节点、输出 / 尺寸测量以及冲突草稿保持；真实XYFlow检查固定素材边随新坐标移动。原13项历史只读、24项Loading和媒体 / 引用回归保留。双构建与安装最终状态以 `dsh-canvas-0.2.47.manifest.json`完成记录为准。仅DOM更新计数，不是绘制 / FPS测量，人工验收202–205。
 

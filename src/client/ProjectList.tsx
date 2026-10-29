@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type CanvasChoice, type Catalog, type Folder } from '../shared/v2'
 import { CanvasApi } from './api'
-import { UiActionMenu, UiButton, UiModal, UiSelect } from './ui'
+import { UiActionMenu, UiButton, UiInput, UiModal, UiSelect } from './ui'
 import { CanvasSettings } from './Settings'
 import { STORAGE_REQUIRED } from '../shared/objectStorage'
 
 type CatalogCommand = Parameters<CanvasApi['catalogCommand']>[0]
+interface NameTarget { kind: 'canvas' | 'folder'; item?: CanvasChoice | Folder; folderId: string | null }
 interface ProjectListProps {
   api: CanvasApi
   active?: boolean
@@ -21,6 +22,7 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
   const [refresh, setRefresh] = useState(0)
   const [busy, setBusy] = useState(false)
   const [moveTarget, setMoveTarget] = useState<CanvasChoice | null>(null)
+  const [nameTarget, setNameTarget] = useState<NameTarget | null>(null)
   const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
   const [storageError, setStorageError] = useState('')
   const [showSettings, setShowSettings] = useState(false)
@@ -93,14 +95,8 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
       setCommandError(storageConfigured === false ? STORAGE_REQUIRED : storageError || '正在读取对象存储设置，请稍后重试')
       return
     }
-    const label = kind === 'canvas' ? '画布' : '文件夹'
-    const name = window.prompt(`${item ? '重命名' : '新建'}${label}`, item?.name ?? '')
-    if (name === null) return
-    if (!name.trim()) { setCommandError(`请输入${label}名称`); return }
-    void command({
-      operation: `${kind}-${item ? 'rename' : 'create'}`, name,
-      ...(item ? { id: item.id, revision: item.revision } : kind === 'canvas' ? { folderId: selectedFolder?.id ?? null } : {}),
-    })
+    setCommandError('')
+    setNameTarget({ kind, item, folderId: selectedFolder?.id ?? null })
   }
   const deleteItem = (kind: 'canvas' | 'folder', item: CanvasChoice | Folder) => {
     const detail = kind === 'canvas' ? '对象存储中的媒体将保留。' : '仅可删除空文件夹。'
@@ -156,6 +152,12 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
             </li>)}</ul>}
       </main>
     </div>
+    {active && nameTarget && <NameDialog target={nameTarget} busy={busy} error={commandError} onClose={() => { setNameTarget(null); setCommandError('') }} onSave={async (name) => {
+      const { kind, item, folderId } = nameTarget
+      if (await command({ operation: `${kind}-${item ? 'rename' : 'create'}`, name,
+        ...(item ? { id: item.id, revision: item.revision } : kind === 'canvas' ? { folderId } : {}),
+      })) setNameTarget(null)
+    }} />}
     {active && moveTarget && <MoveDialog canvas={moveTarget} folders={catalog?.folders ?? []} busy={busy} error={commandError} onClose={() => setMoveTarget(null)} onMove={async (folderId) => {
       if (await command({ operation: 'canvas-move', id: moveTarget.id, revision: moveTarget.revision, folderId })) setMoveTarget(null)
     }} />}
@@ -163,6 +165,30 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
       <CanvasSettings api={api} onChanged={() => { setCommandError(''); setRefresh((v) => v + 1) }} />
     </UiModal>}
   </div>
+}
+
+function NameDialog({ target, busy, error, onSave, onClose }: {
+  target: NameTarget; busy: boolean; error: string; onSave: (name: string) => Promise<void>; onClose: () => void
+}) {
+  const [name, setName] = useState(target.item?.name ?? '')
+  const [validation, setValidation] = useState('')
+  const label = target.kind === 'canvas' ? '画布' : '文件夹'
+  const title = `${target.item ? '重命名' : '新建'}${label}`
+  return <UiModal label={title} className="dc-name-dialog" onClose={() => { if (!busy) onClose() }}>
+    <form onSubmit={(event) => {
+      event.preventDefault()
+      if (busy) return
+      const value = name.trim().normalize('NFC')
+      if (!value || value.length > 160) { setValidation(!value ? `请输入${label}名称` : '名称不能超过160个字符'); return }
+      setValidation(''); void onSave(value)
+    }}>
+      <label>{label}名称<UiInput aria-label={`${label}名称`} data-modal-autofocus value={name} disabled={busy}
+        onChange={(event) => { setName(event.target.value); setValidation('') }} /></label>
+      {(validation || error) && <p className="dc-error" role="alert">{validation || error}</p>}
+      <div className="dc-form-actions"><UiButton variant="outline" disabled={busy} onClick={onClose}>取消</UiButton>
+        <UiButton type="submit" variant="primary" disabled={busy}>{busy ? '保存中…' : target.item ? '保存' : '创建'}</UiButton></div>
+    </form>
+  </UiModal>
 }
 
 function MoveDialog({ canvas, folders, busy, error, onMove, onClose }: { canvas: CanvasChoice; folders: Folder[]; busy: boolean; error: string; onMove: (folder: string | null) => Promise<void>; onClose: () => void }) {

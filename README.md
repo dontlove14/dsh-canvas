@@ -2,9 +2,11 @@
 
 基于 React Flow 12 的本地多模态创作画布，运行于 DeepSeek Harness。提供图片生成、视频生成、FishTTS语音生成，以及图片、视频、音频资源六种节点；连线把具体素材作为下游输入，生成由用户逐节点发起。
 
-**运行基准：Node.js 22.13+、Harness 0.2.1-rc.2。** SQLite 保存目录、画布、任务和对象定位；图片 / 视频 / 音频及派生文件保存在私有阿里云 OSS。支持 OpenAI / Gemini 图片和 Sora 视频协议。
+**运行基准：Node.js 22.13+、Harness 0.2.1-rc.2。** SQLite 保存目录、画布、任务和对象定位；图片 / 视频 / 音频及派生文件保存在私有阿里云 OSS。支持 OpenAI / Gemini / Seedream 图片、Seedance视频，以及保留的Sora协议。
 
-文档类型：入门教程 / 项目入口；负责人：项目维护者；最近核对：2026-10-28。版本或启动方式变化时更新；详细维护规则见[文档导航](docs/index.md)。
+文档类型：入门教程 / 项目入口；负责人：项目维护者；最近核对：2026-10-29。版本或启动方式变化时更新；详细维护规则见[文档导航](docs/index.md)。
+
+Seedance预审可在设置单独配置Bytedance / BytePlus，图片、视频、音频操作栏盾牌发起异步审核；通过用Asset ID，其他情况继续URL生成。单次批量关注主图，多次历史逐输出送审，真人选择已认证人物组。使用与恢复见[运行指南](docs/operations.md)和[ADR-0059](docs/adr/0059-seedance-asset-review-and-frozen-generation-references.md)。
 
 ## 本地快速体验
 
@@ -13,7 +15,7 @@ npm ci
 npm run dev
 ```
 
-打开 <http://127.0.0.1:5173>。开发数据存放于 `.dev-data/`。图片生成已接入 GPT Image 2.5 Sunburst / Flare，以及 Nano Banana Pro / 2 / 2 Lite / 2.1，需要配置所选供应商密钥；真实视频模型待后续接入。
+打开 <http://127.0.0.1:5173>。开发数据存放于 `.dev-data/`。图片生成已接入 GPT Image 2.5 Sunburst / Flare、Nano Banana Pro / 2 / 2 Lite / 2.1，以及 Seedream / Dola Seedream 5.0 Lite / Pro；视频接入Doubao / Dreamina Seedance 2.0 / mini / fast / 2.5，需要配置所选供应商。
 
 1. 在“设置 → 无限画布 → 对象存储”填写已有阿里云 OSS Bucket、地域与AK，测试并保存启用。未配置不能创建画布，提示“请前往设置页面设置对象存储”。随后在“画布项目”列表新建画布（可归入一级文件夹），点击项目进入编辑器。
 2. 在“模型设置 → 配置模型”选择图片型号与供应商：GPT为Model Link / OpenAI，Banana为Model Link / Gemini，各组合独立密钥。画布只显示具有Key的具体供应商；无可用模型时显示“请前往设置页面配置模型”。新节点优先选择已配置Model Link。输入 `@` 插入参考图标签，底部参数按型号显示有效分辨率 / 比例等选项，点箭头提交。GPT支持1–10张、最多16图参考；Banana每次1张，Lite最多1图参考、其他最多14图。
@@ -23,11 +25,17 @@ npm run dev
 
 双击图片 / 视频资源画面，在画布内居中放大该节点；名称双击用于改名，顶部放大按钮查看原文件。
 
+模型设置按供应商卡片汇总，已配置型号可直接编辑。Key / EP默认脱敏，点击右侧眼睛可显示完整值，再次点击隐藏；FishTTS / OSS密钥同样支持。仅查看不改变保存草稿，Key留空继续保留，关闭 / 切换后恢复隐藏；见[脱敏配置规则](docs/adr/0058-masked-settings-and-explicit-secret-reveal.md)。
+
 视频使用一行自定义播放 / 暂停、时间和进度条，声音开启，不提供静音 / 全屏 / 更多按钮。图片与视频原文件预览只有媒体和关闭按钮，无标题、另存或弹窗卡片边框；下载仍在节点顶部操作栏。
 
 音频资源展示实际音频波形，播放部分高亮；点击 / 拖动波形跳转，底部显示当前时间、播放按钮和总时长，顶部可下载。提示词随内容增长到220px后滚动，@徽章与文字等高；生成卡片以模型 / 参数 / 生成按钮收尾，任务详情从顶部“任务”查看。
 
-设置页只展示已配置模型和渠道；点击“配置模型”，先选择模型，再选供应商并保存独立API Key。同一模型的多个已配置渠道合并展示，未配置项只在选择器中提供。
+设置页按供应商展示卡片，卡片内逐项列出已保存模型并提供“编辑”；不展示Base URL。编辑回填当前组合EP，Key留空保留；取消不写入。卡片入口可添加该供应商支持的型号，顶部“配置模型”仍可选择型号与渠道，各组合独立保存。未配置卡片用于配置入口，画布菜单仍只显示完整配置组合，见[ADR-0057](docs/adr/0057-provider-cards-and-direct-model-editing.md)。
+
+Seedream 5.0 Lite / Pro标准版支持Model Link / ByteDance，Dola Seedream 5.0 Lite / Pro为NSFW版本，仅支持BytePlus。官方渠道填Key和对应型号EP，Model Link只填Key；各型号 / 渠道完全独立。画布与任务中心显示模型名称，EP只用于设置 / 请求。默认2K / 单张，Pro支持1K / 1.5K / 2K与10参考图，Lite支持2K / 3K / 4K与14图；首期仅文生图 / 图生图，见[协议参考](docs/providers.md#seedream能力与供应商)。
+
+Seedance标准Doubao型号支持Model Link / ByteDance，Dreamina为NSFW型号，仅BytePlus；各型号独立Key，官方另填EP。没有引用自动文生视频，接入图 / 视频 / 音频即默认参考生成；有引用时底部下拉只选择参考生视频或首尾帧生成，首尾帧必须手动切换。首尾帧最多两图，按连接顺序默认首帧 / 尾帧，图上可交换；清空引用回到文生视频，再次连接仍默认参考。默认720p / 16:9 / 5秒 / 单条、同步音频开启；2.5首尾帧自动跟随首帧比例。见[协议参考](docs/providers.md#seedance能力与供应商)和[ADR-0056](docs/adr/0056-seedance-mode-inference-from-references.md)。
 
 Sunburst / Flare的1K、2K、4K均提供16:9、9:16、21:9。1K宽屏使用符合最低像素限制的实际尺寸，按钮悬停可查看；其余原尺寸不变，见[比例规则](docs/adr/0044-wide-image-ratios-at-one-k.md)。
 
@@ -52,7 +60,7 @@ dsh --profile canvas-test --from-default-profile web --help
 安装并启动；按实际位置调整包路径：
 
 ```bash
-dsh plugin --profile canvas-test add /Users/bytedance/Documents/dsh-canvas/dsh-canvas-0.2.38.tgz
+dsh plugin --profile canvas-test add /Users/bytedance/Documents/dsh-canvas/dsh-canvas-0.2.59.tgz
 dsh --profile canvas-test --port 8080
 ```
 
@@ -76,10 +84,10 @@ Harness 内复用官方通用组件库；单选下拉组合官方按钮与菜单
 - 顶部“任务”按分页表格展示所有未删除画布任务，支持完整ID、文件夹 / 画布名、类型和提交时间联合查询；双月时间范围可单侧，详情可返回保留条件 / 页码。见[查询规则](docs/adr/0035-searchable-paginated-task-dialog.md)。
 - 文件按“前缀 / 文件夹名称与ID / 画布名称与ID / 资源名称与ID”存储。改名 / 移动后台Copy，失败读原对象；旧对象保留，完成的暂存清理。单个活动提供商接收新任务，旧配置保留历史读取能力。
 - 页面链接按需批量签名，有效1小时、临近过期刷新；数据库不存签名URL。任务提交模型前准备固定参考，需要URL的协议重新签名24小时，原图片multipart / 视频data URL协议保持。
-- 重生成或切换预览不会替换已有连线的素材引用。当前协议仅接受 PNG / JPEG / WebP 参考图；视频和音频资源用于播放。
+- 重生成或切换预览不会替换已有连线的素材引用。参考图仅接受PNG / JPEG / WebP；Seedance参考模式另支持MP4 / MOV视频与WAV / MP3音频，按型号限制数量 / 时长。
 - 单选节点时，直接上下游连线显示蓝色流光，沿输出端流向输入端；取消 / 多选 / 隐藏停止，减少动态效果时静态高亮。见[连线规则](docs/adr/0036-selected-node-relationship-flow.md)。
 - 提示词标签绑定具体素材；删除标签保留连线，解除连线后的标签显示失效，需重新引用或删除后再生成。标签支持整体删除、复制粘贴和撤销；规则见[引用 ADR](docs/adr/0027-prompt-asset-mentions.md)。
-- 图片模型固定双供应商，地址不可自定义，密钥不共享；GPT请求PNG，Banana的Gemini请求JPEG、Model Link按服务返回格式，Base64结果保存OSS。0.2.43修正Model Link为generateContent；已有Key无需重配，旧失败任务保留，用户主动生成新任务。TTS使用固定Model Link服务。真实视频接入前没有视频候选；旧Mock结果、图与任务保留，部分成功图片保留，不自动切换渠道或重提批次。
+- 模型使用固定供应商组合，地址不可自定义，密钥不共享；GPT请求PNG，Banana的Gemini请求JPEG、Model Link按服务返回格式，Base64结果保存OSS。0.2.43修正Model Link为generateContent；已有Key无需重配，旧失败任务保留，用户主动生成新任务。TTS使用固定Model Link服务。Seedance提交后由宿主查询原ID、下载视频到OSS；旧Mock结果、图与任务保留，部分成功图片保留，不自动切换渠道或重提批次。
 - 确认可用硬件图形后端后，仅固定倍率平移短暂提示GPU合成；缩放和静止释放，避免长期放大旧缓存。浏览器决定图层与文字栅格化，实际清晰度 / 性能由人工验证。
 
 完整规则、任务状态和当前边界见[业务与功能](docs/business.md)；协议参数见[模型协议参考](docs/providers.md)。

@@ -1,10 +1,26 @@
 # 当前架构与执行流程
 
-文档类型：解释；负责人：项目维护者；最近核对：2026-10-28。每次模块 / SDK / 存储边界变化时复核。
+文档类型：解释；负责人：项目维护者；最近核对：2026-10-29。每次模块 / SDK / 存储边界变化时复核。
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
 
-节点任务和媒体加载共用[NodeLoading](../src/client/NodeLoading.tsx)，直接组合`border-beam@1.4.1` / `thinking-orbs@0.3.2`。NodeLoadingBoundary汇总内部媒体就绪，不嵌套重复Loading；SignedImage等当前链接 / decode，VideoPlayer等首帧，AudioPlayer等元数据 / 波形结束。工作区单份主题订阅向依赖传递Harness显式主题 / 文本墨色和隐藏状态，节点独立IntersectionObserver暂停离屏效果，pulse暂停时释放依赖JS循环；不自绘动画、不增加任务或图数据字段。Canvas2D为装饰、status仅为屏幕阅读器文字，静态警告与不同依赖样式区分阶段；见[ADR-0046](adr/0046-dependency-backed-whole-node-loading.md)。
+0.2.55的CanvasReviewState先从掩码settings推导任一家configured，再按画布读取预审状态；按钮仅订阅共享布尔可用性，未配置不请求状态 / 云端组。已有设置保存 / 关闭与激活刷新路径沿用，不增Host路由或持久格式。HistoryNode合并折叠操作栏；0.2.56画布根的单个非passive捕获监听将节点操作栏普通wheel与修饰键wheel都转交renderer原生处理，分别平移 / 缩放，保留坐标、两轴惯性与倍率限制，隐藏 / 卸载移除监听。
+
+0.2.57 ReviewButton额外订阅当前asset的结果，两家Active才隐藏；SeedanceReviewDialog从掩码配置与原任务推导可选供应商，切到另一家清空人物组 / 路径，成功详情不渲染。UiSelect复用公开Menu的ReactNode label携带悬停原因，原生与独立模式均校验disabled，全部不可用时保留无选项占位。ProjectList用同一UiModal / UiInput替换浏览器prompt，新建 / 改名共用NameDialog，原CatalogCommand身份 / revision / folderId保持，错误保留本地输入；Host与两库不改变。
+
+0.2.54新增独立[ReviewStore](../src/host/review/store.ts) / [ReviewRuntime](../src/host/review/runtime.ts)：设置 → Vault版本；送审API → 独立预审库 → 官方适配器 → 原文件OSS URL；异步结果 → Client按assetId订阅；生成接受前 → requestId固定来源 → 现有Providers。两家各自有界网络并发，Host锁 / writer token共同约束；Cloud失败不改变原画布。主库DDL、Asset、TaskSnapshot保持，独立预审库schema 1纳入备份。新任务缺绑定不派发，旧任务用原URL；详见[ADR-0059](adr/0059-seedance-asset-review-and-frozen-generation-references.md)。
+
+0.2.53的SecretField仅在用户点击眼睛后通过owner认证POST settings-secret读取当前单字段，常规目录继续Key掩码。SqliteStore验证配置身份 / owner并只读当前Key；显示预览不写草稿，控件隐藏 / 取消 / 禁用时清除并拒绝迟到响应。任务固定Vault引用不受查看或编辑影响，无新持久格式；见[ADR-0058](adr/0058-masked-settings-and-explicit-secret-reveal.md)。
+
+Seedream在同一Providers边界增加原生JSON请求，逻辑型号与路由EP分开；SqliteStore在接受任务时固定model快照与Vault binding，配置轮换不影响任务。Client仅按完整配置展示型号，EP只在设置输入；图片字节仍走暂存 → OSS发布，不改图 / DDL和后台调度。协议与错误边界见[ADR-0053](adr/0053-seedream-endpoint-routing-and-model-identity.md)。
+
+Seedance复用相同配置、任务队列和OSS结果发布边界。Client与Host通过[shared/seedance](../src/shared/seedance.ts)统一模式 / 连线限制，[帧分配](../src/client/SeedanceFrameRoles.tsx)以已有assetId显式记录角色。任务参考固定ObjectLocator后，[临时流式检查](../src/host/media/seedanceReferences.ts)逐份核验hash与实际元数据，全部检查完成才签名24小时URL；POST创建与至少3秒间隔GET查询由Providers / Runtime执行，成功公开视频URL不转发Key。新增协议和可选参数只写已有JSON字段，不更改schema / 23表，见[ADR-0055](adr/0055-seedance-video-modes-and-independent-provider-routing.md)。
+
+0.2.51在画布图编辑入口统一处理引用变化：只对入边变化的Seedance节点推导模式，未变的边直接返回，拖动不触发参数全量同步。空引用text、首连reference、frames仅手动，清空角色与模式和边同次保存；Host只在图校验 / 新提交时使用有效模式，Providers与历史快照保持，见[ADR-0056](adr/0056-seedance-mode-inference-from-references.md)。
+
+0.2.49按[ADR-0054](adr/0054-no-result-submission-failure-and-seedream-id-correction.md)将无可用结果 / 外部ID的提交错误标为本地failed；启动修正符合条件的历史unknown而不重提。模型配置原子更正Lite ID，保留UUID / EP / Vault及历史快照；Client失败分支优先显示静态红色感叹号。
+
+节点任务和媒体加载共用[NodeLoading](../src/client/NodeLoading.tsx)：任务组合`border-beam@1.4.1` / `thinking-orbs@0.3.2`，文件加载直接用`img-fx@0.5.1` ImageGeneration 像素效果与`three@0.186.1`共享GPU。NodeLoadingBoundary汇总内部媒体就绪，不嵌套重复Loading；SignedImage等当前链接 / decode，VideoPlayer等首帧，AudioPlayer等元数据 / 波形结束。工作区单份主题订阅向依赖传Harness显式主题 / 表面色与隐藏状态，离屏 / 减少动态效果暂停，最后一个媒体实例释放GPU；无WebGL2或初始化失败时静态单色提示。动画为装饰，status仅供屏幕阅读器；任务与媒体阶段见[ADR-0046](adr/0046-dependency-backed-whole-node-loading.md)、[ADR-0061](adr/0061-dependency-backed-media-pixel-loading.md)。
 
 ## 组件与职责
 
@@ -40,6 +56,7 @@ flowchart LR
 | [client/ui](../src/client/ui.tsx) | 共享宿主通用组件、单选组合与独立开发兜底；仅 Harness 入口导入官方运行时，不复制内部组件 / CSS |
 | [CanvasApp](../src/client/Canvas.tsx) / [ProjectList](../src/client/ProjectList.tsx) | 默认项目列表、一级目录管理、点击进入编辑器；页面内保留文件夹筛选 |
 | [CanvasWorkspace](../src/client/Canvas.tsx) / [Settings](../src/client/Settings.tsx) | React Flow、保存后返回列表、上传 / 拖拽、资源 / 生成名称、任务详情、共用对象存储 / 模型 / TTS设置 |
+| [canvasTextSelection](../src/client/canvasTextSelection.tsx) / [CSS](../src/client/styles.css) | 画布及owned portal默认禁止文字选中，原生输入 / 可编辑 / 显式复制区域开放；公共Menu由context传作用域，画布外不受影响，见ADR-0060 |
 | [ObjectStorageSettings](../src/client/ObjectStorageSettings.tsx) / [mediaUrlCache](../src/client/mediaUrlCache.ts) / [SignedMedia](../src/client/SignedMedia.tsx) | 单活动目标与配置脱敏、100项共享批量缓存、过期刷新与播放位置恢复；不持有AK |
 | [RelationshipEdge](../src/client/RelationshipEdge.tsx) | BaseEdge保留Bezier / 标签 / 热区，仅单选直接入出边叠加CSS流光；浏览器投影，不进入持久图 |
 | [TaskDialog](../src/client/TaskDialog.tsx) / [UiDateTimeRangePicker](../src/client/UiDateTimeRangePicker.tsx) / [UiPagination](../src/client/UiPagination.tsx) | 显式联合查询、目录表格、保留列表的详情返回、取消过期请求；通用本地时区双月日期范围与受控分页 |

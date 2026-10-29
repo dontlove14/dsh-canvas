@@ -48,8 +48,9 @@ it.each(BANANA_MODELS)('offers only Model Link/Gemini for $name, resets unsaved 
   key(container, 'google-ui-secret')
   await act(async () => { button(container, '保存配置').click(); await Promise.resolve() })
   expect(save).toHaveBeenCalledWith({ ...definition, api_key: 'google-ui-secret' })
-  expect(container.querySelectorAll('.dc-model-row')).toHaveLength(1)
-  expect(container.querySelector('.dc-model-row')!.textContent).toContain(`${model.name}Gemini · 已配置`)
+  expect(container.querySelectorAll('.dc-provider-model')).toHaveLength(1)
+  expect(container.querySelector('[data-provider="gemini"] .dc-provider-model')!.textContent).toContain(model.name)
+  expect(container.querySelector('[data-provider="gemini"] .dc-provider-status')!.textContent).toBe('已配置')
   expect(container.textContent).not.toContain('google-ui-secret')
 })
 

@@ -19,7 +19,7 @@ export const StorageInputSchema = z.object({
 export type StorageInput = z.infer<typeof StorageInputSchema>
 export interface PublicStorageProvider {
   id: string; type: 'aliyun-oss'; name: string; region: string; bucket: string; endpoint: string; prefix: string
-  active: boolean; hasCredentials: boolean; accessKeyIdMask: string; verifiedAt: number; revision: number
+  active: boolean; hasCredentials: boolean; accessKeyIdMask: string; accessKeySecretMask?: string; verifiedAt: number; revision: number
 }
 export interface ObjectStorageSettings {
   configured: boolean; activeProviderId: string | null; revision: number

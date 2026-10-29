@@ -9,10 +9,12 @@ import { Database, sql, hash, type Statement, type SqlValue } from './persistenc
 import { LocalVault, atomicJson, type CredentialVault } from './credentials'
 import { pathKey, receive, safeName, extension } from './media/files'
 import { NameSchema, TaskSearchQuerySchema, type TaskSearchQuery, type TaskPage, type Catalog, type CanvasSnapshot, type TaskDetail, type TaskSummary } from '../shared/v2'
-import { ModelRecordSchema, WorkspaceStateSchema, emptyGraph, capabilitiesFor, KEY_MASK, BUSY_STATUSES,
+import { ModelRecordSchema, WorkspaceStateSchema, emptyGraph, capabilitiesFor, BUSY_STATUSES,
   type ModelRecord, type ModelInput, type PublicModel, type WorkspaceState, type Asset, type MediaKind, type Task } from '../shared/contracts'
+import { maskSecret, SettingSecretRequestSchema, type SettingSecretRequest } from '../shared/settingSecrets'
 import { isMockModel } from '../shared/mockModels'
-import { BUILTIN_MODELS, builtinDefinition } from '../shared/modelCatalog'
+import { BUILTIN_MODELS, builtinDefinition, correctSeedreamModelId, modelConfigured, modelRequiresEndpoint } from '../shared/modelCatalog'
+import { inspectSeedanceReference } from './media/seedanceReferences'
 import { FISH_TTS_ENDPOINT, TtsParamsSchema, TtsSettingsInputSchema, type TtsSettingsInput, type PublicTtsSettings, type TtsTaskSnapshot } from '../shared/contracts'
 import { STORAGE_REQUIRED, type ObjectLocator, type ObjectStorageSettings, type StorageInput, type MediaVariant } from '../shared/objectStorage'
 import { ObjectStorage } from './object-storage/service'
@@ -76,6 +78,11 @@ export class SqliteStore {
         ])
       } else await this.db.batch([sql('UPDATE owner_settings SET runtime_token=? WHERE owner_id=?', [this.db.token, this.owner])], true, true)
       this.models = z.array(ModelRecordSchema).parse(await this.readJson('models.json', []))
+      const correctedModels = this.models.map(correctSeedreamModelId)
+      if (correctedModels.some((model, index) => model !== this.models[index])) {
+        await atomicJson(join(this.root, 'models.json'), correctedModels)
+        this.models = correctedModels
+      }
       this.bindings = await this.readJson('model-bindings.json', {})
       const old = await this.readJson('credentials.json', { models: {} })
       for (const model of this.models) {
@@ -93,9 +100,12 @@ export class SqliteStore {
     try { return JSON.parse(await readFile(join(this.root, filename), 'utf8')) }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback; throw error }
   }
+  assertWriter(): void {
+    if (this.closed || this.compromised) throw new CanvasError('存储执行锁已失效，请重启宿主', 503, 'WRITER_FENCED')
+  }
   serial<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(() => {
-      if (this.closed || this.compromised) throw new CanvasError('存储执行锁已失效，请重启宿主', 503, 'WRITER_FENCED')
+      this.assertWriter()
       return operation()
     })
     this.queue = result.catch(() => {})
@@ -142,19 +152,40 @@ export class SqliteStore {
     const builtins = BUILTIN_MODELS.map((definition) => this.models.find((model) => !!builtinDefinition(model)
       && model.model_id === definition.model_id && model.api_base === definition.api_base) ?? definition)
     return [...builtins, ...this.models.filter((model) => !builtinDefinition(model))].map((model) => ({
-      ...model, has_api_key: !!this.keys[model.id], api_key_mask: this.keys[model.id] ? KEY_MASK : '',
+      ...model, has_api_key: !!this.keys[model.id], api_key_mask: maskSecret(this.keys[model.id] ?? ''),
       capabilities: capabilitiesFor(model), configurable: !!builtinDefinition(model),
     }))
   }
   model(id: string) {
     const model = this.models.find((m) => m.id === id)
-    if ((!model && BUILTIN_MODELS.some((m) => m.id === id)) || (model && builtinDefinition(model) && !this.keys[id]))
-      throw new CanvasError('请先在设置中配置该模型供应商的 API Key', 400, 'MODEL_NOT_CONFIGURED')
+    if ((!model && BUILTIN_MODELS.some((m) => m.id === id)) || (model && builtinDefinition(model) && !modelConfigured({ ...model, has_api_key: !!this.keys[id] })))
+      throw new CanvasError('请前往设置页面配置模型', 400, 'MODEL_NOT_CONFIGURED')
     if (!model) throw new CanvasError('模型已删除，请重新选择', 404, 'MODEL_NOT_FOUND')
     return { model: structuredClone(model), key: this.keys[id] ?? '', credentialRef: this.bindings[id] }
   }
   ttsSettings(): PublicTtsSettings {
-    return { endpoint: this.ttsConfig?.endpoint ?? FISH_TTS_ENDPOINT, revision: this.ttsConfig?.revision ?? 0, configured: !!this.ttsConfig, has_api_key: !!this.ttsKey, api_key_mask: this.ttsKey ? KEY_MASK : '' }
+    return { endpoint: this.ttsConfig?.endpoint ?? FISH_TTS_ENDPOINT, revision: this.ttsConfig?.revision ?? 0, configured: !!this.ttsConfig, has_api_key: !!this.ttsKey, api_key_mask: maskSecret(this.ttsKey) }
+  }
+  /** Explicit owner action reads only the current setting, never arbitrary Vault refs or task snapshots. */
+  async settingSecret(input: SettingSecretRequest): Promise<string> {
+    input = SettingSecretRequestSchema.parse(input)
+    return this.serial(async () => {
+      let value: string | undefined
+      if (input.scope === 'model') {
+        const model = this.models.find((model) => model.id === input.id)
+        if (!model || !builtinDefinition(model)) throw new CanvasError('模型配置不存在', 404, 'MODEL_NOT_FOUND')
+        value = this.keys[model.id]
+      } else if (input.scope === 'tts') value = this.ttsKey
+      else if (input.scope === 'storage') {
+        const record = await this.storageRecord(input.id)
+        try {
+          const credentials = JSON.parse(await this.vault.read(record.readCredentialRef ?? record.credentialRef)) as Partial<StorageCredentials>
+          value = credentials[input.field]
+        } catch { throw new CanvasError('对象存储凭据不可用', 409, 'STORAGE_CREDENTIALS_MISSING') }
+      } else throw new CanvasError('预审凭据由独立配置服务读取')
+      if (!value) throw new CanvasError('该配置尚未保存凭据', 404, 'SETTING_SECRET_NOT_FOUND')
+      return value
+    })
   }
   /** Called inside the same serial section that accepts the immutable task. */
   ttsService(): { model: TtsTaskSnapshot['model']; credentialRef: string } {
@@ -188,7 +219,12 @@ export class SqliteStore {
       const id = existing?.id ?? (duplicate ? duplicate.id : definition!.id)
       if (definition && input.id && input.id !== id) throw new CanvasError('模型配置身份不一致', 409, 'MODEL_IDENTITY_CONFLICT')
       const { api_key, ...fields } = input
-      const record = ModelRecordSchema.parse({ ...fields, id })
+      const previous = this.models.find((m) => m.id === id)
+      const record = ModelRecordSchema.parse({ ...fields, id, ...(fields.endpoint_id === undefined && previous?.endpoint_id ? { endpoint_id: previous.endpoint_id } : {}) })
+      const needsEndpoint = modelRequiresEndpoint(record)
+      if (record.endpoint_id && !needsEndpoint) throw new CanvasError('此供应商使用 Model ID，无需配置 EP', 400, 'MODEL_NOT_SUPPORTED')
+      if (needsEndpoint && (api_key !== undefined ? !!api_key.trim() : !!this.keys[id]) && !record.endpoint_id)
+        throw new CanvasError('请配置所选模型供应商的 EP', 400, 'MODEL_NOT_CONFIGURED')
       if (this.models.find((m) => m.id === id)?.kind && this.models.find((m) => m.id === id)!.kind !== record.kind) throw new CanvasError('编辑时不能改变模型类型')
       const bindings = { ...this.bindings }
       if (api_key !== undefined || !bindings[id]) bindings[id] = await this.vault.put(api_key?.trim() ?? '')
@@ -418,6 +454,15 @@ export class SqliteStore {
     await this.objects.verify(locator)
     return (await this.objects.sign(locator, { method: 'GET', ttl: 86400 }, true)).url
   }
+  async inspectReference(taskId: string, assetId: string, signal: AbortSignal): Promise<Asset> {
+    const row = await this.db.get('SELECT canvas_id,locator_json FROM task_references WHERE task_id=? AND asset_id=?', [taskId, assetId])
+    if (!row) throw new CanvasError('任务参考素材不存在', 404)
+    const locator: ObjectLocator = JSON.parse(row.locator_json)
+    const asset = this.state(row.canvas_id).assets.find((asset) => asset.id === assetId)
+    if (!asset) throw new CanvasError('任务参考素材不存在', 404)
+    const source = await (await this.objects.adapter(locator.providerId, locator.credentialRef)).openRead(locator)
+    return inspectSeedanceReference(source, { ...asset, bytes: locator.bytes, mime: locator.mime }, locator.sha256, signal)
+  }
   async mediaHash(canvas: string, id: string): Promise<string> {
     const row = await this.db.get("SELECT file_hash FROM canvas_assets WHERE canvas_id=? AND id=? AND file_state='ready'", [canvas, id])
     if (!row) throw new CanvasError('媒体文件不可用', 404, 'MEDIA_MISSING')
@@ -610,7 +655,7 @@ export class SqliteStore {
       const record = JSON.parse(item.config_json)
       const credentials = JSON.parse(await this.vault.read(item.read_credential_ref).catch(() => '{}')) as Partial<StorageCredentials>
       providers.push({ ...record, active: item.id === row.activeProviderId, hasCredentials: !!credentials.accessKeyId && !!credentials.accessKeySecret,
-        accessKeyIdMask: credentials.accessKeyId ? `••••${credentials.accessKeyId.slice(-4)}` : '' })
+        accessKeyIdMask: maskSecret(credentials.accessKeyId ?? ''), accessKeySecretMask: maskSecret(credentials.accessKeySecret ?? '') })
     }
     const counts = await this.db.get("SELECT SUM(state IN ('pending','running')) AS moving,SUM(state='failed') AS failed FROM file_operations")
     return { ...row, configured: !!row.activeProviderId, providers, moving: counts.moving ?? 0, failed: counts.failed ?? 0 }

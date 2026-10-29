@@ -68,11 +68,11 @@ describe('unified object storage settings', () => {
     expect(save).toHaveBeenCalledTimes(1); expect(changed).toHaveBeenCalledTimes(1)
     expect([...host.querySelectorAll<HTMLInputElement>('input[type="password"]')].map((i) => i.value)).toEqual(['', ''])
   })
-  it('uses three tabs and offers only the implemented object storage vendor', async () => {
+  it('uses four tabs and offers only the implemented object storage vendor', async () => {
     const api = new CanvasApi(); vi.spyOn(api, 'storage').mockResolvedValue(empty)
     const host = mount(<CanvasSettings api={api} />)
     await act(async () => { await Promise.resolve() })
-    expect([...host.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['对象存储', '模型设置', 'TTS 设置'])
+    expect([...host.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['对象存储', '模型设置', 'TTS 设置', 'Seedance 预审'])
     expect([...host.querySelectorAll('select option')].map((o) => o.textContent)).toEqual(['阿里云 OSS'])
     expect(host.textContent).not.toContain('宿主媒体根目录')
   })

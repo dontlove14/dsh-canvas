@@ -39,11 +39,17 @@ const body = result.outputFiles[0].text
 await writeFile('lib/client.js', `globalThis.__ModuleLoader__.load({id:"dsh-canvas",factory:(require)=>{const module={exports:{}};const exports=module.exports;\n${body}\nreturn module.exports;}});\n`)
 await build({
   entryPoints: ['src/host/index.ts'], outfile: 'lib/index.js', bundle: true, platform: 'node', format: 'esm',
-  target: 'node22', packages: 'external', sourcemap: true,
+  target: 'node22', packages: 'external', external: ['./vendor/volcengine-signer.cjs'], sourcemap: true,
 })
 // Bundling places Database's import.meta.url in lib/index.js.
 await copyFile('src/host/persistence/worker.mjs', 'lib/worker.mjs')
 await copyFile('src/host/persistence/schema.sql', 'lib/schema.sql')
+await copyFile('src/host/review/review-worker.mjs', 'lib/review-worker.mjs')
+await copyFile('src/host/review/review-schema.sql', 'lib/review-schema.sql')
+await copyFile('src/host/review/vendor/LICENSE', 'lib/volcengine-signer-LICENSE')
+await copyFile('src/host/review/vendor/source.json', 'lib/volcengine-signer-source.json')
+await mkdir('lib/vendor', { recursive: true })
+await copyFile('src/host/review/vendor/volcengine-signer.cjs', 'lib/vendor/volcengine-signer.cjs')
 for (const [config, outDir, rootDir] of [
   ['tsconfig.host.json', 'lib/types', 'src'],
   ['tsconfig.client.json', 'lib/types', 'src'],

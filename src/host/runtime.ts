@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { Store } from './store'
-import { Providers, ProviderFailure, type ProviderResult } from './providers'
+import { Providers, ProviderFailure, type ProviderResult, type ReviewReferenceResolver } from './providers'
 import { BUSY_STATUSES, TRACKED_STATUSES, isTtsSnapshot, type Task, type TaskStatus } from '../shared/contracts'
 import { sql, type Statement } from './persistence/database'
 import { Uploads } from './media/uploads'
 import { isMockModel } from '../shared/mockModels'
 import { renderMock } from './mockGeneration'
-import { isBananaImage } from '../shared/modelCatalog'
+import { isBananaImage, isSeedreamImage } from '../shared/modelCatalog'
 
 export interface RuntimeConfig { maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; maxMediaBytes: number; maxReferenceBytes: number }
 /** Long-lived host lifecycle. Neither a request signal nor a Peer owns this controller. */
@@ -20,23 +20,36 @@ export class CanvasRuntime {
   private scanWork?: Promise<void>
   private maintenance?: Promise<void>
   readonly uploads: Uploads
-  constructor(readonly store: Store, private config: RuntimeConfig) {
-    this.providers = new Providers(store, config, this.controller.signal)
+  constructor(readonly store: Store, private config: RuntimeConfig, reviewReferences?: ReviewReferenceResolver) {
+    this.providers = new Providers(store, config, this.controller.signal, reviewReferences)
     this.uploads = new Uploads(store, config.maxMediaBytes)
   }
   async start(): Promise<void> {
     for (const state of this.store.allStates()) for (const task of state.tasks) {
-      if (!TRACKED_STATUSES.has(task.status) || !BUSY_STATUSES.has(task.status)) continue
+      if (!TRACKED_STATUSES.has(task.status)) continue
       const data = await this.store.taskPrivate(task.id).catch(() => null)
-      if (!data) await this.patch(task, { status: task.providerTaskId ? 'save_failed' : 'unknown', error: '任务恢复凭据版本缺失，请检查备份' })
-      else if (!task.providerTaskId && data.issued && !data.outputs) {
+      if (task.status === 'unknown') {
+        // Upgrade historical no-result submissions without issuing another request.
+        // Local failure does not assert that the provider performed no side effect.
+        if (!task.providerTaskId && data?.issued && !data.outputs?.length && !task.resultIds.length) {
+          const detail = await this.store.taskDetail(task.workspaceId, task.id)
+          if (!detail.externalCompletedAt) await this.patch(task, { status: 'failed' })
+        }
+        continue
+      }
+      if (!BUSY_STATUSES.has(task.status)) continue
+      if (!data) await this.patch(task, { status: task.providerTaskId ? 'save_failed' : 'failed', error: '任务恢复凭据版本缺失，请检查备份' })
+      else if (!task.providerTaskId && data.issued && !data.outputs?.length) {
         const detail = await this.store.taskDetail(task.workspaceId, task.id)
-        await this.patch(task, { status: detail.externalCompletedAt ? 'save_failed' : 'unknown', error: detail.externalCompletedAt ? '外部已完成，但原结果描述未能持久保存；请核对后结束本地等待' : '上次提交中断，无法确认外部服务是否接收；不会自动重提' })
+        await this.patch(task, { status: detail.externalCompletedAt ? 'save_failed' : 'failed', error: detail.externalCompletedAt ? '外部已完成，但原结果描述未能持久保存；请核对后结束本地等待' : '上次提交中断，未取得可用结果；不会自动重提' })
       }
     }
     this.timer = setInterval(() => this.wake(), 250); this.timer.unref(); this.wake()
   }
   isActive(id: string): boolean { return this.active.has(id) }
+  private pollDelay(task: Task): number {
+    return task.snapshot.model.protocol === 'seedance-video' ? Math.max(3000, this.config.pollIntervalMs) : this.config.pollIntervalMs
+  }
   wake(): void {
     if (this.controller.signal.aborted) return
     if (!this.scanning) {
@@ -61,14 +74,14 @@ export class CanvasRuntime {
         const data = await this.store.taskPrivate(task.id).catch(() => null)
         if (this.controller.signal.aborted) {
           // Preserve known external identity or downloaded descriptors; never label shutdown as provider failure.
-          if (!current.providerTaskId && data?.issued && !data.outputs) await this.patch(current, { status: 'unknown', error: '宿主停止时提交结果无法确认' })
+          if (!current.providerTaskId && data?.issued && !data.outputs) await this.patch(current, { status: 'failed', error: '宿主停止时未取得提交结果；不会自动重提' })
           return
         }
         const message = this.store.redact(error instanceof Error ? error.message : '任务执行失败', [data?.key ?? ''])
         const saving = !!data?.outputs || current.status === 'saving'
-        let status: TaskStatus = saving ? 'save_failed' : !data?.issued || isMockModel(current.snapshot.model) || error instanceof ProviderFailure && error.definitive ? 'failed' : 'unknown'
+        let status: TaskStatus = saving ? 'save_failed' : 'failed'
         if (current.providerTaskId && !data?.outputs && !saving) status = error instanceof ProviderFailure && error.definitive ? 'unknown' : current.status
-        await this.patch(current, { status, error: message }, [sql("UPDATE task_details SET failure_stage=?,failure_code=?,failure_message=?,next_run_at=? WHERE task_id=?", [saving ? 'storage' : current.providerTaskId ? 'poll' : 'submit', error instanceof ProviderFailure ? 'PROVIDER_ERROR' : 'TRANSPORT_OR_STORAGE_ERROR', message, Date.now() + this.config.pollIntervalMs, task.id])])
+        await this.patch(current, { status, error: message }, [sql("UPDATE task_details SET failure_stage=?,failure_code=?,failure_message=?,next_run_at=? WHERE task_id=?", [saving ? 'storage' : current.providerTaskId ? 'poll' : 'submit', error instanceof ProviderFailure ? 'PROVIDER_ERROR' : 'TRANSPORT_OR_STORAGE_ERROR', message, Date.now() + this.pollDelay(current), task.id])])
       }).catch(() => {}).finally(async () => {
         try { await this.store.db.batch([sql('UPDATE task_details SET lease_owner=NULL,lease_until=NULL WHERE task_id=? AND lease_owner=?', [task.id, this.store.db.token])]) } catch {}
         this.active.delete(task.id)
@@ -106,7 +119,7 @@ export class CanvasRuntime {
         result = { status: 'completed', outputs: await this.attempt(task, 'mock-render', () => renderMock(task, this.store, this.controller.signal, (progress) => this.patch(task, { progress }))) }
       } else if (task.providerTaskId) result = await this.attempt(task, 'poll', () => this.providers.poll(task.snapshot, data.key, task.providerTaskId!))
       else {
-        if (data.issued) { await this.patch(task, { status: 'unknown', error: '之前的提交结果无法确认，不会自动重提' }); return }
+        if (data.issued) { await this.patch(task, { status: 'failed', error: '之前的提交未取得可用结果；不会自动重提' }); return }
         await this.store.verifyReferences(task.id)
         const prepared = await this.attempt(task, 'prepare-references', () => this.providers.prepare(task.snapshot, task.id))
         data.issued = true
@@ -115,7 +128,7 @@ export class CanvasRuntime {
         result = await this.attempt(task, 'submit', () => this.providers.submit(task.snapshot, data.key, prepared))
       }
       await this.patch(task, { ...(result.id ? { providerTaskId: result.id } : {}), status: result.outputs ? 'saving' : result.status, progress: result.progress, error: result.error ? this.store.redact(result.error, [data.key]) : undefined }, [
-        sql('UPDATE task_details SET external_status=?,next_run_at=? WHERE task_id=?', [result.status, Date.now() + this.config.pollIntervalMs, task.id]),
+        sql('UPDATE task_details SET external_status=?,next_run_at=? WHERE task_id=?', [result.status, Date.now() + this.pollDelay(task), task.id]),
         ...(result.status === 'failed' ? [sql("UPDATE task_details SET phase='failed',failure_stage='provider',failure_code=?,failure_message=? WHERE task_id=?", [this.store.redact(result.errorCode ?? 'EXTERNAL_FAILED', [data.key]), this.store.redact(result.error ?? '外部生成失败', [data.key]), task.id])] : []),
       ])
       if (result.outputs) {
@@ -135,7 +148,7 @@ export class CanvasRuntime {
           const source = staged ? Readable.from([]) : await this.providers.outputStream(output, task.snapshot, data.key)
           const [width, height] = isTtsSnapshot(task.snapshot) ? [] : task.snapshot.params.size.split('x').map(Number)
           const dimensions = !isTtsSnapshot(task.snapshot) && isMockModel(task.snapshot.model) ? { width, height, ...(task.snapshot.model.kind === 'video' ? { duration: task.snapshot.params.seconds } : {}) }
-            : isBananaImage(task.snapshot.model) && output.width && output.height ? { width: output.width, height: output.height } : {}
+            : (isBananaImage(task.snapshot.model) || isSeedreamImage(task.snapshot.model)) && output.width && output.height ? { width: output.width, height: output.height } : {}
           return this.store.saveMedia(source, { id: output.id, kind: task.snapshot.model.kind, filename: output.filename, createdAt: Date.now(), nodeId: task.nodeId, taskId: task.id, ...dimensions }, this.config.maxMediaBytes, task.snapshot.model.kind, this.controller.signal)
         })
         await this.store.update(task.workspaceId, (state) => {

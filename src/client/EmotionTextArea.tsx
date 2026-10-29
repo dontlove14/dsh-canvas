@@ -2,10 +2,12 @@ import { forwardRef, useId, useImperativeHandle, useLayoutEffect, useRef, useSta
 import { createPortal } from 'react-dom'
 import { PromptEditorController, type PromptSuggestions } from './promptEditorController'
 import { emotionEditorCodec, EMOTION_CHOICES, type EmotionChoice } from './emotionEditorCodec'
+import { useCanvasTextSelectionScope } from './canvasTextSelection'
 
 export interface EmotionEditorHandle { flush: () => string }
 interface Props { value: string; onChange: (text: string) => void; disabled?: boolean; onError?: (error: unknown) => void }
 export const EmotionTextArea = forwardRef<EmotionEditorHandle, Props>(function EmotionTextArea({ value, onChange, disabled = false, onError }, ref) {
+  const textScope = useCanvasTextSelectionScope()
   const root = useRef<HTMLDivElement>(null)
   const controller = useRef<PromptEditorController<EmotionChoice> | null>(null)
   const menu = useRef<HTMLDivElement>(null)
@@ -28,11 +30,11 @@ export const EmotionTextArea = forwardRef<EmotionEditorHandle, Props>(function E
   useLayoutEffect(() => { controller.current?.update(options) })
   useLayoutEffect(() => { menu.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [suggestions?.active])
   return <div className="dc-tts-text dc-prompt-wrap nodrag nopan nowheel">
-    <div ref={root} className="dc-prompt-editor dc-tts-textarea" role="textbox" aria-label="文字内容" aria-multiline="true"
+    <div ref={root} className="dc-prompt-editor dc-tts-textarea" data-dc-text-selectable="true" role="textbox" aria-label="文字内容" aria-multiline="true"
       aria-disabled={disabled} aria-autocomplete="list" aria-controls={suggestions ? `${id}-list` : undefined}
       aria-expanded={!!suggestions} aria-activedescendant={suggestions?.items.length ? `${id}-${suggestions.active}` : undefined}
       data-placeholder="输入要朗读的文字，输入 @ 选择情绪…" data-empty={!value} tabIndex={disabled ? -1 : 0} suppressContentEditableWarning />
-    {suggestions && createPortal(<div className="dc-app dc-prompt-suggestions dc-tts-emotions nodrag nopan nowheel" data-prompt-suggestions ref={menu}
+    {suggestions && createPortal(<div className={`dc-app dc-prompt-suggestions dc-tts-emotions nodrag nopan nowheel ${textScope}`} data-prompt-suggestions ref={menu}
       style={{ left: suggestions.left, top: suggestions.top }} onPointerDown={(event) => event.preventDefault()} onKeyDown={(event) => event.stopPropagation()}>
       <div className="dc-prompt-suggestions-heading">选择情绪 <small>↑↓ 选择 · Enter 确认</small></div>
       <div id={`${id}-list`} role="listbox" aria-label="FishTTS 情绪">

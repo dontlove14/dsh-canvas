@@ -75,12 +75,12 @@ async function waitImport(instance: CanvasService, taskId: string) {
 }
 
 describe('local configuration and graph writes', () => {
-  it('never returns saved keys, preserves blank edits and uses restricted files', async () => {
+  it('never returns full saved keys in model lists, preserves blank edits and uses restricted files', async () => {
     const instance = await service()
     const config = await model(instance, 'http://localhost/v1')
     const response = await (await instance.handle(request('models'))).text()
     expect(response).not.toContain('secret-test-key')
-    expect(response).toContain('••••••••')
+    expect(response).toContain('sec********key')
     await instance.store.saveModel({ id: config.id, kind: config.kind, name: config.name, model_id: config.model_id, api_base: config.api_base, protocol: config.protocol })
     expect(instance.store.model(config.id).key).toBe('secret-test-key')
     const contents = await readFile(join(instance.config.dataDir, 'models.json'), 'utf8')
@@ -255,18 +255,15 @@ describe('generation protocol and task state', () => {
     expect(response.status).toBe(307)
     expect((await remoteBody(instance.store, response)).subarray(4, 12)).toEqual(mp4.subarray(4, 12))
   })
-  it('marks ambiguous submissions unknown and does not automatically submit again', async () => {
+  it('marks no-result submissions failed, unlocks the node and never automatically submits again', async () => {
     let calls = 0
     const base = await stub((_req: any, res: any) => { calls++; res.writeHead(503); res.end(JSON.stringify({ error: { message: 'timeout secret-test-key' } })) })
     const instance = await service()
     const { generator, state } = await addGenerator(instance, base)
     const task = await instance.generate('w', generator.id, state.graphRevision)
-    const unknown = await waitFor(instance, task.id, 'unknown')
-    expect(unknown.error).not.toContain('secret-test-key')
-    await expect(instance.saveGraph('w', emptyGraph(), state.graphRevision)).rejects.toMatchObject({ code: 'NODE_BUSY' })
+    const failed = await waitFor(instance, task.id, 'failed')
+    expect(failed.error).not.toContain('secret-test-key')
     await new Promise((resolve) => setTimeout(resolve, 550)); expect(calls).toBe(1)
-    await instance.taskAction('w', task.id, 'abandon')
-    expect(instance.store.state('w').tasks[0].status).toBe('abandoned')
     await instance.saveGraph('w', emptyGraph(), state.graphRevision)
   })
   it('definitive provider errors are redacted and unlock the node', async () => {
@@ -277,6 +274,15 @@ describe('generation protocol and task state', () => {
     const failed = await waitFor(instance, task.id, 'failed')
     expect(failed.error).not.toContain('secret-test-key'); expect(failed.error).not.toContain('secret-other')
     await instance.store.deleteModel(generator.modelId!)
+  })
+  it.each([{}, { data: [] }, { data: [{ b64_json: 'not-an-image' }] }])('ends a successful HTTP response with no usable output as failed', async (body) => {
+    let calls = 0
+    const base = await stub((_req: any, res: any) => { calls++; res.end(JSON.stringify(body)) })
+    const instance = await service(), { generator, state } = await addGenerator(instance, base)
+    const task = await instance.generate('w', generator.id, state.graphRevision)
+    expect((await waitFor(instance, task.id, 'failed')).resultIds).toEqual([])
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(calls).toBe(1); expect((await instance.store.taskPrivate(task.id)).issued).toBe(true)
   })
   it('retries downloading the same result without another paid submission', async () => {
     let posts = 0; let downloads = 0; let base = ''
@@ -391,17 +397,44 @@ describe('restart recovery', () => {
     await waitFor(recovered, task.id, 'completed')
     expect(posts).toBe(0); expect(polls).toBe(1)
   })
-  it('recovers an interrupted unknown submission without network traffic', async () => {
+  it.each(['submitted', 'unknown'] as const)('ends an interrupted %s submission as failed without network traffic or changing its snapshot', async (status) => {
     let calls = 0
     const base = await stub((_req: any, res: any) => { calls++; res.end('{}') })
     const root = await temp(); const original = await service(root)
     const { generator, config } = await addGenerator(original, base)
-    const task: Task = { id: randomUUID(), workspaceId: 'w', nodeId: generator.id, snapshot: { model: original.store.model(config.id).model, prompt: 'prompt', params: generator.params!, referenceIds: [] }, status: 'submitted', resultIds: [], createdAt: Date.now(), updatedAt: Date.now() }
+    const task: Task = { id: randomUUID(), workspaceId: 'w', nodeId: generator.id, snapshot: { model: original.store.model(config.id).model, prompt: 'prompt', params: generator.params!, referenceIds: [] }, status, resultIds: [], createdAt: Date.now(), updatedAt: Date.now(), ...(status === 'unknown' ? { error: 'Original timeout' } : {}) }
     await original.store.update('w', (state) => { state.tasks.push(task) })
     await original.store.writeTaskPrivate(task.id, { key: 'secret-test-key', issued: true })
+    const detail = await original.store.taskDetail('w', task.id)
+    const graph = original.store.state('w').graph
     await original.close()
     const recovered = await service(root)
-    expect(recovered.store.state('w').tasks[0].status).toBe('unknown')
+    expect(recovered.store.state('w').tasks[0]).toMatchObject({ id: task.id, status: 'failed', snapshot: task.snapshot, createdAt: task.createdAt, resultIds: [] })
+    expect(recovered.store.state('w').graph).toEqual(graph)
+    expect(await recovered.store.taskPrivate(task.id)).toMatchObject({ key: 'secret-test-key', issued: true })
+    expect((await recovered.store.taskDetail('w', task.id)).attempts).toEqual(detail.attempts)
+    if (status === 'unknown') expect(recovered.store.state('w').tasks[0].error).toBe('Original timeout')
+    await new Promise((resolve) => setTimeout(resolve, 350)); expect(calls).toBe(0)
+  })
+  it('keeps a queryable unknown external task and a save failure recoverable on restart', async () => {
+    let calls = 0
+    const base = await stub((_req: any, res: any) => { calls++; res.end('{}') })
+    const root = await temp(), original = await service(root)
+    const { generator, config } = await addGenerator(original, base)
+    const snapshot = { model: original.store.model(config.id).model, prompt: 'prompt', params: generator.params!, referenceIds: [] }
+    const query: Task = { id: randomUUID(), workspaceId: 'w', nodeId: generator.id, snapshot, status: 'unknown', providerTaskId: 'recoverable-id', resultIds: [], createdAt: 1, updatedAt: 1 }
+    const save: Task = { ...query, id: randomUUID(), providerTaskId: undefined, status: 'save_failed' }
+    await original.store.update('w', (state) => { state.tasks.push(query, save) })
+    for (const task of [query, save]) await original.store.writeTaskPrivate(task.id, { key: 'secret-test-key', issued: true })
+    const committed = original.store.state('w').tasks
+    const catalog = await original.store.db.all('SELECT * FROM task_catalog ORDER BY queue_seq')
+    const details = await original.store.db.all('SELECT * FROM task_details ORDER BY task_id')
+    for (const task of committed) task.updatedAt = catalog.find((row) => row.id === task.id)!.updated_at
+    await original.close()
+    const recovered = await service(root)
+    expect(recovered.store.state('w').tasks).toEqual(JSON.parse(JSON.stringify(committed)))
+    expect(await recovered.store.db.all('SELECT * FROM task_catalog ORDER BY queue_seq')).toEqual(catalog)
+    expect(await recovered.store.db.all('SELECT * FROM task_details ORDER BY task_id')).toEqual(details)
     await new Promise((resolve) => setTimeout(resolve, 350)); expect(calls).toBe(0)
   })
 })

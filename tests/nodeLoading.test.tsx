@@ -22,9 +22,9 @@ vi.mock('@xyflow/react', async (original) => {
   return {
   ...actual,
   Background: () => null, Controls: () => null, MiniMap: () => null,
-  ReactFlow: ({ nodes, nodeTypes, children }: any) => {
+  ReactFlow: ({ nodes, nodeTypes, children, proOptions }: any) => {
     flowStore = actual.useStoreApi()
-    return <div>
+    return <div data-hide-attribution={String(proOptions?.hideAttribution)}>
     {nodes.map((node: any) => {
       const Component = nodeTypes[node.type]
       return <div key={node.id} data-test-node={node.id}><Component id={node.id} data={node.data} selected={node.selected} /></div>
@@ -141,8 +141,8 @@ describe('dependency-backed whole-node loading', () => {
     vi.stubGlobal('devicePixelRatio', 2)
     const store = createLoadingResolutionStore({ getZoom: () => 2.5, subscribe: () => () => {} })
     const { container } = mount(<LoadingResolutionContext.Provider value={store}>
-      <article className="dc-node"><NodeLoading mediaLoading title="引用图" compact /></article>
-      <div data-preview><NodeLoading mediaLoading title="预览" compact /></div>
+      <article className="dc-node"><NodeLoading task={task('queued')} title="引用图" compact /></article>
+      <div data-preview><NodeLoading task={task('queued')} title="预览" compact /></div>
     </LoadingResolutionContext.Provider>)
     const node = container.querySelector<HTMLCanvasElement>('article canvas')!
     const preview = container.querySelector<HTMLCanvasElement>('[data-preview] canvas')!
@@ -151,7 +151,7 @@ describe('dependency-backed whole-node loading', () => {
   })
   it('updates for fractional screen density and a monitor switch, including after the DPR media query is rearmed', () => {
     vi.stubGlobal('devicePixelRatio', 1.25)
-    const { container } = mount(<NodeLoading mediaLoading title="预览" />)
+    const { container } = mount(<NodeLoading task={task('queued')} title="预览" />)
     const orb = container.querySelector('canvas')!
     expect(orb.width).toBe(128)
     const initial = media.get('(resolution: 1.25dppx)')!
@@ -213,15 +213,33 @@ describe('dependency-backed whole-node loading', () => {
     expect(container.querySelector('[tabindex]')).toBeNull()
     expect(paints.length).toBeGreaterThan(0); expect(orbFrames()).toBe(1)
   })
-  it.each(['unknown', 'save_failed'] as const)('stops running effects for %s and preserves the actual warning', (status) => {
+  it.each(['failed', 'unknown', 'save_failed'] as const)('replaces all loading effects with a red exclamation for %s even while old media is pending', (status) => {
     const { container, root } = mount(<NodeLoading task={task('generating')} title="语音" />)
-    act(() => root.render(<NodeLoading task={task(status)} title="语音" />))
-    expect(container.querySelector('[data-beam][data-loading-paused]')).toBeTruthy()
-    expect(container.querySelector('.dc-node-loading-warning')).toBeTruthy()
-    expect(container.querySelector('[role="status"]')!.textContent).toBe(status === 'unknown' ? '提交结果待确认' : '结果保存失败')
-    expect(orbFrames()).toBe(0)
+    act(() => root.render(<NodeLoading task={task(status)} title="语音" mediaLoading />))
+    expect(container.querySelector('.dc-node-failure svg[aria-hidden="true"]')).toBeTruthy()
+    expect(container.querySelector('[role="status"]')!.textContent).toBe(status === 'unknown' ? '提交结果待确认' : status === 'save_failed' ? '结果保存失败' : '失败')
+    expect(container.querySelector('[data-beam],canvas,.dc-node-loading,[data-loading-preset]')).toBeNull()
+    expect(frames.size).toBe(0); expect(intersections.size).toBe(0)
   })
-  it.each(['completed', 'failed', 'abandoned', undefined] as const)('removes loading and stops dependency frames for %s', (status) => {
+  it('keeps the old media element while a failed task overrides boundary loading, including compact previews', async () => {
+    const api = new CanvasApi()
+    vi.spyOn(api, 'mediaUrls').mockImplementation(async (_canvas, items) => ({
+      items: items.map((item) => ({ ...item, url: `https://assets.example/${item.assetId}`, expiresAt: Date.now() + 3600000 })),
+    }))
+    const view = (status: TaskStatus) => <NodeLoadingBoundary>
+      <SignedImage api={api} canvas="w" assetId="old-result" alt="图片" />
+      <NodeLoading task={task(status)} title="图片" compact />
+    </NodeLoadingBoundary>
+    const { container, root } = mount(view('completed'))
+    await act(async () => { await Promise.resolve() })
+    const image = container.querySelector('img')
+    expect(container.querySelector('[data-task-status="media-loading"]')).toBeTruthy()
+    act(() => root.render(view('failed')))
+    expect(container.querySelector('.dc-node-failure[data-compact]')).toBeTruthy()
+    expect(container.querySelector('img')).toBe(image)
+    expect(container.querySelector('[data-beam],canvas')).toBeNull(); expect(frames.size).toBe(0)
+  })
+  it.each(['completed', 'abandoned', undefined] as const)('removes loading and stops dependency frames for %s', (status) => {
     const { container, root } = mount(<NodeLoading task={task('generating')} title="视频" />)
     act(() => root.render(<NodeLoading task={status ? task(status) : undefined} title="视频" />))
     expect(container.childElementCount).toBe(0); expect(orbFrames()).toBe(0)
@@ -241,6 +259,7 @@ describe('dependency-backed whole-node loading', () => {
   })
   it('routes every node branch through both dependencies, preserves media DOM and pauses a retained hidden canvas', async () => {
     const { container, show, api } = await workspace()
+    expect(container.querySelector('[data-hide-attribution="true"]')).toBeTruthy()
     const cards = [...container.querySelectorAll('[data-test-node]')]
     expect(cards).toHaveLength(12)
     for (const card of cards) {
@@ -313,10 +332,11 @@ describe('dependency-backed whole-node loading', () => {
     expect(image.style.visibility).toBe('hidden')
     expect(container.querySelectorAll('[data-beam]')).toHaveLength(1)
     act(() => root.render(view('completed')))
-    expect(container.querySelector('[data-task-status="media-loading"][data-loading-preset="pulse-inner"]')).toBeTruthy()
+    expect(container.querySelector('[data-task-status="media-loading"][data-loading-preset="pixels-organic"]')).toBeTruthy()
+    expect(container.querySelector('[data-beam],canvas')).toBeNull()
     expect(container.querySelector('img')).toBe(image)
     act(() => image.dispatchEvent(new Event('load')))
-    expect(container.querySelector('[data-beam]')).toBeTruthy(); expect(image.style.visibility).toBe('hidden')
+    expect(container.querySelector('[data-task-status="media-loading"]')).toBeTruthy(); expect(image.style.visibility).toBe('hidden')
     await act(async () => { decode(); await Promise.resolve() })
     expect(container.querySelector('.dc-node-loading')).toBeNull()
     expect(image.style.visibility).toBe(''); expect(container.querySelector('img')).toBe(image)

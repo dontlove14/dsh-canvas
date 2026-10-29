@@ -95,7 +95,7 @@ describe('FishTTS durable generation', () => {
     const service = await instance()
     const ddl = await service.store.db.all("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name")
     const publicSettings = await service.store.saveTtsSettings({ endpoint: FISH_TTS_ENDPOINT, revision: 0, api_key: 'tts-test-secret' })
-    expect(publicSettings).toMatchObject({ configured: true, has_api_key: true, api_key_mask: '••••••••' })
+    expect(publicSettings).toMatchObject({ configured: true, has_api_key: true, api_key_mask: 'tts********ret' })
     expect(JSON.stringify(publicSettings)).not.toContain('tts-test-secret')
     expect(await readFile(join(service.config.dataDir, 'tts-settings.json'), 'utf8')).not.toContain('tts-test-secret')
     const tts = node(); const saved = await service.saveGraph('w', { ...emptyGraph(), nodes: [tts] }, 0)
@@ -191,7 +191,7 @@ describe('FishTTS durable generation', () => {
     expect(new Headers(fetch.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer accepted-tts-key')
     expect(reopened.store.ttsSettings().has_api_key).toBe(false)
   })
-  it.each([[401, 'failed'], [503, 'unknown']] as const)('classifies HTTP %s and does not silently repeat submission', async (status, expected) => {
+  it.each([[401, 'failed'], [503, 'failed']] as const)('classifies HTTP %s and does not silently repeat submission', async (status, expected) => {
     const fetch = vi.fn(async () => Response.json({ message: 'tts-key-test 请求失败' }, { status })); vi.stubGlobal('fetch', fetch)
     const service = await instance()
     await service.store.saveTtsSettings({ endpoint: FISH_TTS_ENDPOINT, revision: 0, api_key: 'tts-key-test' })

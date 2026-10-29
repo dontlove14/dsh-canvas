@@ -2,6 +2,8 @@
 
 状态：已采纳
 
+浏览器隔离边界由[ADR-0058](0058-masked-settings-and-explicit-secret-reveal.md)补充：常规读取继续脱敏，用户主动点击可读取当前配置单字段；任务快照与凭据版本保持。
+
 文档类型：解释；负责人：项目维护者；最近核对：2026-10-26。
 记录日期：2026-10-26。替代 [ADR-0004](0004-host-owned-credentials.md)、[ADR-0006](0006-durable-task-recovery.md)、[ADR-0011](0011-polling-and-operation-concurrency.md) 的实现方式。
 

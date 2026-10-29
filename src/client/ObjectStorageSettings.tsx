@@ -3,6 +3,7 @@ import { StorageInputSchema, STORAGE_REQUIRED, type ObjectStorageSettings as Set
 import { CanvasApi } from './api'
 import { UiButton, UiInput, UiSelect } from './ui'
 import { invalidateMediaUrls } from './SignedMedia'
+import { SecretInput } from './SecretField'
 
 const empty = { type: 'aliyun-oss' as const, name: '阿里云 OSS', region: 'oss-cn-hangzhou', bucket: '', endpoint: 'https://oss-cn-hangzhou.aliyuncs.com', prefix: 'dsh-canvas', accessKeyId: '', accessKeySecret: '' }
 export function ObjectStorageSettings({ api, onChanged }: { api: CanvasApi; onChanged?: () => void }) {
@@ -11,6 +12,7 @@ export function ObjectStorageSettings({ api, onChanged }: { api: CanvasApi; onCh
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const selected = settings?.providers.find((provider) => provider.id === form.id)
   const load = () => api.storage().then(setSettings).catch((e) => setError(e.message))
   useEffect(() => { let live = true; void api.storage().then((s) => { if (live) setSettings(s) }).catch((e) => { if (live) setError(e.message) }); return () => { live = false } }, [api])
   const change = (key: keyof StorageInput, value: string) => {
@@ -49,8 +51,12 @@ export function ObjectStorageSettings({ api, onChanged }: { api: CanvasApi; onCh
       </div>
       <label>外网 Endpoint<UiInput value={form.endpoint ?? ''} disabled={busy} onChange={(e) => change('endpoint', e.target.value)} /></label>
       <div className="dc-form-columns">
-        <label>AccessKey ID<UiInput type="password" autoComplete="new-password" value={form.accessKeyId ?? ''} disabled={busy} placeholder={form.id ? '留空保留原凭据' : 'RAM AccessKey ID'} onChange={(e) => change('accessKeyId', e.target.value)} /></label>
-        <label>AccessKey Secret<UiInput type="password" autoComplete="new-password" value={form.accessKeySecret ?? ''} disabled={busy} placeholder={form.id ? '留空保留原凭据' : 'RAM AccessKey Secret'} onChange={(e) => change('accessKeySecret', e.target.value)} /></label>
+        <label>AccessKey ID<SecretInput key={`${form.id ?? 'new'}:${settings?.revision}:ak`} label="AccessKey ID" value={form.accessKeyId ?? ''} disabled={busy}
+          savedMask={selected?.accessKeyIdMask} load={selected?.hasCredentials ? (signal) => api.settingSecret({ scope: 'storage', id: selected.id, field: 'accessKeyId' }, signal) : undefined}
+          placeholder={form.id ? `${selected?.accessKeyIdMask ?? ''} · 留空保留原凭据` : 'RAM AccessKey ID'} onChange={(e) => change('accessKeyId', e.target.value)} /></label>
+        <label>AccessKey Secret<SecretInput key={`${form.id ?? 'new'}:${settings?.revision}:sk`} label="AccessKey Secret" value={form.accessKeySecret ?? ''} disabled={busy}
+          savedMask={selected?.accessKeySecretMask} load={selected?.hasCredentials ? (signal) => api.settingSecret({ scope: 'storage', id: selected.id, field: 'accessKeySecret' }, signal) : undefined}
+          placeholder={form.id ? `${selected?.accessKeySecretMask ?? ''} · 留空保留原凭据` : 'RAM AccessKey Secret'} onChange={(e) => change('accessKeySecret', e.target.value)} /></label>
       </div>
       <div className="dc-form-actions">
         {form.id && <UiButton variant="outline" disabled={busy} onClick={() => setForm(empty)}>添加新配置</UiButton>}

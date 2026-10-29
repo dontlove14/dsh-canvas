@@ -14,7 +14,7 @@ import type { SidebarRightTabDefinition } from '@deepseek-ai/dsh-client-ui-sideb
 // public registration and real app/hooks; semantic controls stand in for that loader.
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Button: () => null, Input: () => null, Checkbox: () => null,
-  SegmentedControl: () => null, Menu: () => null, Modal: () => null,
+  SegmentedControl: () => null, Menu: () => null, Modal: () => null, Tooltip: () => null,
 }))
 vi.mock('../src/client/ui', async (original) => ({
   ...await original<typeof import('../src/client/ui')>(),

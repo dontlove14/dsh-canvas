@@ -24,7 +24,8 @@ const pkg = JSON.parse(await readFile('package.json', 'utf8'))
 const checkDir = process.env.CANVAS_ARTIFACT_CHECK_DIR ?? join(tmpdir(), `${pkg.name}-artifact-${pkg.version}`)
 await mkdir(checkDir, { recursive: true })
 const lib = await hashes(await files('lib'))
-for (const name of ['lib/index.js', 'lib/client.js', 'lib/worker.mjs', 'lib/schema.sql']) assert(lib[name], `missing ${name}`)
+for (const name of ['lib/index.js', 'lib/client.js', 'lib/worker.mjs', 'lib/schema.sql', 'lib/review-worker.mjs',
+  'lib/review-schema.sql', 'lib/vendor/volcengine-signer.cjs', 'lib/volcengine-signer-LICENSE', 'lib/volcengine-signer-source.json']) assert(lib[name], `missing ${name}`)
 if (process.argv[2] === 'record') {
   await writeFile(join(checkDir, 'lib-first.json'), JSON.stringify(lib, null, 2))
   console.log(`Recorded ${Object.keys(lib).length} built files`)
@@ -72,11 +73,63 @@ if (process.argv[2] === 'record') {
     const { id } = await configuredCreate.json()
     const graph = await routes.get('/api/canvas/v2/graph').fetch(new Request(`http://localhost/api/canvas/v2/graph?canvas=${id}`))
     assert.equal(graph.status, 200); assert.equal((await graph.json()).graphRevision, 0)
-    assert.equal(routes.size, 19)
+    assert.equal(routes.size, 26)
+    const reviewSettings = routes.get('/api/canvas/v2/seedance-review-settings')
+    const masked = await reviewSettings.fetch(new Request('http://localhost/api/canvas/v2/seedance-review-settings'))
+    assert.equal(masked.status, 200)
+    assert.equal((await masked.json()).profiles.length, 2)
+    const reviewPage = await routes.get('/api/canvas/v2/asset-reviews').fetch(new Request(`http://localhost/api/canvas/v2/asset-reviews?canvas=${id}`))
+    assert.deepEqual(await reviewPage.json(), { items: [], revision: 0, busy: false })
+    // Invoke the compiled ESM Host + native CJS signer using offline credentials.
+    const originalFetch = globalThis.fetch, signedCalls = []
+    globalThis.fetch = async (url, init) => {
+      const endpoint = new URL(String(url)), body = JSON.parse(init.body)
+      assert.equal(endpoint.searchParams.get('Action'), 'ListAssetGroups')
+      assert.equal(body.ProjectName, 'offline-project')
+      assert.deepEqual(body.Filter, { GroupType: 'AIGC' })
+      assert.equal(body.MaxResults, 1)
+      const region = endpoint.hostname.includes('byteplus') ? 'ap-southeast-1' : 'cn-beijing'
+      assert(String(init.headers.Authorization).includes(`/${region}/ark/request`))
+      assert.equal(init.headers['X-Content-Sha256'], digest(init.body))
+      signedCalls.push(region)
+      return Response.json({ Result: { Items: [] } })
+    }
+    try {
+      for (const provider of ['bytedance', 'byteplus']) {
+        const saved = await reviewSettings.fetch(new Request('http://localhost/api/canvas/v2/seedance-review-settings', {
+          method: 'POST', body: JSON.stringify({ provider, revision: 0, projectName: 'offline-project',
+            accessKeyId: 'offline-review-ak', accessKeySecret: 'offline-review-sk' }),
+        }))
+        assert.equal(saved.status, 200)
+        const value = await saved.json()
+        assert(!JSON.stringify(value).includes('offline-project') && !JSON.stringify(value).includes('offline-review'))
+        const test = await routes.get('/api/canvas/v2/seedance-review-settings-test').fetch(new Request('http://localhost/api/canvas/v2/seedance-review-settings-test', {
+          method: 'POST', body: JSON.stringify({ provider }),
+        }))
+        assert.equal(test.status, 200, JSON.stringify(await test.json()))
+        const reveal = await routes.get('/api/canvas/v2/settings-secret').fetch(new Request('http://localhost/api/canvas/v2/settings-secret', {
+          method: 'POST', body: JSON.stringify({ scope: 'seedance-review', provider, field: 'projectName' }),
+        }))
+        assert.equal(reveal.headers.get('Cache-Control'), 'no-store')
+        assert.deepEqual(await reveal.json(), { value: 'offline-project' })
+      }
+      assert.deepEqual(signedCalls, ['cn-beijing', 'ap-southeast-1'])
+    } finally {
+      for (const dispose of cleanup.splice(0).reverse()) await dispose()
+      globalThis.fetch = originalFetch
+    }
+    // Remove only the isolated offline fixture profiles before further smoke checks.
+    const reviewDb = new DatabaseSync(join(dataDir, 'seedance-review.sqlite'))
+    reviewDb.prepare('DELETE FROM review_profiles').run(); reviewDb.close()
+    await apply({
+      effect: (setup) => { cleanup.push(setup()) },
+      credentials: { readRecord: async (key) => records.get(key), modifyRecord: async (key, mutate) => { const next = await mutate(records.get(key)); records.set(key, next); return next } },
+      connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },
+    }, { dataDir })
     const imageModels = await routes.get('/api/canvas/v2/models').fetch(new Request('http://localhost/api/canvas/v2/models'))
     assert.equal(imageModels.status, 200)
     const catalog = (await imageModels.json()).models
-    assert.equal(catalog.length, 12)
+    assert.equal(catalog.length, 30)
     assert(catalog.every((model) => model.configurable && !model.has_api_key))
     const gptCatalog = catalog.filter((model) => model.protocol === 'openai-image')
     assert.equal(gptCatalog.length, 4)
@@ -95,6 +148,56 @@ if (process.argv[2] === 'record') {
       const presets = model.capabilities.sizePresets
       assert.equal(presets.length, model.model_id === 'gemini-3.1-flash-lite-image' ? 10 : model.model_id === 'gemini-3.1-flash-image' ? 40 : 30)
       assert(presets.some((preset) => preset.ratio === '21:9' && preset.resolution === '1K' && preset.size === '1584x672'))
+    }
+    const seedreamCatalog = catalog.filter((model) => model.protocol === 'seedream-image')
+    assert.equal(seedreamCatalog.length, 6)
+    for (const model of seedreamCatalog) {
+      const dola = model.model_id.startsWith('dola-'), pro = model.model_id.includes('-pro-')
+      assert.equal(model.model_id, `${dola ? 'dola' : 'doubao'}-seedream-5-0-${pro ? 'pro-260628' : '260128'}`)
+      assert(dola ? model.api_base === 'https://ark.ap-southeast.bytepluses.com/api/v3'
+        : ['https://api.modellink.online/v1', 'https://ark.cn-beijing.volces.com/api/v3'].includes(model.api_base))
+      assert.equal(model.capabilities.sizePresets.length, 24)
+      assert.equal(model.capabilities.defaultSize, '2048x2048')
+      assert.equal(model.capabilities.maxReferences, pro ? 10 : 14)
+      assert.deepEqual(model.capabilities.counts, [1])
+      const { capabilities, has_api_key, api_key_mask, configurable, ...record } = model
+      const official = model.api_base !== 'https://api.modellink.online/v1'
+      const configure = (input) => routes.get('/api/canvas/v2/models').fetch(new Request('http://localhost/api/canvas/v2/models', {
+        method: 'POST', body: JSON.stringify(input),
+      }))
+      if (official) assert.equal((await configure({ ...record, api_key: 'offline-smoke-key' })).status, 400)
+      const saved = await configure({ ...record, api_key: 'offline-smoke-key', ...(official ? { endpoint_id: 'ep-offline-smoke' } : {}) })
+      assert.equal(saved.status, 200)
+      const actual = (await saved.json()).models.find((item) => item.id === model.id)
+      assert.equal(actual.model_id, model.model_id); assert.equal(actual.name, model.name); assert.equal(actual.has_api_key, true)
+      assert.equal(actual.endpoint_id, official ? 'ep-offline-smoke' : undefined)
+      const reveal = await routes.get('/api/canvas/v2/settings-secret').fetch(new Request('http://localhost/api/canvas/v2/settings-secret', {
+        method: 'POST', body: JSON.stringify({ scope: 'model', id: model.id, field: 'api_key' }),
+      }))
+      assert.equal(reveal.status, 200); assert.equal(reveal.headers.get('Cache-Control'), 'no-store')
+      assert.deepEqual(await reveal.json(), { value: 'offline-smoke-key' })
+    }
+    const videoCatalog = catalog.filter((model) => model.protocol === 'seedance-video')
+    assert.equal(videoCatalog.length, 12)
+    for (const model of videoCatalog) {
+      assert.equal(model.kind, 'video')
+      const nsfw = model.model_id.startsWith('dreamina-')
+      assert(nsfw ? model.api_base === 'https://ark.ap-southeast.bytepluses.com/api/v3'
+        : ['https://api.modellink.online/seedance/api/v3', 'https://ark.cn-beijing.volces.com/api/v3'].includes(model.api_base))
+      assert.equal(model.capabilities.secondsRange.max, model.model_id.includes('-2-5-') ? 30 : 15)
+      assert.deepEqual(model.capabilities.referenceKinds, ['image', 'video', 'audio'])
+      assert.deepEqual(model.capabilities.counts, [1])
+      const { capabilities, has_api_key, api_key_mask, configurable, ...record } = model
+      const configure = (input) => routes.get('/api/canvas/v2/models').fetch(new Request('http://localhost/api/canvas/v2/models', {
+        method: 'POST', body: JSON.stringify(input),
+      }))
+      const official = !model.api_base.includes('modellink')
+      if (official) assert.equal((await configure({ ...record, api_key: 'offline-video-key' })).status, 400)
+      const response = await configure({ ...record, api_key: 'offline-video-key', ...(official ? { endpoint_id: 'ep-offline-video' } : {}) })
+      assert.equal(response.status, 200)
+      const actual = (await response.json()).models.find((item) => item.id === model.id)
+      assert.equal(actual.name, model.name); assert.equal(actual.model_id, model.model_id)
+      assert.equal(actual.endpoint_id, official ? 'ep-offline-video' : undefined)
     }
     const taskSearch = await routes.get('/api/canvas/v2/task-search').fetch(new Request('http://localhost/api/canvas/v2/task-search?page=1&pageSize=10'))
     assert.equal(taskSearch.status, 200)
@@ -137,7 +240,7 @@ if (process.argv[2] === 'record') {
     assert.equal(waveform.headers.get('location'), null)
     const original = await routes.get('/api/canvas/v2/media').fetch(new Request(`http://localhost/api/canvas/v2/media?canvas=${id}&id=${audioId}`))
     assert.equal(original.status, 307)
-    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), 'README.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'cordis.patch.yml']
+    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), ...await files('designs'), 'README.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'vitest.config.ts', 'cordis.patch.yml']
     const source = await hashes(sourcePaths)
     const manifest = { name: pkg.name, version: pkg.version, node: process.version, npm: execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim(), source, sourceHash: digest(JSON.stringify(source)), lib, libHash: digest(JSON.stringify(lib)), reproducible: true, compiledHostSmoke: 'passed' }
     await writeFile(`${pkg.name}-${pkg.version}.manifest.json`, JSON.stringify(manifest, null, 2))

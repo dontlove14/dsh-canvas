@@ -12,6 +12,7 @@ import { useNodeActions } from './CanvasSelection'
 import { NODE_OVERLAY_STYLE } from './nodeOverlayLayout'
 import { SignedImage } from './SignedMedia'
 import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
+import { ReviewButton } from './ReviewControls'
 
 function ActionIcon({ action }: { action: 'rotate' | 'download' | 'expand' }) {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -56,9 +57,10 @@ function ResourceNodeBody({ node, asset, task, selected, api, workspace, rotatio
     updateInternals(node.id)
   }, [node.id, size.width, size.height, onSize, updateInternals])
   return <article className={`dc-node dc-resource-node ${selected ? 'selected' : ''} ${node.kind}`} style={{ width: size.width, height: size.height }}>
-    <NodeTitle node={node} onRename={onRename} />
+    <NodeTitle node={node} onRename={onRename} assetId={asset.id} />
     <NodeToolbar position={Position.Top} align="end" offset={42} isVisible={actionsVisible} style={NODE_OVERLAY_STYLE}>
       <div className="dc-resource-toolbar nodrag nopan nowheel" role="toolbar" aria-label={asset.kind === 'image' ? '图片操作' : '视频操作'}>
+        <ReviewButton asset={asset} />
         {asset.kind === 'image' && <UiButton title="顺时针旋转 90°" aria-label="顺时针旋转 90°" onClick={() => onRotate(node.id, asset.id)}><ActionIcon action="rotate" /></UiButton>}
         <UiButton title="下载原文件" aria-label="下载原文件" onClick={() => {
           const link = document.createElement('a'); link.href = api.media(workspace, asset.id, true); link.download = asset.filename; link.click()

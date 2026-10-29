@@ -1,0 +1,14 @@
+{
+  "package": "@volcengine/openapi",
+  "version": "1.36.2",
+  "tarball": "https://registry.npmjs.org/@volcengine/openapi/-/openapi-1.36.2.tgz",
+  "source": "lib/base/sign.js",
+  "sourceSha256": "b85d332b255ac749c538166ba72989b57c9388a5da6d5c20c2c6f2304f728288",
+  "upstreamLicenseSha256": "05d08133dc3479517855b7077f4c35224bff4f7b57dab98a258418cd94feb666",
+  "changes": [
+    "Remove util.debuglog import and calls to prevent signed media URL logging.",
+    "Omit unused commented SignedQueries line and source map reference.",
+    "Append a trailing newline to the upstream LICENSE."
+  ],
+  "runtimeDependencies": { "crypto-js": "4.2.0", "form-data": "4.0.6" }
+}

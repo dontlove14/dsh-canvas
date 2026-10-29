@@ -29,7 +29,7 @@ export function mockRecord(id: string): ModelRecord {
 }
 export function isMockModel(record: { id: string; kind: string; name: string; model_id: string; api_base: string; protocol: string }): boolean {
   const model = mockModel(record.id)
-  return !!model && ['kind', 'name', 'model_id', 'api_base', 'protocol'].every((key) => record[key as keyof ModelRecord] === model[key as keyof ModelRecord])
+  return !!model && (['kind', 'name', 'model_id', 'api_base', 'protocol'] as const).every((key) => record[key] === model[key])
 }
 export function validateMockGeneration(snapshot: TaskSnapshot, assets: readonly Asset[]): void {
   if (!isMockModel(snapshot.model)) throw new Error('请选择 Mock 模型')

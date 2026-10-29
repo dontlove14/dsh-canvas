@@ -46,8 +46,9 @@ export function storageInput(revision = 0, bucket = 'test-bucket'): StorageInput
 }
 export async function initialize(instance: CanvasService, runtime = false) {
   await instance.store.init()
+  await instance.reviews.init()
   if (!(await instance.store.storage()).configured) await instance.store.setStorage(storageInput())
-  if (runtime) await instance.runtime.start()
+  if (runtime) { await instance.reviewRuntime.start(); await instance.runtime.start() }
 }
 export async function cloudPath(store: Store, id: string): Promise<string> {
   const canvas = await store.db.get('SELECT canvas_id FROM canvas_assets WHERE id=?', [id])

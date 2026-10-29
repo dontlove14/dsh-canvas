@@ -9,13 +9,13 @@ import css from './styles.css?inline'
 import { CanvasApi } from './api'
 import { CanvasApp } from './Canvas'
 import { CanvasSettings } from './Settings'
-import { Button, Input, Checkbox, SegmentedControl, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Checkbox, SegmentedControl, Menu, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { HarnessUiProvider } from './ui'
 
 export const name = 'dsh-canvas'
 export const inject = ['slots', 'layout', 'sidebarRightTabs']
 const PANEL_ID = 'dsh-canvas' as MainPanelId
-const components = { Button, Input, Checkbox, SegmentedControl, Menu, Modal }
+const components = { Button, Input, Checkbox, SegmentedControl, Menu, Modal, Tooltip }
 interface Face { api: CanvasApi }
 function MainPanel({ api }: Face) {
   return <HarnessUiProvider components={components}><CanvasApp api={api} /></HarnessUiProvider>

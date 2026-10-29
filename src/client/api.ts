@@ -2,6 +2,8 @@ import { type ModelInput, type ModelsResponse, type PublicModel, type MediaKind,
 import { V2_ROOT, type CanvasSnapshot, type GraphMutation, type Catalog, type TaskDetail, type TaskSummary, type TaskSearchQuery, type TaskPage } from '../shared/v2'
 import { WaveformSchema, WAVEFORM_VERSION, type AudioWaveform } from '../shared/audioWaveform'
 import type { ObjectStorageSettings, StorageInput, MediaUrl, MediaVariant } from '../shared/objectStorage'
+import type { SettingSecretRequest, SettingSecretResponse } from '../shared/settingSecrets'
+import type { ReviewSettings, ReviewSettingsInput, ReviewProvider, ReviewPage, ReviewSubmit, PublicReview, ReviewGroups } from '../shared/seedanceReview'
 
 export class ApiError extends Error {
   constructor(message: string, readonly code: string, readonly status: number) { super(message) }
@@ -21,6 +23,20 @@ export class CanvasApi {
   private json(data: unknown): RequestInit { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) } }
   async models(): Promise<PublicModel[]> { return (await this.request<ModelsResponse>('models', {})).models }
   async saveModel(input: ModelInput): Promise<PublicModel[]> { return (await this.request<ModelsResponse>('models', {}, this.json(input))).models }
+  async settingSecret(input: SettingSecretRequest, signal?: AbortSignal): Promise<string> {
+    return (await this.request<SettingSecretResponse>('settings-secret', {}, { ...this.json(input), signal, cache: 'no-store' })).value
+  }
+  reviewSettings(signal?: AbortSignal): Promise<ReviewSettings> { return this.request('seedance-review-settings', {}, { signal, cache: 'no-store' }) }
+  saveReviewSettings(input: ReviewSettingsInput): Promise<ReviewSettings> { return this.request('seedance-review-settings', {}, this.json(input)) }
+  testReviewSettings(provider: ReviewProvider): Promise<{ ok: boolean }> { return this.request('seedance-review-settings-test', {}, this.json({ provider })) }
+  reviews(canvas: string, signal?: AbortSignal): Promise<ReviewPage> { return this.request('asset-reviews', { canvas }, { signal, cache: 'no-store' }) }
+  submitReview(canvas: string, input: ReviewSubmit): Promise<PublicReview> { return this.request('asset-reviews', { canvas }, this.json(input)) }
+  reviewAction(canvas: string, id: string, action: 'retry' | 'resume' | 'reconcile' | 'abandon', requestId?: string): Promise<PublicReview> {
+    return this.request('asset-review-action', { canvas, id }, this.json({ action, ...(requestId ? { requestId } : {}) }))
+  }
+  reviewGroups(canvas: string, provider: ReviewProvider, nextToken?: string, signal?: AbortSignal): Promise<ReviewGroups> {
+    return this.request('review-groups', { canvas, provider, ...(nextToken ? { nextToken } : {}) }, { signal, cache: 'no-store' })
+  }
   async deleteModel(id: string): Promise<PublicModel[]> { return (await this.request<ModelsResponse>('model-delete', { id }, { method: 'POST' })).models }
   catalog(): Promise<Catalog> { return this.request('catalog', {}) }
   catalogCommand(input: { operation: string; id?: string; name?: string; revision?: number; folderId?: string | null }): Promise<{ id: string }> {

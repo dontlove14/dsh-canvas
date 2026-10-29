@@ -1,6 +1,6 @@
 # ADR 决策记录
 
-文档类型：解释；负责人：项目维护者；最近核对：2026-10-28。发布时复核有效性；决策替换或重审条件出现时立即更新，规则见[文档导航](../index.md)。
+文档类型：解释；负责人：项目维护者；最近核对：2026-10-29。发布时复核有效性；决策替换或重审条件出现时立即更新，规则见[文档导航](../index.md)。
 
 0001–0012 保留首版补录；0013–0017 记录 SQLite / 目录 / 媒体 / Runtime 实施，0018 补充项目列表与编辑器导航，0019 记录原生设置样式与宿主主题继承，0020 记录通用组件规则，0021 记录每轮自动更新本地插件和压缩包清理。被取代的实现标为“已替代”，仍有效的原则在原 ADR 增加更新说明。2026-10-26 为本次实施 / 核对日期。
 
@@ -62,6 +62,16 @@
 | [ADR-0050](0050-submission-history-and-expanded-result-ports.md) | 按提交堆叠历史与展开逐素材端点 | 立即卡片、同节点多任务、确切回执核对、独立Loading / 引用、仅索引升级 | 已采纳；多次提交替代0026 |
 | [ADR-0051](0051-readonly-submission-inspection.md) | 展开只读记录与收起最新编辑 | 持久快照、迟到读取取消、无写入查看、最新输入恢复、原引用身份 | 已采纳；替代0050展开编辑条款 |
 | [ADR-0052](0052-position-and-content-render-isolation.md) | 节点位置与内容更新隔离 | 全字段共享、所属节点投影、几何测量、编辑器实时图写入、不改持久格式 | 已采纳 |
+| [ADR-0053](0053-seedream-endpoint-routing-and-model-identity.md) | Seedream 独立渠道、EP路由与显示身份 | doubao / dola六组合、官方EP / Model Link ID、固定快照、原生JSON与OSS | Lite ID / 无结果状态由0054替代 |
+| [ADR-0054](0054-no-result-submission-failure-and-seedream-id-correction.md) | 无结果提交失败与Seedream ID更正 | 本地failed、不重提、红色感叹号、配置更正保留凭据 / 快照 | 已采纳；部分替代0046 / 0053 |
+| [ADR-0055](0055-seedance-video-modes-and-independent-provider-routing.md) | Seedance模式与独立渠道 | 八型号十二组合、官方EP / Model Link ID、互斥模式 / 帧角色、混合参考与OSS | 手动文生选择由0056替代，其余已采纳 |
+| [ADR-0056](0056-seedance-mode-inference-from-references.md) | 根据引用推导Seedance模式 | 空引用text、首连reference、frames仅手动、清空重置、边与模式一起保存 | 已采纳；部分替代0055 |
+| [ADR-0057](0057-provider-cards-and-direct-model-editing.md) | 供应商卡片与直接编辑 | 同供应商跨协议分组、响应式卡片、逐组合Key / EP编辑、取消 / 失败 / 清除保护 | 已采纳；部分替代0040 |
+| [ADR-0058](0058-masked-settings-and-explicit-secret-reveal.md) | 脱敏配置与显式查看 | 部分掩码、逐字段owner只读、眼睛显隐、预览不写草稿、取消与迟到保护 | 已采纳；部分替代0016 / 0057 |
+| [ADR-0059](0059-seedance-asset-review-and-frozen-generation-references.md) | Seedance素材预审与固定生成引用 | 两家独立 / 脱敏、按画布建组、逐素材异步恢复、主图 / 历史标记、Active用Asset ID其余URL | 已采纳 |
+| [ADR-0060](0060-canvas-text-selection-opt-in.md) | 画布文字默认禁选与显式开放 | 画布 / portal统一默认、原生输入 / 可编辑 / 复制区域开放、保留节点框选与原子标签 | 已采纳 |
+| [ADR-0061](0061-dependency-backed-media-pixel-loading.md) | 媒体文件像素Loading | 真实ImageGeneration、Harness黑白主题、共享GPU / 暂停 / 静态兼容与隐藏署名 | 已采纳；媒体阶段部分替代0046 / 0047 |
+| [ADR-0062](0062-harness-node-delete-confirmation.md) | Harness节点删除确认 | 原生Delete / Backspace、Modal / Button、异步取消与最新任务检查、保留媒体 / 下游结果 | 已采纳 |
 
 ## 如何使用
 

@@ -2,6 +2,9 @@
 
 状态：已采纳
 
+失败静态依赖效果由 [ADR-0054](0054-no-result-submission-failure-and-seedream-id-correction.md) 替代。
+0.2.60起文件加载阶段由 [ADR-0061](0061-dependency-backed-media-pixel-loading.md) 改用 ImageGeneration 像素效果；本文件的文件阶段 Orb / Beam 描述保留为历史，任务阶段及后续选型约定继续适用。
+
 文档类型：解释；负责人：项目维护者 / 开发执行者；最近核对：2026-10-28。
 记录日期：2026-10-28。新增或替换插件Loading、更新动画依赖或宿主主题约定时复核。
 
@@ -19,7 +22,7 @@
 
 0.2.41按[ADR-0047](0047-zoom-aware-loading-resolution.md)为锁定Orb增加经上游hash校验的绘图密度参数，仅随实际画布缩放提高Canvas2D像素数，不改动画引擎、设计尺寸或本ADR状态 / 主题 / 暂停约定。
 
-图片生成、视频生成、空TTS、带结果TTS、图片 / 视频 / 音频资源及无素材节点均使用同一入口；没有任务且文件已就绪时保留原空节点图标和媒体内容。submitted / queued使用Beam `pulse-inner`与Orb `connecting`，generating用整圈`md`与`working`，saving用`pulse-outside`与`weaving`；生成成功 / 普通素材加载中用`pulse-inner`与`shaping`。unknown / save_failed用静态依赖效果与不同的警告轮廓，不持续假装执行；执行终态与本地文件就绪均满足后移除Loading并释放动画。仅视觉状态变化，不变更任务身份、图结构、尺寸、引用、结果或媒体播放器挂载。
+图片生成、视频生成、空TTS、带结果TTS、图片 / 视频 / 音频资源及无素材节点均使用同一入口；没有任务且文件已就绪时保留原空节点图标和媒体内容。submitted / queued使用Beam `pulse-inner`与Orb `connecting`，generating用整圈`md`与`working`，saving用`pulse-outside`与`weaving`；生成成功 / 普通素材加载中用`pulse-inner`与`shaping`。0.2.49起 failed / unknown / save_failed 按 ADR-0054 改用静态红色感叹号，优先于文件Loading并释放依赖动画。仅视觉状态变化，不变更图结构、尺寸、引用、结果或媒体播放器挂载。
 
 节点边界汇总内部媒体加载状态，保持单个整节点Loading，不在图片与外层重复叠加。SignedImage在拿到当前对象链接、load与decode完成前隐藏原生img表面，避免空src / 加载 / 错误时露出图片图标或文件名；资产切换立即失效旧链接与旧decode回调。图片等解码，视频播放器等loadeddata首帧，音频等loadedmetadata与波形请求结束；波形失败保留原音频可播放路径，媒体链接 / 解码 / 播放终态错误停止等待并保留实际错误，不无限Loading。装饰结果堆叠图不阻塞主图就绪。引用图与独立预览复用加载方式，使用20px Orb适配小区域。
 

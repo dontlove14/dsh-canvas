@@ -11,6 +11,7 @@ import { VideoPlayer } from './VideoPlayer'
 import { useNodeActions } from './CanvasSelection'
 import { SignedImage } from './SignedMedia'
 import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
+import { ReviewButton } from './ReviewControls'
 
 export function GenerationGlyph({ video = false }: { video?: boolean }) {
   return <svg width="44" height="44" viewBox="0 0 48 48" fill="currentColor" aria-hidden="true">
@@ -45,7 +46,7 @@ function GenerationNodeBody({ node, asset, results, task, selected, expanded, ap
   const shown = expanded ? results : asset ? [asset] : []
   return <article className={`dc-node dc-generation-node ${asset ? 'has-result' : ''} ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''} ${results.length > 1 && !expanded ? 'stacked' : ''}`}
     style={{ width: size.width, height: size.height }}>
-    <NodeTitle node={node} onRename={onRename} />
+    <NodeTitle node={node} onRename={onRename} assetId={asset?.id} />
     {(!expanded || !asset) && <><CanvasHandle type="target" /><CanvasHandle type="source" disabled={!asset} /></>}
     {results.length > 1 && !expanded && results.filter((item) => item.id !== asset?.id).slice(0, 2).reverse().map((item, index) =>
       <div key={item.id} className={`dc-result-layer ${index === 0 && results.length > 2 ? 'second' : 'first'}`}>
@@ -60,12 +61,14 @@ function GenerationNodeBody({ node, asset, results, task, selected, expanded, ap
           {expanded ? <>
             <span className="dc-result-index">{index + 1}{item.id === asset.id ? ' · 主图' : ''}</span>
             {actionsVisible && <div className="dc-group-actions nodrag nopan nowheel" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+              {item.id === asset.id && <ReviewButton asset={item} />}
               <UiButton onClick={() => download(api, workspace, item)}>↓ 下载</UiButton>
               {item.id !== asset.id && <UiButton onClick={() => onResult(node.id, item.id)}>设为主图</UiButton>}
               {index === size.collapseIndex && <UiButton onClick={() => onExpand(node.id)}><ExpandGlyph collapse />收起</UiButton>}
             </div>}
             {item.id === asset.id && <><CanvasHandle type="target" /><CanvasHandle type="source" /></>}
           </> : actionsVisible && <div className="dc-group-actions nodrag nopan nowheel" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+            <ReviewButton asset={item} />
             {results.length === 1 && <UiButton title="下载原文件" aria-label="下载原文件" onClick={() => download(api, workspace, item)}>↓</UiButton>}
             {results.length === 1 && <UiButton title="查看原文件" aria-label="查看原文件" onClick={() => onOpen(item)}><ExpandGlyph /></UiButton>}
             {results.length > 1 && <UiButton title="展开生成结果" aria-label={`展开 ${results.length} 个生成结果`} onClick={() => onExpand(node.id)}>

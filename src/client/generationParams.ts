@@ -27,5 +27,6 @@ export function ratioChoices(choices: readonly SizeChoice[], resolution: string 
 }
 export function paramsSummary(model: PublicModel, params: GenerationParams): string {
   const choice = sizeChoices(model).find((choice) => choice.size === params.size)
-  return [choice?.ratio ?? params.size, choice?.resolution, `${params.n}${model.kind === 'video' ? '条' : '张'}`, ...(model.kind === 'video' ? [`${params.seconds}秒`] : [])].filter(Boolean).join(' · ')
+  return [choice?.ratio === 'adaptive' ? '自动比例' : choice?.ratio ?? params.size, choice?.resolution, `${params.n}${model.kind === 'video' ? '条' : '张'}`,
+    ...(model.kind === 'video' ? [`${params.seconds}秒`] : [])].filter(Boolean).join(' · ')
 }

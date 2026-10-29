@@ -1,11 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
 import { BorderBeam } from 'border-beam'
 import { ThinkingOrb } from 'thinking-orbs'
 import { TRACKED_STATUSES, TaskStatusLabels, type TaskStatus } from '../shared/contracts'
 import type { TaskSummary } from '../shared/v2'
 import { useLoadingPixelRatio } from './loadingResolution'
+import { MediaLoadingEffect } from './MediaLoadingEffect'
 
-type Environment = { theme: 'dark' | 'light'; ink: string; paused: boolean }
+type Environment = { theme: 'dark' | 'light'; ink: string; surface?: string; paused: boolean }
 const useDomEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 export const NodeLoadingContext = createContext<Environment>({ theme: 'dark', ink: '#efedf4', paused: false })
 const NodeMediaContext = createContext<{ loading: boolean; report: (id: string, loading: boolean) => void } | null>(null)
@@ -36,7 +37,7 @@ export function useNodeMediaLoading(loading: boolean): boolean {
 
 /** One subscription per workspace; the libraries receive the actual Harness theme. */
 export function useNodeLoadingEnvironment(root: RefObject<HTMLElement>, active: boolean): Environment {
-  const [appearance, setAppearance] = useState({ theme: 'dark' as 'dark' | 'light', ink: '#efedf4' })
+  const [appearance, setAppearance] = useState({ theme: 'dark' as 'dark' | 'light', ink: '#efedf4', surface: '#202023' })
   const [reduced, setReduced] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
   useDomEffect(() => {
     const element = root.current
@@ -50,7 +51,9 @@ export function useNodeLoadingEnvironment(root: RefObject<HTMLElement>, active: 
       // Computed Harness text colors are rgb(); use the library's supported tint.
       const ink = /^(#[\da-f]{3}(?:[\da-f]{3})?|rgba?\()/i.test(style.color)
         ? style.color : theme === 'dark' ? '#efedf4' : '#202023'
-      setAppearance((old) => old.theme === theme && old.ink === ink ? old : { theme, ink })
+      const hostSurface = style.getPropertyValue('--dc-surface').trim()
+      const surface = hostSurface && !hostSurface.includes('var(') ? hostSurface : theme === 'dark' ? '#202023' : '#ffffff'
+      setAppearance((old) => old.theme === theme && old.ink === ink && old.surface === surface ? old : { theme, ink, surface })
     }
     resolve()
     const observer = new MutationObserver(resolve)
@@ -90,6 +93,16 @@ export function NodeLoading({ task, title, mediaLoading = false, compact = false
   task?: TaskSummary; title: string; mediaLoading?: boolean; compact?: boolean
 }) {
   const media = useContext(NodeMediaContext)
+  if (task && (task.status === 'failed' || task.status === 'unknown' || task.status === 'save_failed')) {
+    return <div className="dc-node-failure" data-task-status={task.status} data-compact={compact ? '' : undefined}>
+      <svg className="dc-node-failure-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" />
+        <path d="M24 13v13" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+        <circle cx="24" cy="34" r="2.5" fill="currentColor" />
+      </svg>
+      <span className="dc-sr-only" role="status" aria-live="polite" aria-atomic="true" aria-label={`${title}状态`}>{TaskStatusLabels[task.status]}</span>
+    </div>
+  }
   const phase = task && TRACKED_STATUSES.has(task.status) ? task.status : (mediaLoading || media?.loading) ? 'media-loading' : null
   return phase ? <TrackedNodeLoading phase={phase} task={task} title={title} compact={compact} /> : null
 }
@@ -97,12 +110,11 @@ export function NodeLoading({ task, title, mediaLoading = false, compact = false
 function TrackedNodeLoading({ phase, task, title, compact }: {
   phase: TaskStatus | 'media-loading'; task?: TaskSummary; title: string; compact: boolean
 }) {
-  const { theme, ink, paused: environmentPaused } = useContext(NodeLoadingContext)
+  const { theme, ink, surface, paused: environmentPaused } = useContext(NodeLoadingContext)
   const frame = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
   const [radius, setRadius] = useState(10)
   const [inNode, setInNode] = useState(false)
-  const pixelRatio = useLoadingPixelRatio(inNode)
   useDomEffect(() => { setInNode(!!frame.current?.closest('.dc-node')) }, [])
   useEffect(() => {
     const element = frame.current
@@ -115,25 +127,37 @@ function TrackedNodeLoading({ phase, task, title, compact }: {
     if (frame.current) observer.observe(frame.current)
     return () => observer.disconnect()
   }, [])
-  const warning = phase === 'unknown' || phase === 'save_failed'
-  const paused = environmentPaused || !visible || warning
-  const preset = phase === 'generating' || warning ? 'md' : phase === 'saving' ? 'pulse-outside' : 'pulse-inner'
-  const orb = phase === 'generating' ? 'working' : phase === 'saving' ? 'weaving' : phase === 'media-loading' ? 'shaping' : 'connecting'
-  const progress = !warning && phase !== 'media-loading' && typeof task?.progress === 'number' && Number.isFinite(task.progress)
+  const paused = environmentPaused || !visible
+  const preset = phase === 'generating' ? 'md' : phase === 'saving' ? 'pulse-outside' : 'pulse-inner'
+  const orb = phase === 'generating' ? 'working' : phase === 'saving' ? 'weaving' : 'connecting'
+  const progress = phase !== 'media-loading' && typeof task?.progress === 'number' && Number.isFinite(task.progress)
     ? ` ${Math.round(Math.max(0, Math.min(100, task.progress)))}%` : ''
   const status = <span className="dc-node-loading-label dc-sr-only" role="status" aria-live="polite" aria-atomic="true" aria-label={`${title}状态`}>
     {phase === 'media-loading' ? '正在加载媒体' : TaskStatusLabels[phase]}{progress}
   </span>
-  return <div ref={frame} className={`dc-node-loading ${warning ? 'dc-node-loading-warning' : ''}`} data-task-status={phase} data-loading-preset={preset}>
+  if (phase === 'media-loading') return <div ref={frame} className="dc-node-loading dc-node-media-loading" data-task-status={phase}
+    data-loading-preset="pixels-organic" data-loading-theme={theme} data-loading-paused={paused ? '' : undefined}>
+    <MediaLoadingEffect theme={theme} surface={surface ?? (theme === 'dark' ? '#202023' : '#ffffff')} paused={paused} radius={radius} />
+    {status}
+  </div>
+  return <div ref={frame} className="dc-node-loading" data-task-status={phase} data-loading-preset={preset}>
     {typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? <BorderBeam
       // Pulse presets use the dependency's JS oscillator. Switching to static md
       // tears it down while hidden/reduced; pausing CSS alone would leave JS running.
-      size={paused ? 'md' : preset} colorVariant="mono" theme={theme} strength={warning ? .35 : .75} borderRadius={radius}
+      size={paused ? 'md' : preset} colorVariant="mono" theme={theme} strength={.75} borderRadius={radius}
       className="dc-node-loading-beam" data-loading-paused={paused ? '' : undefined} data-loading-theme={theme} css={beamPauseCss}>
       <div className="dc-node-loading-content">
-        <ThinkingOrb size={compact ? 20 : 64} pixelRatio={pixelRatio} state={orb} theme={theme} color={ink} paused={paused} aria-hidden="true" />
+        <TaskLoadingOrb compact={compact} inNode={inNode} state={orb} theme={theme} ink={ink} paused={paused} />
         {status}
       </div>
     </BorderBeam> : <div className="dc-node-loading-content">{status}</div>}
   </div>
+}
+
+function TaskLoadingOrb({ compact, inNode, state, theme, ink, paused }: {
+  compact: boolean; inNode: boolean; state: ComponentProps<typeof ThinkingOrb>['state']
+  theme: 'light' | 'dark'; ink: string; paused: boolean
+}) {
+  const pixelRatio = useLoadingPixelRatio(inNode)
+  return <ThinkingOrb size={compact ? 20 : 64} pixelRatio={pixelRatio} state={state} theme={theme} color={ink} paused={paused} aria-hidden="true" />
 }

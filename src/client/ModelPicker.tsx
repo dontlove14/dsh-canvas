@@ -1,18 +1,20 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { PublicModel } from '../shared/contracts'
-import { providerFor } from '../shared/modelCatalog'
+import { providerFor, modelConfigured } from '../shared/modelCatalog'
 import { isMockModel } from '../shared/mockModels'
 import { UiButton } from './ui'
+import { useCanvasTextSelectionScope } from './canvasTextSelection'
 
 /** Only configured real model-provider combinations are selectable. */
 export function selectableModels(models: readonly PublicModel[]): PublicModel[] {
-  return models.filter((model) => model.has_api_key && !isMockModel(model))
+  return models.filter((model) => modelConfigured(model) && !isMockModel(model))
 }
 
 export function ModelPicker({ models, value, disabled, onChange }: {
   models: readonly PublicModel[]; value: string | null; disabled: boolean; onChange: (model: PublicModel) => void
 }) {
+  const textScope = useCanvasTextSelectionScope()
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ left: 12, top: 12 })
   const anchor = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null)
@@ -43,7 +45,7 @@ export function ModelPicker({ models, value, disabled, onChange }: {
       aria-controls={open ? id : undefined} onClick={() => setOpen((current) => !current)}>
       <span>{selected ? `${selected.name}${providerFor(selected) ? ` · ${providerFor(selected)!.label}` : ''}` : options.length ? '选择模型' : '请前往设置页面配置模型'}</span><span aria-hidden="true">⌄</span>
     </UiButton>
-    {open && createPortal(<div ref={popup} id={id} role="dialog" aria-label="选择模型和供应商" className="dc-overlay-scope dc-model-picker nodrag nopan nowheel" style={position}
+    {open && createPortal(<div ref={popup} id={id} role="dialog" aria-label="选择模型和供应商" className={`dc-overlay-scope dc-model-picker nodrag nopan nowheel ${textScope}`} style={position}
       onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}
       onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setOpen(false) }}>
       {groups.map((modelId) => <fieldset key={modelId}><legend>{options.find((model) => model.model_id === modelId)!.name}</legend>

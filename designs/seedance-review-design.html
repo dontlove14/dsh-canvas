@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Seedance 预审 · 设计提案</title>
+<style>
+:root{--bg:#f5f6f8;--paper:#fff;--soft:#f0f2f5;--ink:#20232a;--muted:#66717f;--line:#dce1e7;--accent:#087f9c;--pass:#087f9c;--fail:#ba333b;--wait:#866016;--focus:#087f9c;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#17191d;--paper:#202328;--soft:#292d33;--ink:#e6e9ed;--muted:#a1abb8;--line:#3b424c;--accent:#50c6e0;--pass:#50c6e0;--fail:#ff8990;--wait:#e5bd75;--focus:#50c6e0;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.75}main{max-width:1080px;margin:0 auto;padding:40px 28px 64px}header{padding-bottom:24px;border-bottom:1px solid var(--line)}h1{font-size:30px;line-height:1.3;margin:8px 0 12px;font-weight:650}h2{font-size:23px;line-height:1.4;margin:0 0 16px}h3{font-size:17px;line-height:1.5;margin:0 0 12px}p{margin:10px 0}.meta,.muted,small{color:var(--muted)}.meta{font-size:13px}.lead{max-width:850px}.tag{display:inline-flex;align-items:center;padding:2px 10px;font-size:12px;border:1px solid var(--line);border-radius:100px}nav{display:flex;flex-wrap:wrap;gap:16px;margin-top:20px}a{color:var(--accent);text-underline-offset:3px}section.chapter{margin-top:32px;padding:28px;background:var(--paper);border:1px solid var(--line);border-radius:12px}.notice{border-left:3px solid var(--accent);padding:12px 18px;background:var(--soft);margin:18px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.card{padding:20px;border:1px solid var(--line);border-radius:10px}.card-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.card-head h3{margin:0}.form{display:grid;gap:12px;margin-top:16px}label{display:grid;gap:5px;font-size:13px;color:var(--muted)}.secret{display:flex;align-items:center;gap:4px;background:var(--soft);border:1px solid var(--line);border-radius:7px}.secret input{min-width:0;width:100%;border:0;background:transparent;box-shadow:none}.secret button{border:0;background:transparent;padding:8px;flex-shrink:0}button,input,select{font:inherit;color:var(--ink)}button,select{border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:7px 12px;cursor:pointer}input{padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--soft)}button:hover{border-color:var(--accent)}button:disabled{cursor:default;opacity:.5}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--focus);outline-offset:3px}.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}.demo-tag{font-size:12px;color:var(--muted);margin-bottom:12px}.feedback{font-size:13px;min-height:23px;color:var(--accent)}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.tabs button[aria-selected=true]{border-color:var(--accent);color:var(--accent)}.canvas-demo{padding:20px;background:var(--soft);border-radius:10px;margin-top:14px}.node{padding:16px 18px;border:1px solid var(--line);background:var(--paper);border-radius:9px;min-width:0}.node-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.node-name{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}.node-name strong{font-size:14px;font-weight:500}.badges{display:flex;gap:9px;flex-wrap:wrap;font-size:12px}.badge{display:inline-flex;gap:4px;align-items:center;color:var(--pass);white-space:nowrap}.badge.failed{color:var(--fail)}.badge.unknown{color:var(--wait)}.icon{width:16px;height:16px;display:inline-block;vertical-align:middle;flex-shrink:0}.toolbar{display:flex;gap:5px}.toolbar button{padding:5px 7px;display:inline-flex;align-items:center;gap:5px}.media-outline{margin-top:16px;min-height:72px;display:flex;gap:12px;align-items:center;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}.media-outline svg{width:34px;height:34px}.result-picker{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.result-picker button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}.history{display:grid;gap:14px}.history .node.active{border-color:var(--accent)}.popover{margin-top:18px;border:1px solid var(--line);background:var(--paper);padding:18px;border-radius:9px}.popover[hidden]{display:none}.popover h3{font-size:15px}.popover-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.table-wrap{width:100%;overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;margin:14px 0}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:11px 12px}th{background:var(--soft);font-weight:550}th:first-child,td:first-child{padding-left:10px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:var(--soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:18px 0}.step{border-top:2px solid var(--accent);padding:12px 0}.step small{display:block}.sources{font-size:13px}.sources li{margin:7px 0}.foot{margin-top:24px;font-size:13px;color:var(--muted)}[hidden]{display:none!important}
+@media(max-width:700px){main{padding:24px 14px 40px}h1{font-size:26px}section.chapter{padding:20px 16px}.grid,.steps,.popover-fields{grid-template-columns:1fr}th,td{padding:10px 8px}.canvas-demo{padding:14px}.node{padding:14px}}
+@media print{body{background:#fff;color:#111}main{max-width:none;padding:0}section.chapter{break-inside:avoid;border-color:#ddd}.actions,.tabs,nav{display:none}a{color:inherit}.demo-tag:after{content:"（打印状态示意）"}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="meta">设计提案 · 2026-10-29 · 基于本机插件 0.2.53 · 待用户评审</div>
+<h1>Seedance 预审</h1>
+<p class="meta">用户已批准，功能已纳入0.2.54；本页保留交互提案与离线演示，当前行为见仓库 ADR-0059。</p>
+<p class="lead">在设置中分别配置国内与海外账号，在画布上对具体图片、视频、音频发起送审；以名称旁的状态提示跟踪结果，审核通过后供对应供应商的视频模型引用。</p>
+<span class="tag">本稿不实现插件功能</span>
+<nav aria-label="文档导航"><a href="#settings">设置</a><a href="#review">节点与堆叠</a><a href="#groups">素材组</a><a href="#generation">生成引用</a><a href="#exceptions">恢复与边界</a><a href="seedance-review-architecture.md">技术设计</a></nav>
+</header>
+
+<section class="chapter" id="scope">
+<h2>先确定素材组边界</h2>
+<p><strong>按画布自动创建的组使用 <code>AIGC</code> 类型，用于虚拟人像素材。</strong>真实人物使用已认证的真人组；一个真人组只能对应一个人，不能把画布上所有人物放进同一个自动组。</p>
+<p>所有有实际文件的图片、视频、音频节点都提供预审入口。文件类型支持并不代表内容适用于虚拟素材库：非虚拟人像类素材无需进入该库，真人应选择真人认证组。</p>
+<div class="notice"><strong>建议的首轮范围：</strong>设置两家供应商、按画布创建虚拟组、单素材异步送审、逐素材状态与恢复、生成引用。真人素材支持选择官方已认证的组；无可用真人组时，引导到官方控制台完成认证。本轮不在插件内新建 H5 认证系统，不新增审核策略开关。</div>
+<p class="muted">这是针对官方接口限制提出的方案，不把上传虚拟组当作真人认证。是否将完整 H5 真人认证也纳入首轮，属于待评审范围。</p>
+</section>
+
+<section class="chapter" id="settings">
+<h2>01 · 设置页新增「Seedance 预审」</h2>
+<p>与对象存储、模型设置、TTS 设置并列。页内两张独立配置卡片：<strong>Bytedance</strong>、<strong>BytePlus</strong>。每张只有 ProjectName、AK、SK，分别保存和编辑，不共用模型 API Key，也不共用 OSS 凭据。</p>
+<div class="demo-tag">可点击的设置示意 · 所有值均为演示值 · 不读写插件或账号</div>
+<div class="tabs" aria-label="设置标签示意"><button disabled>对象存储</button><button disabled>模型设置</button><button disabled>TTS 设置</button><button aria-current="page">Seedance 预审</button></div>
+<div class="grid" id="settings-demo">
+<article class="card" data-provider-form="bytedance">
+<div class="card-head"><h3>Bytedance</h3><span class="tag">已配置 · 演示</span></div>
+<form class="form">
+<label>ProjectName<span class="secret"><input type="password" value="default" autocomplete="off" aria-label="Bytedance ProjectName"><button type="button" data-eye aria-label="显示 Bytedance ProjectName">◉</button></span></label>
+<label>Access Key（AK）<span class="secret"><input type="password" value="DEMO_BYTEDANCE_AK_NOT_A_CREDENTIAL" autocomplete="off" aria-label="Bytedance AK"><button type="button" data-eye aria-label="显示 Bytedance AK">◉</button></span></label>
+<label>Secret Key（SK）<span class="secret"><input type="password" value="DEMO_BYTEDANCE_SK_NOT_A_CREDENTIAL" autocomplete="off" aria-label="Bytedance SK"><button type="button" data-eye aria-label="显示 Bytedance SK">◉</button></span></label>
+<div class="actions"><button type="button" data-test>测试连接</button><button type="submit" class="primary">保存</button></div>
+<div class="feedback" role="status"></div>
+</form>
+</article>
+<article class="card" data-provider-form="byteplus">
+<div class="card-head"><h3>BytePlus</h3><span class="tag">已配置 · 演示</span></div>
+<form class="form">
+<label>ProjectName<span class="secret"><input type="password" value="default" autocomplete="off" aria-label="BytePlus ProjectName"><button type="button" data-eye aria-label="显示 BytePlus ProjectName">◉</button></span></label>
+<label>Access Key（AK）<span class="secret"><input type="password" value="DEMO_BYTEPLUS_AK_NOT_A_CREDENTIAL" autocomplete="off" aria-label="BytePlus AK"><button type="button" data-eye aria-label="显示 BytePlus AK">◉</button></span></label>
+<label>Secret Key（SK）<span class="secret"><input type="password" value="DEMO_BYTEPLUS_SK_NOT_A_CREDENTIAL" autocomplete="off" aria-label="BytePlus SK"><button type="button" data-eye aria-label="显示 BytePlus SK">◉</button></span></label>
+<div class="actions"><button type="button" data-test>测试连接</button><button type="submit" class="primary">保存</button></div>
+<div class="feedback" role="status"></div>
+</form>
+</article>
+</div>
+<div class="table-wrap"><table>
+<thead><tr><th>字段 / 操作</th><th>行为</th></tr></thead>
+<tbody>
+<tr><td>ProjectName</td><td>新配置默认为 <code>default</code>，大小写保持原值。列表和编辑默认脱敏；右侧眼睛单独显示或隐藏。</td></tr>
+<tr><td>AK / SK</td><td>首次保存必须成对填写。编辑时留空保留；替换必须成对替换，避免新 AK 与旧 SK 错配。默认脱敏，眼睛只预览对应字段。</td></tr>
+<tr><td>编辑 / 保存</td><td>保留已有配置，失败保留草稿；防止重复保存。掩码和完整预览都不作为新值自动回写。</td></tr>
+<tr><td>测试连接</td><td>只读验证指定项目的素材组查询权限；不创建组、不上传素材、不发起生成。不声称只读测试已验证创建权限、权益及所有模型调用。</td></tr>
+<tr><td>保存后的生效范围</td><td>以后新建画布按已配置供应商登记建组任务。旧画布在首次进入预审或首次送审时补建，保存配置不批量创建所有旧画布的云端组。</td></tr>
+<tr><td>脱敏范围</td><td>三个字段都脱敏，包括 ProjectName。点击眼睛才临时查看；离开标签、隐藏页面或取消编辑后重新隐藏。</td></tr>
+</tbody></table></div>
+</section>
+
+<section class="chapter" id="review">
+<h2>02 · 顶部预审入口，名称旁显示结果</h2>
+<p>图片、视频、音频节点的顶部操作栏新增<strong>盾牌图标</strong>，提示为「Seedance 预审」。生成节点必须已有保存完成的输出文件才可送审；空节点、生成中但尚无文件的卡片没有可送审目标。</p>
+<p>点击后打开一个小面板，明确本次素材和目标供应商。只有一家可用配置时直接选中；两家均配置时优先带入唯一连接的官方 Seedance 供应商，否则使用本画布最近一次选择，首次无默认时由用户选择。不会因一张图连接两家模型而自动双份送审。</p>
+<p>面板提供「虚拟素材 / 已认证真人素材」路径。虚拟素材使用本画布的默认组；真人素材选择该供应商、该项目中已认证的人物组，没有组则停在认证引导。点击「提交预审」后本地异步任务被接受，立即显示「审核中」，关闭面板和离开画布不取消任务。</p>
+<div class="demo-tag">交互示意 · 切换展示方式，点击盾牌，再使用「模拟通过 / 失败」查看标记 · 不调用任何接口</div>
+<div class="tabs" id="layout-tabs" role="tablist" aria-label="堆叠展示方式">
+<button role="tab" aria-selected="true" data-layout="single">单素材</button>
+<button role="tab" aria-selected="false" data-layout="batch">单次批量 · 主图</button>
+<button role="tab" aria-selected="false" data-layout="history">多次生成 · 每份输出</button>
+</div>
+<div class="canvas-demo" id="review-demo">
+<div id="result-picker" class="result-picker" hidden></div>
+<div id="node-stage" class="history"></div>
+<div id="review-panel" class="popover" hidden>
+<h3 id="review-target"></h3>
+<div class="popover-fields">
+<label>供应商<select id="review-provider"><option value="bytedance">Bytedance</option><option value="byteplus">BytePlus</option></select></label>
+<label>素材路径<select id="review-kind"><option value="virtual">虚拟素材 · 本画布组</option><option value="human">已认证真人素材 · 人物组</option></select></label>
+<label id="human-group-field" hidden>已认证真人组<select><option>已认证角色 A（仅演示）</option></select></label>
+</div>
+<p id="review-group" class="muted"></p>
+<p id="generation-route"></p>
+<div class="actions">
+<button id="submit-review" class="primary">提交预审（演示）</button>
+<button id="mock-pass">模拟通过</button><button id="mock-fail">模拟失败</button><button id="mock-unknown">模拟查询中断</button>
+<button id="close-review">关闭</button>
+</div>
+<div id="review-message" class="feedback" role="status"></div>
+</div>
+<p class="muted" id="layout-caption"></p>
+</div>
+<div class="table-wrap"><table>
+<thead><tr><th>状态</th><th>名称旁展示</th><th>点击状态后的行为</th></tr></thead>
+<tbody>
+<tr><td>未送审</td><td>不显示状态标记</td><td>从顶部盾牌打开送审面板。</td></tr>
+<tr><td>排队 / 准备 / 提交 / Processing</td><td>青蓝色小点 +「审核中」</td><td>显示本次供应商和阶段；不编造完成百分比、预计完成时间。</td></tr>
+<tr><td>Active</td><td>青蓝色盾牌勾，仅图标</td><td>查看该供应商的「审核通过」、素材 ID 和时间；再次点击预审入口不重复上传。</td></tr>
+<tr><td>明确提交失败 / Failed</td><td>红色盾牌叉，仅图标</td><td>显示「预审失败」、官方错误码和经脱敏的原因；格式 / 下载错误与内容拒绝分别解释。</td></tr>
+<tr><td>提交结果不确定 / 无法继续查询</td><td>中性提示图标「待确认」</td><td>优先恢复查询 / 核对已提交结果。网络超时不冒充审核失败，也不自动重新上传。</td></tr>
+</tbody></table></div>
+<p>样式以参考图为准：名称旁显示小字或小图标，不给整个节点蒙层，不替换既有生成与媒体 Loading。颜色跟随 Harness 主题。图标具有键盘操作、说明文字和屏幕阅读器名称；详情点击不触发改名、拖动、播放或打开历史编辑器。</p>
+<p><strong>两家结果同时存在时：</strong>展示两枚紧凑标记，分别标注 BD / B+；例如「BD 审核中」「B+ 盾牌勾」。不把某一家通过显示为全供应商通过。</p>
+</section>
+
+<section class="chapter" id="stacks">
+<h2>03 · 两类堆叠使用不同送审目标</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>场景</th><th>本次送审对象</th><th>状态位置与切换</th></tr></thead>
+<tbody>
+<tr><td>普通资源 / 单输出</td><td>当前 <code>assetId</code> 对应的图片、视频或音频原文件</td><td>名称旁显示该素材状态。</td></tr>
+<tr><td>单次批量结果，切换主图</td><td>只送当前主图，不批量送审其他结果。展开后也以主图为默认入口。</td><td>节点名称旁显示主图状态。主图从 A 换为 B 时切换到 B 的状态；A 的任务继续、结果保留。A 通过不代表 B 通过。</td></tr>
+<tr><td>多次生成历史，展开</td><td>每次提交中的每一份实际输出都可单独送审，包括一条历史提交内的多输出。</td><td>每个输出单元增加自己的轻量名称 / 状态行与盾牌入口；不只把图标放在整个历史节点的标题旁。</td></tr>
+<tr><td>多次生成历史，收起</td><td>只送当前实际显示的封面输出，通常是最新提交的第一份结果。</td><td>显示封面对应状态。最新提交尚无结果时，不拿上一张图的通过标记顶替；提示展开查看可送审历史结果。</td></tr>
+<tr><td>同一素材在画布上被多个节点引用</td><td>同一供应商、项目、组、原文件身份下共享审核记录。</td><td>多处同步显示，同一内容不因节点位置、改名、连线、封面旋转而重新送审。</td></tr>
+</tbody></table></div>
+<p>审核完成不切换主图、不重排历史、不抢焦点，也不改旧连线指向的素材。每个状态以实际文件身份为准，节点只是它的展示位置。</p>
+</section>
+
+<section class="chapter" id="groups">
+<h2>04 · 新建画布时登记建组，云端异步完成</h2>
+<p><strong>采用你的按画布建组建议，但不等待云端接口完成才让画布创建成功。</strong>新画布保存成功的同次处理登记补建意图，随后后台为已配置的两家供应商各创建一份 AIGC 组。只配一家就只建一家。</p>
+<div class="steps">
+<div class="step"><strong>1 · 画布立即可用</strong><small>不被云端建组耗时、断网或权限错误阻塞。</small></div>
+<div class="step"><strong>2 · 两家分别建组</strong><small>画布 × 供应商 × 账号配置域 × ProjectName 各自绑定。</small></div>
+<div class="step"><strong>3 · 送审等待对应组</strong><small>组未就绪时审核任务排队；失败提供明确原因与重试。</small></div>
+</div>
+<p>组名称建议由画布名称的短前缀与稳定画布标识组成，满足官方长度限制；改名不重建组。旧画布首次使用补建；删除或复制画布不隐式删除、复用别的画布的云端组。</p>
+<p>真人素材使用“画布关联人物组”的方式，一个画布可以关联多个已认证组；同一个人在两家供应商的授权和 Group ID 分开维护。自动创建的 AIGC 组不会替代真人认证。</p>
+<p>ProjectName 改变后使用新项目中的组；旧任务继续使用接受时的项目。AK/SK 轮换先检查原组是否仍可访问，不能仅凭字符串变化认定账号已换，也不能把无权限当作组已删除。</p>
+</section>
+
+<section class="chapter" id="generation">
+<h2>05 · 预审结果如何供视频生成引用</h2>
+<p><strong>按用户确认规则：审核通过用 Asset ID；未送审或审核失败，仍允许生成并使用原 URL。</strong>审核中、待确认也使用原 URL，不把预审作为生成的必经门槛。</p>
+<p>仅对 Bytedance / BytePlus 的 Seedance 官方渠道使用。已通过素材在对应请求的 <code>image_url.url</code>、<code>video_url.url</code>、<code>audio_url.url</code> 中写入 <code>asset://&lt;官方 Asset ID&gt;</code>，保持原来的引用排序和 <code>reference_image</code> / <code>reference_video</code> / <code>reference_audio</code> / <code>first_frame</code> / <code>last_frame</code> 角色。</p>
+<div class="table-wrap"><table>
+<thead><tr><th>对应供应商下的参考素材状态</th><th>建议行为</th></tr></thead>
+<tbody>
+<tr><td>从未送审</td><td>保持现有原 URL 生成路径，不自动上传所有参考素材。</td></tr>
+<tr><td>Active，项目及账号访问匹配</td><td>使用官方 Asset URI；接受生成任务时固定本次引用，不因后续状态或设置变动重新选择。</td></tr>
+<tr><td>正在预审 / 失败 / 待确认</td><td>允许正常提交视频生成，使用原 URL。预审失败标记仍保留，不伪装通过，也不重新上传素材。</td></tr>
+<tr><td>只有另一供应商或旧项目的通过记录</td><td>不复用该 Asset ID，当前供应商使用原 URL。状态说明所属供应商 / 项目，不当作当前通过。</td></tr>
+<tr><td>Model Link / 其他模型</td><td>保持原路径，不传官方 Asset ID，不自动切换供应商。</td></tr>
+</tbody></table></div>
+<p>模型 API Key、EP 与素材组需要处于兼容账号 / 项目权限范围。仅配置一个 ProjectName 无法自动证明模型凭据属于该项目；生成前进行可用性检查，官方若返回跨项目 / 权限错误，保留原记录并报告错误，不自动迁移或降级。</p>
+<p>一个请求允许混用：参考图 A 已通过则传 Asset URI，参考视频 B 未通过则传 URL。引用方式在任务接受时固定：当次用了 URL，后来素材审核通过也不会修改或重新提交该任务，下一次生成才使用 Asset ID。</p>
+<p>入库成功不保证每个模型都接受该素材的时长、尺寸，也不保证最终提示词与视频产物通过所有审核。生成仍执行对应版本的输入限制。</p>
+</section>
+
+<section class="chapter" id="exceptions">
+<h2>06 · 关闭页面、重启与失败恢复</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>情况</th><th>处理</th></tr></thead>
+<tbody>
+<tr><td>重复点击 / POST 回包丢失</td><td>复用本地请求身份和已接受任务。没有官方 Asset ID 且提交结果不明时，先核对，不能直接再发一次 CreateAsset。</td></tr>
+<tr><td>关闭面板 / 离开画布</td><td>后台继续；重新进入读取当前状态。关闭面板不等于取消已接受任务。</td></tr>
+<tr><td>Harness 重启 / 电脑关闭</td><td>关机期间不在本机执行。再次启动后恢复持久任务；已有 Asset ID 只查询，不重新上传原素材。</td></tr>
+<tr><td>GetAsset 返回 HTTP 200</td><td>仍读取 Status；只有 Active 才显示通过。Failed 读取错误码和原因。</td></tr>
+<tr><td>已通过素材再次点击</td><td>打开详情与可用性查询，默认不重新送审、不创建新 Asset。</td></tr>
+<tr><td>明确失败后重试</td><td>用户显式发起新一次任务。旧错误及旧 Asset ID 保留；网络错误优先恢复查询。</td></tr>
+<tr><td>素材改名 / 节点移动 / 主图切换</td><td>保留原素材审核记录；状态展示跟随具体 assetId。原文件字节改变则不继承旧通过状态。</td></tr>
+<tr><td>本地删除素材 / 画布</td><td>不自动调用官方删除接口。停止无主轮询并保留必要任务证据；云端清理需另行明确操作。</td></tr>
+<tr><td>签名 URL</td><td>提交时针对固定原文件生成新 URL，不能上传压缩封面或波形，不能持久缓存临时 URL 当作素材身份。</td></tr>
+<tr><td>缺权益 / 授权 / 权限</td><td>画布继续可用，送审显示明确的配置或开通问题。不会自动创建真人组或改用另一供应商。</td></tr>
+</tbody></table></div>
+<p>首轮 BytePlus 使用 <code>Moderation.Strategy=Default</code>，Bytedance 不发送此字段。附件里的 Skip 是另一种官方策略，需单独的产品决定和权益核对；本稿不把“预审”自动解释为启用 Skip。</p>
+</section>
+
+<section class="chapter sources" id="sources">
+<h2>依据与待确认点</h2>
+<p>输入依据：用户提供的两张状态截图、<code>seedance-domestic-overseas-asset-review-official-api.md</code>，以及当前插件的资源节点、主图切换、逐次生成历史与后台任务实现。以下官方资料于 2026-10-29 核对：</p>
+<ul>
+<li><a href="https://docs.volcengine.com/docs/ark/create-asset-group-api?lang=zh">Bytedance：CreateAssetGroup</a> — 当前创建接口仅支持 AIGC。</li>
+<li><a href="https://docs.volcengine.com/docs/ark/private-virtual-avatar-library-guide-preview?lang=zh">Bytedance：私域虚拟人像库指南</a> — 虚拟内容边界、项目隔离与素材组自由管理。</li>
+<li><a href="https://console.volcengine.com/ark/region:cn-beijing/docs/guide-preview">Bytedance：真人素材指南</a> — 真人认证、人物组与人脸一致性。</li>
+<li><a href="https://docs.byteplus.com/en/docs/modelark/create-asset-api">BytePlus：CreateAsset</a> — 海外 Host、区域、AK/SK、异步审核及策略。</li>
+<li><a href="https://console.volcengine.com/ark/region:cn-beijing/docs/create-video-generation-task-api">Bytedance：视频生成请求</a> — image_url / video_url / audio_url 与 Asset URI。</li>
+</ul>
+<p>附件第 9 节示例中的 <code>type: input_image</code> 与当前 Seedance 视频接口字段不一致；设计以视频接口的 <code>type: image_url</code> 为准。海外签名区域示例异常、官方 SDK 版本及真实账户权限，在实现接入前用当前官方配置核对，不以文档示例冲突推断已验证可用。</p>
+<p><strong>需要你评审的核心取舍：</strong>普通虚拟组按画布自动创建；真人使用已认证人物组；新建画布不等云端返回；多次历史逐输出送审。其余未验证的真实账户行为在技术设计中单列。</p>
+</section>
+<p class="foot">本文件中的交互只演示设计状态，不上传、不鉴权、不保存本机配置、不创建云端组；插件版本仍为 0.2.53。</p>
+</main>
+<script>
+(() => {
+  const eyeIcon = (open) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>${open ? '' : '<path d="m3 3 18 18"/>'}</svg>`;
+  const shield = (mark = 'check') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/>${mark === 'check' ? '<path d="m8 12 3 3 5-6"/>' : mark === 'x' ? '<path d="m9 9 6 6m0-6-6 6"/>' : '<path d="M12 8v5m0 3h.01"/>'}</svg>`;
+  const mediaIcon = (kind) => kind === 'audio'
+    ? '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12v8m6-13v18m6-23v28m6-22v16m6-11v6"/></svg>'
+    : kind === 'video'
+    ? '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="7" width="19" height="18" rx="2"/><path d="m23 12 6-4v16l-6-4"/></svg>'
+    : '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="2"/><circle cx="22" cy="10" r="2"/><path d="m4 25 9-12 7 9 5-6 4 7"/></svg>';
+  const settings = document.getElementById('settings-demo');
+  settings.querySelectorAll('[data-eye]').forEach((button) => {
+    button.innerHTML = eyeIcon(false);
+    button.setAttribute('aria-pressed', 'false');
+    button.addEventListener('click', () => {
+      const input = button.parentElement.querySelector('input');
+      const visible = input.type === 'password';
+      input.type = visible ? 'text' : 'password';
+      button.innerHTML = eyeIcon(visible);
+      button.setAttribute('aria-pressed', String(visible));
+      button.setAttribute('aria-label', `${visible ? '隐藏' : '显示'} ${input.getAttribute('aria-label')}`);
+    });
+  });
+  const hideAll = () => settings.querySelectorAll('[data-eye]').forEach((button) => {
+    const input = button.parentElement.querySelector('input');
+    input.type = 'password'; button.innerHTML = eyeIcon(false); button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('aria-label', `显示 ${input.getAttribute('aria-label')}`);
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) hideAll(); });
+  window.addEventListener('pagehide', hideAll);
+  settings.querySelectorAll('form').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault(); hideAll();
+      form.querySelector('.feedback').textContent = '保存反馈演示：未写入任何插件配置。';
+    });
+    form.querySelector('[data-test]').addEventListener('click', () => {
+      form.querySelector('.feedback').textContent = '连接测试反馈演示：未访问任何官方接口。';
+    });
+  });
+  const assets = [
+    { id: 'demo-output-a', name: '素材图片 A', kind: 'image', time: '第 3 次提交' },
+    { id: 'demo-output-b', name: '生成视频 B', kind: 'video', time: '第 2 次提交' },
+    { id: 'demo-output-c', name: '生成音频 C', kind: 'audio', time: '第 1 次提交' }
+  ];
+  const batch = assets.map((asset, index) => ({ ...asset, id: `demo-batch-${index}`, name: `批量图片 ${index + 1}`, kind: 'image' }));
+  const records = new Map(), selectedPaths = new Map();
+  let layout = 'single', main = 0, target = null;
+  const stage = document.getElementById('node-stage'), picker = document.getElementById('result-picker');
+  const panel = document.getElementById('review-panel'), provider = document.getElementById('review-provider');
+  const kind = document.getElementById('review-kind'), message = document.getElementById('review-message');
+  const providerName = (id) => id === 'bytedance' ? 'Bytedance' : 'BytePlus';
+  const key = () => `${target.id}:${provider.value}:${kind.value}`;
+  function badges(asset) {
+    return ['bytedance', 'byteplus'].flatMap((id) => {
+      const path = selectedPaths.get(`${asset.id}:${id}`);
+      if (!path) return [];
+      const state = records.get(`${asset.id}:${id}:${path}`); if (!state) return [];
+      const label = id === 'bytedance' ? 'BD' : 'B+';
+      const description = `${providerName(id)} · ${path === 'human' ? '真人组' : '画布虚拟组'} · ${state === 'processing' ? '审核中' : state === 'active' ? '审核通过' : state === 'failed' ? '预审失败' : '待确认'}`;
+      return [`<button class="badge ${state}" data-review="${asset.id}" data-provider="${id}" data-path="${path}" aria-label="${description}" title="${description}">${label} ${state === 'processing' ? '● 审核中' : shield(state === 'active' ? 'check' : state === 'failed' ? 'x' : 'wait')}${state === 'unknown' ? '待确认' : ''}</button>`];
+    }).join('');
+  }
+  function node(asset, subtitle) {
+    return `<article class="node ${target?.id === asset.id ? 'active' : ''}"><div class="node-top"><div class="node-name"><strong>${asset.name}</strong><span class="badges">${badges(asset)}</span></div><div class="toolbar"><button data-review="${asset.id}" aria-label="提交 ${asset.name} Seedance 预审" title="Seedance 预审">${shield('wait')}</button></div></div><div class="media-outline">${mediaIcon(asset.kind)}<div><span>${subtitle}</span><br><small>名称旁状态和顶部入口的位置示意</small></div></div></article>`;
+  }
+  function render() {
+    picker.hidden = layout !== 'batch';
+    if (layout === 'batch') {
+      picker.innerHTML = batch.map((asset, index) => `<button data-main="${index}" aria-pressed="${index === main}">${asset.name}${index === main ? ' · 主图' : ''}</button>`).join('');
+      stage.innerHTML = node(batch[main], '单次批量结果：只给当前主图送审');
+    } else if (layout === 'history') stage.innerHTML = assets.map((asset) => node(asset, `${asset.time} · 该份输出独立送审`)).join('');
+    else stage.innerHTML = node(assets[0], '单素材：图片、视频、音频采用相同状态规则');
+    document.getElementById('layout-caption').textContent = layout === 'history' ? '这里混合展示三类媒体，仅用于说明逐输出行为；实际历史仍保持原节点类型和顺序。' : layout === 'batch' ? '切换主图不会继承上一张的审核通过。已送审图片的任务和状态仍保留。' : '可先送 Bytedance，再选择 BytePlus，观察两份状态独立显示。';
+    document.querySelectorAll('[data-layout]').forEach((button) => button.setAttribute('aria-selected', String(button.dataset.layout === layout)));
+  }
+  function panelState() {
+    if (!target) return;
+    document.getElementById('review-target').textContent = `预审目标：${target.name}`;
+    document.getElementById('human-group-field').hidden = kind.value !== 'human';
+    document.getElementById('review-group').textContent = kind.value === 'human' ? '真人组来自已完成认证的人物。本面板不会用 AIGC 组替代认证。' : '使用当前画布在所选供应商中的 AIGC 组；组尚未就绪时等待建组。';
+    const state = records.get(key());
+    document.getElementById('generation-route').textContent = state === 'active'
+      ? '生成引用演示：本供应商已通过 → Asset ID（asset://…）。'
+      : '生成引用演示：尚未通过 → 原 URL；仍可以提交视频生成。';
+    const submit = document.getElementById('submit-review');
+    submit.disabled = ['processing', 'active', 'unknown'].includes(state);
+    submit.textContent = state === 'active' ? '已通过，不重复送审' : state === 'processing' ? '审核中，不重复送审' : state === 'unknown' ? '待确认，先核对原任务' : state === 'failed' ? '明确重试（演示）' : '提交预审（演示）';
+    ['mock-pass', 'mock-fail', 'mock-unknown'].forEach((id) => document.getElementById(id).disabled = !['processing', 'unknown'].includes(state));
+  }
+  function close() { panel.hidden = true; target = null; message.textContent = ''; render(); }
+  document.getElementById('layout-tabs').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-layout]'); if (!button) return;
+    layout = button.dataset.layout; close();
+  });
+  picker.addEventListener('click', (event) => { const button = event.target.closest('[data-main]'); if (button) { main = Number(button.dataset.main); close(); } });
+  stage.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-review]'); if (!button) return;
+    target = [...assets, ...batch].find((asset) => asset.id === button.dataset.review);
+    if (button.dataset.provider) provider.value = button.dataset.provider;
+    if (button.dataset.path) kind.value = button.dataset.path;
+    message.textContent = ''; panel.hidden = false; render(); panelState(); provider.focus();
+  });
+  provider.addEventListener('change', () => { message.textContent = ''; panelState(); });
+  kind.addEventListener('change', () => { message.textContent = ''; panelState(); });
+  document.getElementById('submit-review').addEventListener('click', () => {
+    if (!target || document.getElementById('submit-review').disabled) return;
+    selectedPaths.set(`${target.id}:${provider.value}`, kind.value);
+    records.set(key(), 'processing'); message.textContent = '已接受任务的状态演示：实际未发送素材。'; render(); panelState();
+  });
+  const change = (state, text) => {
+    if (!target || !['processing', 'unknown'].includes(records.get(key()))) return;
+    records.set(key(), state); message.textContent = text; render(); panelState();
+  };
+  document.getElementById('mock-pass').addEventListener('click', () => change('active', '审核通过状态演示：并无真实官方 Asset ID。'));
+  document.getElementById('mock-fail').addEventListener('click', () => change('failed', '失败状态演示：详情将区分内容拒绝、下载失败和格式错误。'));
+  document.getElementById('mock-unknown').addEventListener('click', () => change('unknown', '查询中断状态演示：保留原任务，先恢复查询，不重新上传。'));
+  document.getElementById('close-review').addEventListener('click', close);
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !panel.hidden) close(); });
+  render();
+})();
+</script>
+</body>
+</html>

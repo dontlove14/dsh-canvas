@@ -1,8 +1,24 @@
 # 数据与 HTTP 接口参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-28。契约 / Schema / 路由变更时复核。
+文档类型：参考；负责人：项目维护者；最近核对：2026-10-29。契约 / Schema / 路由变更时复核。
 
 可执行事实：[contracts](../src/shared/contracts.ts)、[v2](../src/shared/v2.ts)、[schema.sql](../src/host/persistence/schema.sql)、[service](../src/host/service.ts)。业务行为见[业务参考](business.md)，配置限额见[运行指南](operations.md)。
+
+## Seedance预审接口
+
+0.2.54共26个注册路径，全部沿用owner认证。独立[seedance-review.sqlite](../src/host/review/review-schema.sql)保存配置投影、组、任务 / 请求幂等、固定生成来源和脱敏审计，主库23表保持。普通DTO没有原ProjectName、AK/SK、凭据引用或签名URL。
+
+| v2路径 | 方法与契约 |
+| --- | --- |
+| seedance-review-settings | GET掩码配置；POST provider、revision和可选projectName / accessKeyId / accessKeySecret，空白不替换，AK/SK成对，严格字段 |
+| seedance-review-settings-test | POST `{provider}`；使用已保存配置执行ListAssetGroups只读测试 |
+| settings-secret | 原单字段POST新增scope=seedance-review、provider、field=projectName / accessKeyId / accessKeySecret；no-store，无query |
+| asset-reviews?canvas=... | GET可选assetIds逗号分隔最多100，返回items / revision / busy，只投影当前资源域与原hash；POST requestId、assetId、provider、groupType=AIGC/LivenessFace，真人必填groupId，虚拟不接受自定组；本地接受202 |
+| asset-review?canvas=...&id=... | GET单任务详情，返回脱敏原因与官方ID |
+| asset-review-action?canvas=...&id=... | POST action=resume/reconcile/retry/abandon；retry必须新requestId且仅failed，unknown可恢复 / 对账 / 结束本地等待 |
+| review-groups?canvas=...&provider=... | GET已认证真人组，nextToken分页最长4096，返回items / nextToken；后台确保本画布AIGC组 |
+
+requestId内容不一致409；相同原文件 / 供应商资源域 / 组的活动、通过或待确认记录复用。模型生成新绑定以原生成requestId和snapshotHash持久化，不改变旧快照；恢复缺失返回REVIEW_BINDING_MISSING，原hash不匹配MEDIA_CHANGED。详见[契约](../src/shared/seedanceReview.ts)和[ADR-0059](adr/0059-seedance-asset-review-and-frozen-generation-references.md)。
 
 ## 对象与身份
 
@@ -10,7 +26,7 @@
 
 | 对象 | 字段 |
 | --- | --- |
-| ModelRecord | id、kind image/video、name、model_id、api_base、protocol；Base 为无账号 / 查询 / 片段的 HTTP(S)，最长 2048 |
+| ModelRecord | id、kind image/video、name、model_id、api_base、protocol、可选endpoint_id；Base 为无账号 / 查询 / 片段的 HTTP(S)，最长 2048 |
 | ModelInput / PublicModel | 输入可选 api_key（最长4096）；缺省保留、空串清除。读取仅 has_api_key、api_key_mask、capabilities |
 | CanvasNode | id、kind 六种节点、title、position x/y 有限、modelId/null、prompt≤32000、params/null、assetId/null、selectedResultId/null |
 | CanvasEdge | id、source、target、assetId |
@@ -26,6 +42,14 @@
 GenerationParams为size≤32、n整数1–10、seconds可选整数；0.2.30新增可选background=auto/opaque/transparent、quality=auto/low/medium/high/xhigh/max，旧参数原样读取。sizePresets / backgrounds / qualities为派生ModelCapabilities，不写入ModelRecord，映射规则见[ADR-0037](adr/0037-fixed-provider-image-models.md)。secondsRange={min,max,step}优先于seconds固定列表；生成校验要求视频时长>0，图草稿允许0秒。无DDL / user_version或图结构变化，新字段仅新节点保存，不回填旧数据。
 
 0.2.42增量加入`gemini-image`协议与8个固定Banana模型 / 渠道记录；capabilities新增可选defaultSize，Banana默认1024x1024且counts=[1]。已有params.size映射为供应商比例 / 档位；实际输出宽高仍写入原资产字段。PublicModel只提供has_api_key与掩码，Base64不进入图 / 任务数据库，原模型UUID、schema 3 / DDL及增量DTO保持，见[ADR-0048](adr/0048-banana-native-image-protocol.md)。0.2.43只在适配器内部更正Model Link为generateContent，无新持久协议枚举或节点字段，见[ADR-0049](adr/0049-modellink-banana-generate-content.md)。
+
+0.2.48增加`seedream-image`与六个固定组合。ModelRecord / ModelInput / TaskSnapshot.model可选endpoint_id（trim、≤200、ep-开头）；仅ByteDance / BytePlus Seedream官方配置使用，省略保留原值，启用Key时必填；Model Link与其他协议拒绝。逻辑name / model_id与EP分离，EP不渲染在画布 / 任务中心。旧JSON与快照无需该字段，DDL / user_version / CanvasGraph完全不变；新快照不能交给不支持协议的旧包加载。能力默认2K / 单图，见[ADR-0053](adr/0053-seedream-endpoint-routing-and-model-identity.md)。
+
+0.2.50增加`seedance-video`和十二组合，官方同样使用endpoint_id，Model Link拒绝EP。GenerationParams可选videoMode=text/reference/frames、firstFrameId / lastFrameId为UUID、generateAudio为boolean；size保存真实wire档位 / 比例（如720p/16:9或1080p/adaptive），不伪造输出像素。默认5秒 / 单条 / text / 音频开启。图保存校验模式允许的入边类型 / 数量，生成另验角色 / 引用实际元数据；帧ID绑定既有assetId。task_references仍固定locator_json，执行前流式核验hash再24小时签名，无新字段 / DDL / 路由 / 旧数据回填；不支持Seedance协议的旧包不能读取新快照，见[ADR-0055](adr/0055-seedance-video-modes-and-independent-provider-routing.md)。
+
+0.2.51保留text/reference/frames wire枚举和历史格式，UI只提供reference/frames手动选择；空引用显示text自动状态。图编辑时入边与有效模式一起提交，首连reference、清空text；Host校验 / 新快照按当前引用推导，空的旧reference / frames草稿可生成text。不回填数据库、不修改旧任务snapshot_json或增量hash / requestId语义，见[ADR-0056](adr/0056-seedance-mode-inference-from-references.md)。
+
+0.2.49更正固定Lite配置的model_id为doubao-seedream-5-0-260128 / dola-seedream-5-0-260128，仅models.json原子写回，UUID / EP / Key binding不变，任务snapshot_json保留旧值。无结果提交错误为failed；启动仅将已issued、无外部ID / 输出 / 完成记录的历史needs_attention更正为failed，其他任务身份、尝试和表结构不变，见[ADR-0054](adr/0054-no-result-submission-failure-and-seedream-id-correction.md)。
 
 0.2.18新增领域kind=`tts-generation`，modelId / assetId必须null，params为 `{type:"tts",reference_id:最长512文字,speed:有限正数,volume:有限数}`，默认空音色ID / 1 / 0，prompt复用文字字段。无输入连线；输出仍绑定该节点任务的具体音频assetId。TTS快照model为固定kind=audio、name=FishTTS、model_id / protocol=fish-tts、服务身份UUID和完整api_base；params为TTS参数，referenceIds空，无Key。SQLite **DDL / user_version不变**：只将TTS领域kind编码到已有audio-asset行，严格TTS参数的type标记用于加载还原；hash / 回执使用领域对象，旧行不重写。旧版不支持新TTS参数 / 快照，见[ADR-0030](adr/0030-fish-tts-nodes-and-streamed-audio.md)。
 
@@ -93,6 +117,7 @@ POST graph：
 | 方法 / 后缀 | 输入 | 返回 |
 | --- | --- | --- |
 | GET / POST models | POST ModelInput，新的配置仅允许内置目录身份 / 固定地址 | `{models}`；包含目录占位，PublicModel新增可选configurable，密钥仅掩码 |
+| POST settings-secret | strict JSON：model + id + api_key；tts + api_key；storage + id + accessKeyId / accessKeySecret；scope / field为实际字段名 | `{value}`当前配置单字段；owner认证、no-store，只在用户点击眼睛时调用；拒绝GET / query / 任意ref / task / 多余字段，无写入或云端请求 |
 | POST model-delete | query id | `{models}` |
 | GET catalog | 无 | `{folders,canvases}`，包括修订 / hash / 搬移状态 |
 | POST catalog | requestId、operation；按动作 id/name/folderId/revision | `{id}`；folder-create/rename/delete，canvas-create/rename/move/delete |
@@ -114,7 +139,9 @@ POST graph：
 | POST media-urls | canvas；items 1–100个 `{assetId,variant?}`、force默认false | `{items:[{assetId,variant,url,expiresAt}或{assetId,variant,error}]}`；逐项隔离失败 |
 | POST storage-retry | 无 | `{ok:true}`，失败清单重新排队 |
 
-共19个注册路径（18个v2路径和旧workspace GET）。旧 `/api/canvas/workspace`仅GET投影保留，旧mutation不写入；服务内legacy models alias保留，Harness仅注册新models。旧JSON / 媒体不扫描、不导入。
+共20个注册路径（19个v2路径和旧workspace GET）。旧 `/api/canvas/workspace`仅GET投影保留，旧mutation不写入；服务内legacy models alias保留，Harness仅注册新models。旧JSON / 媒体不扫描、不导入。
+
+常规Key掩码采用头3 / 星号8 / 尾3，长度≤6全遮，不返回原Key；storage provider新增可选accessKeySecretMask。EP字段保持原模型配置格式并在UI默认遮罩。显式settings-secret响应只含当前单字段，客户端不持久化 / 不放入保存草稿，取消与隐藏拒绝迟到结果；参见[ADR-0058](adr/0058-masked-settings-and-explicit-secret-reveal.md)。
 
 Mock模型来自[固定共享定义](../src/shared/mockModels.ts)，不写入models.json，不需要凭据。任务快照仍是严格ModelRecord，只有身份 / 名称 / 协议 / 地址全部匹配内置记录时才允许无凭据本地执行。mock-generate的幂等hash包含mock:true，与generate不可共用requestId。输出ID由任务ID和序号确定，写入同一task_outputs / canvas_assets，复用既有尺寸 / 时长字段；不新增表、节点、边或持久任务DTO字段。0.2.11的主图默认端点规则仍用于单次批量，0.2.44多次提交展开时派生逐素材端点；展开状态不进入增量DTO，旧边assetId保持。
 
