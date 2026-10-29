@@ -12,4 +12,5 @@
 - 临时脚本、日志、调试回执和备份放工作区外的受限临时目录；不得输出认证链接或密钥。源码与必要产物身份清单留在项目中。
 - 浏览器视觉和交互由用户手动验收；自动化检查和HTTP加载核验不能代替人工结果。
 - 画布文字默认禁止选中；原生输入框自动开放，自定义复制区域使用 `data-dc-text-selectable="true"`，新增画布portal接入公共作用域。按 [ADR-0060](docs/adr/0060-canvas-text-selection-opt-in.md)维护，不逐组件补禁选，不关闭节点框选。
+- 新增可创建节点类型须维护统一 `CREATABLE_NODES` 注册与工厂，同时核对底部添加栏、空白右键菜单、输出端点拉到空白的菜单；默认参数、模型输入校验、渲染 / 编辑及三个入口专项一并维护。按 [ADR-0066](docs/adr/0066-shared-node-creation-entrances.md)执行，拉线创建节点与引用边必须同次保存。
 - 新增或替换插件 Loading 前，按 [ADR-0046](docs/adr/0046-dependency-backed-whole-node-loading.md) 询问用户选型；用户已明确指定时不重复询问。任务使用 Thinking Orbs / Beam，媒体文件加载按 [ADR-0061](docs/adr/0061-dependency-backed-media-pixel-loading.md) 使用 ImageGeneration；直接使用依赖并跟随 Harness 主题，以不同样式表示阶段，不显示状态文字。

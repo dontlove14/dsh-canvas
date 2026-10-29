@@ -1,7 +1,8 @@
 import {
-  createContext, forwardRef, useCallback, useContext, useEffect, useId, useRef, useState,
+  createContext, forwardRef, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState,
   type ButtonHTMLAttributes, type ComponentProps, type CSSProperties, type InputHTMLAttributes, type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
 import type * as Primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import { useCanvasTextSelectionScope } from './canvasTextSelection'
 export { UiSlider } from './UiSlider'
@@ -136,6 +137,69 @@ export function UiActionMenu({ label, children = '⋯', items, disabled, side = 
     {items.map((item) => <button key={item.id} type="button" role="menuitem" disabled={item.disabled} className={item.danger ? 'danger' : ''}
       onClick={() => { setOpen(false); item.onSelect(); wrapper.current?.querySelector('button')?.focus() }}>{item.icon}{item.label}</button>)}
   </span>}</span>
+}
+
+export function pointMenuPosition(point: { x: number; y: number }, bounds: DOMRect, size: { width: number; height: number }) {
+  const left = Math.max(12, bounds.left + 8), top = Math.max(12, bounds.top + 8)
+  return {
+    x: Math.max(left, Math.min(point.x, Math.min(window.innerWidth - 12, bounds.right - 8) - size.width)),
+    y: Math.max(top, Math.min(point.y, Math.min(window.innerHeight - 12, bounds.bottom - 8) - size.height)),
+  }
+}
+
+/** Harness Menu anchored to a canvas point rather than a visible trigger. */
+export function UiPointMenu({ label, point, bounds, items, onClose, onSelect }: {
+  label: string; point: { x: number; y: number }; bounds: () => DOMRect | undefined
+  items: readonly (UiAction & { disabledReason?: string })[]
+  onClose: () => void; onSelect: (id: string) => void
+}) {
+  const ui = useContext(UiContext), textScope = useCanvasTextSelectionScope()
+  const id = `dc-point-${useId().replace(/:/g, '')}`
+  const getAnchorRect = useCallback(() => {
+    const rect = bounds()
+    if (!rect) return null
+    const list = document.querySelector<HTMLElement>(`.${id}`)
+    const position = pointMenuPosition(point, rect, { width: list?.offsetWidth || 208, height: list?.offsetHeight || 158 })
+    return new DOMRect(position.x, position.y - 4, 0, 0)
+  }, [bounds, id, point])
+  const entries = items.map((item) => ({ ...item, label: <span title={item.disabledReason}>{item.label}</span> }))
+  const className = `dc-ui-popup dc-node-creation-menu nodrag nopan nowheel ${textScope} ${id}`
+  const choose = (value: string) => { if (items.some((item) => item.id === value && !item.disabled)) onSelect(value) }
+  return ui ? <ui.Menu open anchor={null} portal autoFocus side="bottom" align="start" getAnchorRect={getAnchorRect}
+    items={[{ type: 'label', id: 'creation-title', text: label }, ...entries]}
+    listClassName={className} onClose={onClose} onSelect={choose} />
+    : <StandalonePointMenu label={label} className={className} items={entries} getAnchorRect={getAnchorRect} choose={choose} onClose={onClose} />
+}
+
+function StandalonePointMenu({ label, className, items, getAnchorRect, choose, onClose }: {
+  label: string; className: string; items: readonly UiAction[]; getAnchorRect: () => DOMRect | null
+  choose: (id: string) => void; onClose: () => void
+}) {
+  const list = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const place = () => {
+      const rect = getAnchorRect()
+      if (rect && list.current) { list.current.style.left = `${rect.x}px`; list.current.style.top = `${rect.y + 4}px` }
+    }
+    place(); list.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [getAnchorRect])
+  return createPortal(<div ref={list} role="menu" aria-label={label} className={`${className} dc-point-menu-fallback`} onKeyDown={(event) => {
+    event.stopPropagation()
+    const buttons = [...list.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []]
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    if (event.key === 'Escape' || (event.key === 'Tab' && event.shiftKey)) { event.preventDefault(); onClose() }
+    else if (event.key === 'Tab' || event.key === 'Enter') { event.preventDefault(); buttons[index]?.click() }
+    else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault()
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+        : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+      buttons[next]?.focus()
+    }
+  }}><div className="dc-point-menu-heading">{label}</div>
+    {items.map((item) => <button key={item.id} type="button" role="menuitem" disabled={item.disabled} onClick={() => choose(item.id)}>{item.icon}{item.label}</button>)}
+  </div>, document.body)
 }
 
 export function UiModal({ label, onClose, children, wide = false, className = '' }: {

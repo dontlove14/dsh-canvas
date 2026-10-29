@@ -14,7 +14,8 @@ const Input = forwardRef<HTMLInputElement, Parameters<typeof Primitives.Input>[0
 )
 function Menu({ open, anchor, items, onSelect, listClassName }: Parameters<typeof Primitives.Menu>[0]) {
   return <span>{anchor}{open && createPortal(<div role="menu" className={listClassName}>
-    {items?.map((item) => 'label' in item && <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => onSelect?.(item.id)}>{item.label}</button>)}
+    {items?.map((item) => 'label' in item ? <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => onSelect?.(item.id)}>{item.icon}{item.label}</button>
+      : item.type === 'label' ? <div key={item.id}>{item.text}</div> : <hr key={item.id} />)}
   </div>, document.body)}</span>
 }
 function Modal({ title, closeLabel, onClose, children, className }: Parameters<typeof Primitives.Modal>[0]) {

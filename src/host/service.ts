@@ -22,6 +22,8 @@ import { ReviewSettingsInputSchema, ReviewProviderSchema, ReviewSubmitSchema, Re
 import { ReviewStore, publicReview } from './review/store'
 import { ReviewRuntime } from './review/runtime'
 import { OfficialReviewTransport, type ReviewTransport } from './review/provider'
+import { UploadStartSchema } from '../shared/uploads'
+import { HashSchema } from '../shared/v2'
 
 export interface CanvasConfig {
   dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number
@@ -47,7 +49,10 @@ export const routeDefinitions = [
   { suffix: 'task-search', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'task', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'upload-start', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'upload-status', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'upload', methods: ['POST'] as const, requestBody: 'streaming' as const },
+  { suffix: 'upload-complete', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'upload-cancel', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'media', methods: ['GET', 'HEAD'] as const, requestBody: 'buffered' as const },
   { suffix: 'storage', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'storage-test', methods: ['POST'] as const, requestBody: 'buffered' as const },
@@ -334,8 +339,16 @@ export class CanvasService {
         }
       }
       if (suffix === 'upload-start' && request.method === 'POST') {
-        const body = z.object({ requestId: IdSchema, filename: z.string().min(1).max(255), kind: z.enum(['image', 'video', 'audio']), position: z.object({ x: z.number().finite(), y: z.number().finite() }).strict() }).strict().parse(await request.json())
+        const body = UploadStartSchema.parse(await request.json())
         return json(await this.runtime.uploads.start(await requireCanvas(), body), 201)
+      }
+      if (suffix === 'upload-status' && request.method === 'GET')
+        return json(await this.runtime.uploads.status(await requireCanvas(), IdSchema.parse(url.searchParams.get('id'))))
+      if (['upload-complete', 'upload-cancel'].includes(suffix) && request.method === 'POST') {
+        const body = z.object({ id: IdSchema }).strict().parse(await request.json()), canvasId = await requireCanvas()
+        if (suffix === 'upload-cancel') return json(await this.runtime.uploads.cancel(canvasId, body.id))
+        const result = await this.runtime.uploads.complete(canvasId, body.id)
+        this.runtime.wake(); return json(result, 202)
       }
       if (suffix === 'upload' && request.method === 'POST') {
         const id = await requireCanvas()
@@ -343,7 +356,14 @@ export class CanvasService {
         if (Number(request.headers.get('content-length')) > this.config.maxMediaBytes) throw new CanvasError('文件过大', 413)
         const kind = z.enum(['image', 'video', 'audio']).parse(url.searchParams.get('kind'))
         const filename = decodeURIComponent(request.headers.get('x-canvas-filename') ?? 'media')
-        const result = await this.runtime.uploads.accept(id, IdSchema.parse(url.searchParams.get('id')), Readable.fromWeb(request.body as import('node:stream/web').ReadableStream), kind, filename, request.signal)
+        const stream = Readable.fromWeb(request.body as import('node:stream/web').ReadableStream)
+        const uploadId = IdSchema.parse(url.searchParams.get('id'))
+        if (url.searchParams.has('offset')) {
+          const offset = z.coerce.number().int().nonnegative().parse(url.searchParams.get('offset'))
+          const checksum = HashSchema.parse(request.headers.get('x-canvas-chunk-sha256'))
+          return json(await this.runtime.uploads.chunk(id, uploadId, stream, kind, filename, offset, checksum, request.signal))
+        }
+        const result = await this.runtime.uploads.accept(id, uploadId, stream, kind, filename, request.signal)
         this.runtime.wake(); return json(result, 202)
       }
       if (suffix === 'storage') {

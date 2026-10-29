@@ -71,15 +71,15 @@ table{min-width:650px}.table-wrap{max-height:600px}.demo{padding:15px}.demo-chat
 h1{font-size:25pt}h2{font-size:18pt}h3{font-size:14pt;break-after:avoid}p,li{orphans:3;widows:3}.table-wrap{overflow:visible;max-height:none;border:0}table{min-width:0;font-size:10pt}th{position:static}tr{break-inside:avoid}.demo{break-inside:auto;background:var(--paper)}.demo-grid{grid-template-columns:1fr}.demo-note{font-size:9pt}.demo-board{min-height:0}.control-diagram{break-inside:avoid}footer{break-before:page}.sources a{color:var(--ink)}}
 </style></head>
 <body><div class="layout">
-<nav class="toc" aria-label="文档目录"><p class="toc-title">无限画布插件</p><span class="toc-meta">PRD v0.2 · 评审稿<br>产品需求 · 2026-10-28</span><div class="toc-links"><a href="#section-1"><span>01</span>定位、目标与版本变化</a><a href="#section-2"><span>02</span>v0.2 范围</a><a href="#section-3"><span>03</span>业务对象、控制权与共享规则</a><a href="#section-4"><span>04</span>功能需求</a><a href="#section-5"><span>05</span>本版共同沿用的规则</a><a href="#section-6"><span>06</span>待评审的关键决策</a><a href="#section-7"><span>07</span>依据与版本说明</a><p class="nav-label">交互演示</p><a href="#demo-preset">安装与前置条件</a><a href="#demo-creation">接管与对话续作</a><a href="#demo-editing">视频编辑建议</a><a href="#demo-guidance">普通与专业用户引导</a><p class="nav-label">功能需求</p><a class="nav-sub" href="#fr-01">FR-01 安装后的能力入口与前置条件</a><a class="nav-sub" href="#fr-02">FR-02 人工画布创作</a><a class="nav-sub" href="#fr-03">FR-03 对话创作自动准备目录与画布</a><a class="nav-sub" href="#fr-04">FR-04 Agent 的画布创作能力</a><a class="nav-sub" href="#fr-05">FR-05 只读观察与过程可视化</a><a class="nav-sub" href="#fr-06">FR-06 人工接管与强制停止</a><a class="nav-sub" href="#fr-07">FR-07 人工操作自动转换为文本</a><a class="nav-sub" href="#fr-08">FR-08 用户继续对话，Agent 接着创作</a><a class="nav-sub" href="#fr-09">FR-09 视频编辑与媒体组合</a><a class="nav-sub" href="#fr-10">FR-10 结果交付与本轮结束</a><a class="nav-sub" href="#fr-11">FR-11 关闭、断线、冲突与恢复</a><a class="nav-sub" href="#fr-12">FR-12 Agent 预设的用户引导与表达规则</a><a class="nav-sub" href="#fr-13">FR-13 多模态 Agent 模型选择与资格校验</a></div></nav>
+<nav class="toc" aria-label="文档目录"><p class="toc-title">无限画布插件</p><span class="toc-meta">PRD v0.2 · Agent 预设<br>架构已选定 · 2026-10-29</span><div class="toc-links"><a href="#section-1"><span>01</span>定位、目标与版本变化</a><a href="#section-2"><span>02</span>v0.2 范围</a><a href="#section-3"><span>03</span>Agent 预设架构与控制模型</a><a href="#section-4"><span>04</span>Agent 预设的交互与约束</a><a href="#section-5"><span>05</span>本版共同沿用的规则</a><a href="#section-6"><span>06</span>待评审的关键决策</a><a href="#section-7"><span>07</span>依据与版本说明</a><p class="nav-label">理念与约束示意</p><a href="#demo-preset">多模态模型资格</a><a href="#demo-creation">控制权与上下文交接</a><a href="#demo-guidance">普通与专业用户引导</a><p class="nav-label">预设交互与约束</p><a class="nav-sub" href="#fr-01">FR-01 安装后的能力入口与前置条件</a><a class="nav-sub" href="#fr-02">FR-02 人工画布创作</a><a class="nav-sub" href="#fr-03">FR-03 对话创作自动准备目录与画布</a><a class="nav-sub" href="#fr-04">FR-04 原生工具的业务调用边界</a><a class="nav-sub" href="#fr-05">FR-05 只读观察与过程可视化</a><a class="nav-sub" href="#fr-06">FR-06 人工接管与强制停止</a><a class="nav-sub" href="#fr-07">FR-07 人工操作自动转换为文本</a><a class="nav-sub" href="#fr-08">FR-08 用户继续对话，Agent 接着创作</a><a class="nav-sub" href="#fr-09">FR-09 具体创作功能的后续补充边界</a><a class="nav-sub" href="#fr-10">FR-10 结果交付与本轮结束</a><a class="nav-sub" href="#fr-11">FR-11 关闭、断线、冲突与恢复</a><a class="nav-sub" href="#fr-12">FR-12 Agent 预设的用户引导与表达规则</a><a class="nav-sub" href="#fr-13">FR-13 多模态 Agent 模型选择与资格校验</a></div></nav>
 <article class="document">
 <header class="masthead">
-<p class="eyebrow">产品需求 · v0.2</p>
+<p class="eyebrow">产品需求 · v0.2 · Agent 预设设计</p>
 <h1>DeepSeek Harness<br>无限画布插件</h1>
-<p class="subtitle"><strong>人工画布与 Agent 对话，共用一套媒体创作能力。</strong><br>赋能图片、视频、音频生成和视频编辑；过程可见，用户随时接管，Agent 理解人工修改后续作。专业用户保持精细控制，普通用户通过通俗引导完成创作。</p>
-<div class="meta-row"><span>评审稿 · 新增能力尚未实施</span><span>2026-10-28</span><span>当前实现基线：插件 0.2.45</span></div>
-<div class="scope-note"><strong>已确认：</strong>双入口创作、自动打开侧栏并准备项目、Agent 操作时只读观察、强制人工接管、人工修改自动转为文本并支持对话续作、针对专业与普通用户的表达和引导；助手对话只能选择多模态模型，非多模态模型禁止选择。<br><strong>待评审：</strong>编辑动作、服务范围、生成授权、接管对已提交任务的影响、恢复规则与首批多模态输入能力。PRD v0.2 是需求版本，不是安装包版本。</div>
-<div class="reading-links"><a href="#demo-creation">先看接管与续作演示 ↗</a><a href="#section-6">查看待定决策 ↗</a><a href="./DeepSeek-Harness-Canvas-PRD-v0.2.md">Markdown 正文</a></div>
+<p class="subtitle"><strong>Harness 原生工具＋插件共享创作服务＋自定义 Agent 预设。</strong><br>先明确角色、能力组合、调用边界与控制权交接；人工与对话使用同一项目事实。专业用户保持精度，普通用户通过通俗引导完成创作。</p>
+<div class="meta-row"><span>Agent 接入架构已选定 · 尚未实施</span><span>修订：2026-10-29</span><span>具体创作功能待补充</span></div>
+<div class="scope-note"><strong>本次确定：</strong>一个包、多入口、共享服务；原生工具在预设作用域注册；多模态模型资格；只读观察、强制接管与人工修改上下文；专业与普通用户引导。<br><strong>后续补充：</strong>具体媒体与编辑功能、工具清单、参数、界面和技术契约。方案与示意不代表插件已经实现。</div>
+<div class="reading-links"><a href="#s3-1">先看已选定架构 ↗</a><a href="#demo-creation">查看交接理念示意 ↗</a><a href="./DeepSeek-Harness-Canvas-PRD-v0.2.md">Markdown 正文</a></div>
 </header>
 <main><section class="chapter" id="section-1"><h2><span class="chapter-number">01</span>定位、目标与版本变化</h2><h3 id="s1-1">1.1 两种主要交互方式</h3>
 <p class="decision"><strong>[已确认] 人工画布创作。</strong>用户直接创建和组织节点、编写提示词、引用素材、发起生成与编辑媒体，自由决定内容、流程和结果。</p>
@@ -97,19 +97,65 @@ h1{font-size:25pt}h2{font-size:18pt}h3{font-size:14pt;break-after:avoid}p,li{orp
 <p class="decision"><strong>[已确认]</strong> 同时服务专业媒体创作者与不了解画布 / 剪辑的普通用户。前者可以通过画布精细组织内容，也可以委托 Agent；后者可以只表达想要的结果，由 Agent 逐步引导。入口选择不等于专业程度，不能因为用户使用对话就默认其不专业。</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">用户情况</th><th scope="col">产品需要提供的支持</th></tr></thead><tbody><tr><td>专业创作者</td><td>保留准确的专业术语、参数与素材组织方式，尊重明确的创作决策；人工画布与对话委托可随时切换</td></tr><tr><td>普通用户</td><td>用日常语言理解目标，帮助补齐必要信息，解释下一步与结果；不要求先掌握节点、连线、模型或剪辑术语</td></tr><tr><td>熟悉程度未知 / 使用偏好变化</td><td>默认通俗、简洁；按用户表达和反馈调整，不增加强制专业水平问卷或身份标签</td></tr></tbody></table></div>
 <h3 id="s1-3">1.3 与 v0.1 及当前实现的关系</h3>
-<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">主题</th><th scope="col">旧稿 / 当前基线</th><th scope="col">v0.2 需求</th></tr></thead><tbody><tr><td>主交互</td><td>v0.1 以人工逐节点生成为主</td><td>人工创作与 Agent 对话创作并列</td></tr><tr><td>宿主赋能</td><td>画布页面和媒体生成服务</td><td>面向用户的画布能力与面向 Agent 的创作能力共同交付</td></tr><tr><td>对话侧栏</td><td>当前已能打开无限画布，但会话不自动绑定画布</td><td>Agent 创作时自动打开、定位并关联当前创作画布</td></tr><tr><td>目录</td><td>当前支持插件自己的一级文件夹与多画布</td><td>Agent 能按创作要求创建、命名与复用目录和画布</td></tr><tr><td>控制权</td><td>当前按手动编辑与保存冲突规则运行</td><td>每张画布有明确操作者，支持强制接管与交接同步</td></tr><tr><td>图片 / 视频 / 音频</td><td>当前已接入图片与 FishTTS；真实视频生成待接入</td><td>两种入口按实际接入能力调用对应生成服务</td></tr><tr><td>视频编辑</td><td>当前没有完整视频编辑能力</td><td>增加可观察、可手动修改、可被 Agent 调用的编辑流程</td></tr><tr><td>文件与配置</td><td>v0.1 的“媒体全部本地保存”已被现行对象存储规则更新</td><td>沿用当前资源保存与访问规则，密钥不进入对话上下文</td></tr></tbody></table></div>
-<p class="">当前状态依据业务参考；初始 PRD 仅作为历史材料，不用于推断功能已经交付。<sup><a href="#cite-2">[2]</a></sup><sup><a href="#cite-3">[3]</a></sup> 本稿描述未来行为，现行文档与 ADR 在实施前仍保持当前事实。</p></section><section class="chapter" id="section-2"><h2><span class="chapter-number">02</span>v0.2 范围</h2><h3 id="s2-1">2.1 必须形成的完整流程</h3>
-<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">范围</th><th scope="col">v0.2 必须具备的行为</th><th scope="col">对应需求</th></tr></thead><tbody><tr><td>双入口</td><td>手动画布入口保留；安装插件后提供无限画布助手预设</td><td>FR-01、FR-02</td></tr><tr><td>项目准备</td><td>对话创作自动打开侧栏、准备文件夹和画布；可继续指定的已有项目</td><td>FR-03</td></tr><tr><td>Agent 操作</td><td>读取内容、创建和修改节点、连接具体素材、提交生成、查询结果与进行编辑</td><td>FR-04</td></tr><tr><td>过程可见</td><td>画布实时展示已确认的操作与真实任务状态；Agent 操作时用户只读</td><td>FR-05</td></tr><tr><td>人工接管</td><td>显式接管；停止当前 Agent 创作、回复与后续写入；保留已完成内容</td><td>FR-06</td></tr><tr><td>人工修改记录</td><td>从实际成功的修改生成可理解的文本摘要</td><td>FR-07</td></tr><tr><td>对话续作</td><td>发送续作要求时自动同步摘要与当前画布，再交回 Agent</td><td>FR-08</td></tr><tr><td>视频编辑</td><td>两种入口都可编辑并得到可用视频结果；具体首批编辑动作待评审</td><td>FR-09</td></tr><tr><td>结果交付</td><td>对话、节点和任务共同指向可预览 / 引用 / 下载的实际结果</td><td>FR-10</td></tr><tr><td>异常恢复</td><td>断线、保存失败、任务晚到和宿主重启时保留内容，恢复控制关系</td><td>FR-11</td></tr><tr><td>人群引导</td><td>Agent 预设明确专业与普通用户的沟通规则；普通用户可以不懂画布仍完成对话创作</td><td>FR-12</td></tr><tr><td>Agent 模型资格</td><td>无限画布助手只允许选择已确认具备多模态能力的模型；非多模态模型禁用</td><td>FR-13</td></tr></tbody></table></div>
+<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">主题</th><th scope="col">旧稿 / 当前基线</th><th scope="col">v0.2 需求</th></tr></thead><tbody><tr><td>主交互</td><td>v0.1 以人工逐节点生成为主</td><td>人工创作与 Agent 对话创作并列</td></tr><tr><td>宿主赋能</td><td>画布页面和媒体生成服务</td><td>面向用户的画布能力与面向 Agent 的创作能力共同交付</td></tr><tr><td>Agent 接入</td><td>原插件页面与后台服务尚未形成专属 Agent 工具入口</td><td>原生工具调用共享创作服务；预设组合角色、引导与能力</td></tr><tr><td>对话侧栏</td><td>当前已能打开无限画布，但会话不自动绑定画布</td><td>Agent 创作时自动打开、定位并关联当前创作画布</td></tr><tr><td>目录</td><td>当前支持插件自己的一级文件夹与多画布</td><td>Agent 能按创作要求创建、命名与复用目录和画布</td></tr><tr><td>控制权</td><td>当前按手动编辑与保存冲突规则运行</td><td>每张画布有明确操作者，支持强制接管与交接同步</td></tr><tr><td>图片 / 视频 / 音频</td><td>插件能力持续完善，实际范围以业务与验证文档为准</td><td>两种入口按实际接入能力调用对应生成服务，具体范围后续补充</td></tr><tr><td>视频编辑</td><td>当前没有完整视频编辑能力</td><td>增加可观察、可手动修改、可被 Agent 调用的编辑流程</td></tr><tr><td>文件与配置</td><td>v0.1 的“媒体全部本地保存”已被现行对象存储规则更新</td><td>沿用当前资源保存与访问规则，密钥不进入对话上下文</td></tr></tbody></table></div>
+<p class="">当前状态依据业务参考；初始 PRD 仅作为历史材料，不用于推断功能已经交付。<sup><a href="#cite-2">[2]</a></sup><sup><a href="#cite-3">[3]</a></sup> 本稿描述未来行为，现行文档与 ADR 在实施前仍保持当前事实。</p></section><section class="chapter" id="section-2"><h2><span class="chapter-number">02</span>v0.2 范围</h2><h3 id="s2-1">2.1 本次确定的设计范围</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">范围</th><th scope="col">本次确定的理念与约束</th><th scope="col">对应章节</th></tr></thead><tbody><tr><td>接入架构</td><td>一个插件包、多入口；原生工具调用宿主共享创作服务</td><td>3.1–3.3</td></tr><tr><td>预设定位与交付</td><td>预设是角色、引导、技能与允许能力的组合，随插件安装</td><td>FR-01</td></tr><tr><td>双入口与观察</td><td>人工与对话使用相同业务对象；Agent 操作期间只读可视化</td><td>FR-02、FR-03、FR-05</td></tr><tr><td>工具调用边界</td><td>Agent 通过受控工具操作，不能直接操作数据库或模拟浏览器</td><td>FR-04</td></tr><tr><td>控制权与交接</td><td>人工接管优先；已保存修改自动形成上下文，续作先同步</td><td>FR-06–FR-08</td></tr><tr><td>成果与恢复</td><td>真实结果与任务状态是依据；停止、断线或失败不丢已有成果</td><td>FR-10、FR-11</td></tr><tr><td>用户引导</td><td>专业用户保留精度；普通用户通过通俗引导完成创作</td><td>FR-12</td></tr><tr><td>Agent 模型资格</td><td>只允许合格多模态模型，选择与执行都校验</td><td>FR-13</td></tr></tbody></table></div>
 <p class=""><strong>自由创作的含义：</strong>Agent 可以在本轮需求的范围内决定步骤与节点组织，不要求用户逐次点击节点来执行。手动模式下，建立连线仍只表示引用，不自动执行下游；Agent 模式下，下游执行来自明确的 Agent 操作。</p>
-<p class="decision"><strong>[Assumption, TBD]</strong> 首批音频创作以已具备的文字转语音为基础。音乐、环境声和音效的生成是否进入 v0.2，须在 D-02 明确；不能把配音能力展示为全部音频模型都已支持。</p>
+<p class="">图片、视频、音频生成与视频编辑是产品方向，<strong>不等于这些具体功能已经全部定义或交付</strong>。首批能力与工具契约统一列入后续功能设计。</p>
 <h3 id="s2-2">2.2 影响范围的必要界线</h3>
-<p class="">本版围绕单个用户在 Harness 内完成媒体创作与操作者交接。未指定的协作平台、公开发布、模板商城、素材市场和复杂特效不纳入本稿。已有目录与媒体身份、历史结果、模型配置和任务记录需要继续可读；本稿不授权清空历史或重写已有画布内容。</p></section><section class="chapter" id="section-3"><h2><span class="chapter-number">03</span>业务对象、控制权与共享规则</h2><h3 id="s3-1">3.1 对象的唯一含义</h3>
+<p class="">本版围绕单个用户在 Harness 内完成媒体创作与操作者交接。未指定的协作平台、公开发布、模板商城、素材市场和复杂特效不纳入本稿。已有目录与媒体身份、历史结果、模型配置和任务记录需要继续可读；本稿不授权清空历史或重写已有画布内容。</p></section><section class="chapter" id="section-3"><h2><span class="chapter-number">03</span>Agent 预设架构与控制模型</h2><h3 id="s3-1">3.1 已选定的接入方案</h3>
+
+<figure class="control-diagram" data-diagram>
+<figcaption>图 1 · 一个插件包，多入口，共享创作服务</figcaption>
+<div data-diagram-render></div>
+<div data-diagram-fallback class="flow-fallback">Harness Agent → 预设中的原生工具 → 宿主共享创作服务<br>人工画布 → 同一共享创作服务 → 数据、媒体与持久任务<br>服务确认事实 → 页面呈现；工具回执 → Agent 会话</div>
+<pre hidden data-diagram-source>
+flowchart TB
+H["Harness Agent 与模型"] --> T
+subgraph Package["无限画布插件 · 一个安装包"]
+  subgraph Preset["预设作用域 · 角色、引导、技能"]
+    T["Agent 原生工具入口"]
+  end
+  U["人工页面 / 只读观察"] --> S["宿主共享创作服务"]
+  T --> S
+  S --> D["数据、媒体与持久任务"]
+end
+</pre>
+</figure>
+
+<p class="decision"><strong>[已确认] 方案：Harness 原生工具＋插件共享创作服务＋自定义 Agent 预设。</strong></p>
+<p class="">插件在宿主中加载一份共享创作服务，人工页面和 Agent 工具都通过它处理业务。Agent 工具通过 Harness 的 <code>ctx.tools</code> 注册，加入无限画布助手预设的作用域。预设选择使用哪些能力，不再创建一份独立画布运行时。<sup><a href="#cite-5">[5]</a></sup></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">组成</th><th scope="col">职责</th><th scope="col">边界</th></tr></thead><tbody><tr><td>Harness Agent 与模型</td><td>对话、理解需求、规划步骤、调用工具、生成回复</td><td>使用宿主已有 Agent 驱动与模型路由，不在插件内再实现一套聊天循环</td></tr><tr><td>无限画布助手预设</td><td>组合创作角色、用户引导、技能与允许工具；应用模型资格规则</td><td>预设描述不是业务授权，也不是实际执行者</td></tr><tr><td>Agent 原生工具入口</td><td>接收结构化操作意图，确认调用上下文，调用共享服务并返回结果</td><td>不直接读写数据库，不调用浏览器点击、拖拽或坐标脚本</td></tr><tr><td>插件共享创作服务</td><td>处理业务校验、控制权、数据变更、任务与已确认操作记录</td><td>人工与 Agent 遵守同一业务规则；真实结果只在执行确认后发布</td></tr><tr><td>插件页面</td><td>手动编辑、只读观察、接管入口、展示已确认结果</td><td>页面不是 Agent 执行器，打开侧栏通过插件与宿主的正式集成完成</td></tr></tbody></table></div>
+<p class="">服务接口、调用适配和页面展示在职责上分开，当前保持一个安装包。具体目录、导出路径、服务键、接口参数和持久布局属于后续技术设计。</p>
+<p class=""><strong>选型依据与代价：</strong></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">方案</th><th scope="col">本次结论</th><th scope="col">理由</th></tr></thead><tbody><tr><td>原生工具调用共享服务</td><td>采用</td><td>与 Harness 的工具、作用域、会话和取消机制直接配合，复用现有插件业务</td></tr><tr><td>先建立外部 MCP 服务器</td><td>当前不采用</td><td>当前使用者就在 Harness 内；额外连接与身份适配仍不能代替画布控制权管理</td></tr><tr><td>Agent 直接操作数据库</td><td>不作为产品接入方式</td><td>会绕过业务校验、保存规则和操作者约束，并把内部结构暴露为工具契约</td></tr><tr><td>浏览器模拟操作</td><td>不作为主要创作方式</td><td>执行依赖界面和视口，难以保证确认结果、后台生命周期和强制接管</td></tr></tbody></table></div>
+<p class="">正面影响：人工和 Agent 结果一致，安装链路简单，后续能力可以逐项接入。维护代价：插件需要维护工具契约、资格校验和交接规则，并跟随所支持的 Harness 版本核对公开接口。责任由项目维护者承担。</p>
+<p class="">这是一项可扩展的接入选择：未来需要其他客户端或外部 Agent 使用画布时，可以在同一共享服务上增加 MCP 适配，不复制业务逻辑或建立第二份数据来源。是否对外提供 MCP 的认证与可访问范围在出现该需求时另行设计。<sup><a href="#cite-6">[6]</a></sup></p>
+<h3 id="s3-2">3.2 预设组成与作用域</h3>
+<p class=""><strong>角色与指导负责“如何创作”，工具与服务负责“能做什么、是否允许做”。</strong></p>
+<ul>
+<li>角色提示规定助手是媒体创作伙伴，既理解专业要求，也能引导普通用户。</li>
+<li>技能承载可按需读取的创作方法和使用说明；具体技能内容随功能定义补充。</li>
+<li>工具只暴露已接入并允许当前会话使用的业务能力。没有实现的能力不注册为可用工具，提示词也不能声称可以执行。</li>
+<li>模型资格、控制权与调用校验由程序执行，不能仅靠提示词要求模型自律。</li>
+</ul>
+<p class="decision"><strong>[已确认]</strong> 创作工具在无限画布助手预设的作用域中组合，宿主共享服务只加载一次。不同会话可以有不同的工具组合，但操作同一画布仍服从单一操作者规则。</p>
+<p class="">Harness 作用域管理能力可见性和注册生命周期，并不自动形成数据库、文件或操作权限边界。因此该预设应限制继承的通用执行能力，避免从文件、终端或浏览器工具绕过画布服务；共享服务仍须验证真实会话与当前控制权。<sup><a href="#cite-4">[4]</a></sup></p>
+<h3 id="s3-3">3.3 生命周期、事实来源与依赖方向</h3>
+<p class=""><strong>生命周期分工：</strong></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">事项</th><th scope="col">归属</th></tr></thead><tbody><tr><td>对话轮次、模型请求、回复与取消</td><td>Harness Agent</td></tr><tr><td>预设工具与指导的注册 / 撤销</td><td>对应预设作用域及插件生命周期</td></tr><tr><td>画布、素材、已保存内容与持久媒体任务</td><td>插件共享创作服务及其后台运行时</td></tr><tr><td>当前目标、操作者、交接状态与人工修改批次</td><td>插件交接管理，按会话和画布核对</td></tr><tr><td>面板展开、观察视口与页面呈现</td><td>客户端展示，不取得 Agent 的写入权</td></tr></tbody></table></div>
+<p class="">Agent 工具依赖业务接口，不依赖页面组件或存储实现；页面也通过同一业务接口提交人工意图。服务确认内容变更后，页面刷新 / 订阅该事实，Agent 收到相应回执。执行通知可以推动展示，但不能成为另一份独立项目状态。</p>
+<p class="">提交长时间任务时，工具返回明确的接受结果和任务身份；任务状态由共享服务继续维护。工具调用的取消不等于外部媒体任务已取消。保留现有持久执行与恢复能力，不用进程内的 <code>jobs-local</code> 取代持久队列。<sup><a href="#cite-7">[7]</a></sup></p>
+<p class="">人工接管使用 Harness 的公开 Agent 取消接口停止本轮活动，并由共享服务立即撤销旧操作者的写入资格。服务拒绝晚到写入；停止与清理结果再回报页面。保留原会话与历史，不以销毁会话、杀掉整个宿主进程或清空画布作为接管方式。人工修改通过公开上下文机制在续作前交付，编辑期间不自动唤醒 Agent。</p>
+<p class="">框架取消是需要执行方响应的机制，不会自动强制终止任意宿主代码。因此工具与服务必须及时处理取消，并在最终提交前再次核对写入资格；“旧 Agent 不再改变内容”不能仅靠取消信号或页面禁用来保证。</p>
+<p class="">原生工具和 MCP 都不会自动带来全部音视频理解。当前官方图片附件链路可复用；音视频直接输入、分析形式与模型适配需分别核对。Agent 收到的“实际媒体内容”与名称、元信息、文本说明必须区分，不能把后者当作已经看过或听过素材。<sup><a href="#cite-6">[6]</a></sup></p>
+<h3 id="s3-4">3.4 对象的唯一含义</h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">对象</th><th scope="col">定义与边界</th></tr></thead><tbody><tr><td>文件夹</td><td>插件目录中的一级分类。Agent 自动创建的文件夹与人工创建的文件夹使用同一套管理入口。</td></tr><tr><td>画布</td><td>节点、引用关系与媒体创作内容的项目载体；不等同于 Harness 文件工作区。</td></tr><tr><td>会话</td><td>用户与 Harness Agent 的对话。会话可关联创作画布，不改变文件工作区本身。</td></tr><tr><td>本轮创作</td><td>一条实际创作要求引发的操作序列；完成、失败、停止或接管都会结束本轮自动操作。</td></tr><tr><td>当前创作画布</td><td>本轮明确操作的目标。一个会话同一时刻只有一张当前创作画布。</td></tr><tr><td>控制权</td><td>决定当前谁可以修改画布内容与发起创作动作。作用于画布本身，不只作用于当前浏览器。</td></tr><tr><td>人工修改批次</td><td>人工接管后至下一次成功交回 Agent 之间，已经保存的人工操作集合。</td></tr><tr><td>媒体任务</td><td>一次生成、导入或视频结果制作；有独立状态与输出，不等同于 Agent 的回复。</td></tr></tbody></table></div>
 <p class="decision"><strong>[产品判断]</strong> 一个会话可以先后关联不同画布，但每次操作必须明确目标。用户要求新项目时新建；指定已有项目时读取并复用。自动创建多张画布或跨画布搬移素材须符合本轮要求，不作为每次对话的默认行为。</p>
-<h3 id="s3-2">3.2 控制状态</h3>
+<h3 id="s3-5">3.5 控制状态</h3>
 
-<figure class="control-diagram" data-control-diagram>
-<figcaption>图 1 · 内容控制权的主要转换</figcaption>
+<figure class="control-diagram" data-diagram>
+<figcaption>图 2 · 内容控制权的主要转换</figcaption>
 <div data-diagram-render></div>
 <div data-diagram-fallback class="flow-fallback">人工编辑 → 续作同步 → Agent 创作 → Agent 待命<br>Agent 创作 / 待命 → 人工接管确认 → 人工编辑<br>断线或结果不明 → 状态待核对；不自动继续创作</div>
 <pre hidden data-diagram-source>
@@ -126,14 +172,14 @@ S -->|保存或同步失败| H
 
 <div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">状态</th><th scope="col">内容操作者</th><th scope="col">用户可以做什么</th><th scope="col">离开条件</th></tr></thead><tbody><tr><td>C-01 人工编辑</td><td>用户</td><td>编辑、生成、预览、保存；有关联会话时可请求 Agent 续作</td><td>续作同步完成后进入 C-02</td></tr><tr><td>C-02 Agent 创作中</td><td>当前关联 Agent</td><td>只读观察、查看任务、预览 / 下载、人工接管、在对话中停止</td><td>本轮结束进入 C-03；接管进入 C-04</td></tr><tr><td>C-03 Agent 待命</td><td>保留会话关联，无正在执行的 Agent 创作</td><td>只读观察、发送下一条创作要求、人工接管</td><td>新创作进入 C-02；接管进入 C-04</td></tr><tr><td>C-04 接管确认中</td><td>撤销旧 Agent 写入，尚未开放人工内容编辑</td><td>观察接管结果；不允许两方同时修改</td><td>确认写入已冻结、当前状态可用后进入 C-01</td></tr><tr><td>C-05 续作同步中</td><td>暂无内容写入方</td><td>查看；等待已有编辑保存与上下文同步</td><td>成功进入 C-02；失败回 C-01</td></tr><tr><td>C-06 状态待核对</td><td>暂无可确认的写入方</td><td>查看最后确认的内容、重新连接、核对状态</td><td>确认后回到实际控制状态，不能自动发起新生成</td></tr></tbody></table></div>
 <p class="decision"><strong>[Assumption, TBD]</strong> Agent 本轮完成后保持 C-03，只读待命，用户若要编辑仍点击接管；后续创作对话可以直接进入新一轮。这样避免任务结束瞬间无提示地改变画布操作含义。此规则待 D-06 评审，并非用户已经确认的完成后交互。纯人工使用不进入 C-03。</p>
-<h3 id="s3-3">3.3 操作权限矩阵</h3>
+<h3 id="s3-6">3.6 操作权限矩阵</h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">操作</th><th scope="col">人工编辑</th><th scope="col">Agent 创作中 / 待命的用户</th><th scope="col">当前 Agent</th></tr></thead><tbody><tr><td>查看、平移、缩放、选择、预览、下载</td><td>允许</td><td>允许</td><td>可读取必要内容</td></tr><tr><td>改名、移动节点、编辑提示词 / 参数</td><td>允许</td><td>禁止</td><td>仅持有本画布控制权时允许</td></tr><tr><td>新建 / 删除节点、建立 / 解除引用</td><td>允许，遵守现有业务校验</td><td>禁止</td><td>同左，遵守本轮需求与业务校验</td></tr><tr><td>生成、重试生成、导入素材、编辑视频</td><td>允许，按能力与任务规则处理</td><td>禁止</td><td>同左；超出本轮授权范围时需用户新指令</td></tr><tr><td>修改目标画布所属目录 / 删除目标画布</td><td>按现有任务与目录规则</td><td>禁止</td><td>仅明确的用户管理要求；不能为清理流程自动删除</td></tr><tr><td>读取或更改密钥原文</td><td>不通过画布提供</td><td>不通过画布提供</td><td>不提供此能力</td></tr></tbody></table></div>
 <p class="">观察模式中的视口与选择只影响本人的查看状态，不持久化为对 Agent 的内容修改，也不触发人工接管。修改模型 / 存储配置沿用设置入口；改配置不会自动取得画布控制权，也不改变已提交任务的固定输入。</p>
-<h3 id="s3-4">3.4 四条共享规则</h3>
+<h3 id="s3-7">3.7 四条共享规则</h3>
 <p class=""><strong>SR-01 单一操作者。</strong>同一画布同一时刻只允许一方执行创作性写入。所有入口、旧请求、相关子 Agent 和延迟回调都服从当前控制关系；不能只把浏览器按钮禁用而仍接受后台 Agent 写入。另一个会话不能抢走正在创作的画布。</p>
 <p class=""><strong>SR-02 以已确认内容为准。</strong>只展示实际成功的操作。已完成的节点修改保留；未执行的计划不画成完成结果。交接以最新保存状态为基线，不能通过旧整图覆盖当前内容。</p>
 <p class=""><strong>SR-03 Agent 停止与媒体任务分开。</strong>接管立即终止 Agent 后续创作与回复。已在外部服务执行的媒体任务能否取消由服务能力决定，不能显示未经确认的“已取消”。具体处理见 FR-06。</p>
-<p class=""><strong>SR-04 人工修改先同步、后续作。</strong>人工编辑期间不自动唤醒 Agent。继续创作前，自动提供已保存修改摘要与当前内容；失败则不交出控制权、不让 Agent 使用旧状态。</p></section><section class="chapter" id="section-4"><h2><span class="chapter-number">04</span>功能需求</h2><h3 id="fr-01">FR-01 安装后的能力入口与前置条件</h3>
+<p class=""><strong>SR-04 人工修改先同步、后续作。</strong>人工编辑期间不自动唤醒 Agent。继续创作前，自动提供已保存修改摘要与当前内容；失败则不交出控制权、不让 Agent 使用旧状态。</p></section><section class="chapter" id="section-4"><h2><span class="chapter-number">04</span>Agent 预设的交互与约束</h2><h3 id="fr-01">FR-01 安装后的能力入口与前置条件</h3>
 <p class=""><strong>目的：</strong>用户安装一次插件，即可选择手动创作或无限画布助手，不需要再手工安装一份预设。</p>
 <p class=""><strong>入口与行为：</strong></p>
 <ul>
@@ -148,15 +194,9 @@ S -->|保存或同步失败| H
 <div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">条件</th><th scope="col">结果</th></tr></thead><tbody><tr><td>未配置对象存储</td><td>目录和设置可打开；新建画布、导入和新生成被阻止，提供对象存储设置入口</td></tr><tr><td>未配置当前类型媒体模型</td><td>可讨论 / 整理已有内容；不能提交该类型生成，说明缺少什么配置</td></tr><tr><td>Agent 模型不可用、非多模态或能力未确认</td><td>手动画布入口仍可用；禁止用该模型发送助手消息或开始 / 继续创作，引导选择或配置合格的多模态模型</td></tr><tr><td>视频 / 音频类型尚未接入所需能力</td><td>不显示虚假可用模型，不把模拟结果当真实输出；告知无法完成的部分</td></tr><tr><td>预设加载失败或被禁用</td><td>保留手动入口与已有数据；会话无法使用相应 Agent 能力，说明加载问题</td></tr></tbody></table></div>
 <p class="">用户只写入配置，画布与 Agent 只得到“已配置 / 未配置”和可用能力，不取得密钥原文。聊天模型用于理解与规划，媒体服务负责实际生成；二者配置职责保持明确。</p>
 
-<section class="demo" id="demo-preset" data-demo-preset aria-labelledby="preset-title">
-<div class="demo-heading"><span class="demo-badge">交互评审 · FR-01 / FR-13</span><h4 id="preset-title">安装、配置与多模态模型资格</h4></div>
-<p class="demo-note">选择一种情况，查看产品应给出的反馈。这里只改变文档说明，不修改配置。</p>
-<div class="button-row">
-<button type="button" data-scenario="ready" aria-pressed="true">配置就绪</button>
-<button type="button" data-scenario="storage" aria-pressed="false">未配置对象存储</button>
-<button type="button" data-scenario="video" aria-pressed="false">缺少视频模型</button>
-<button type="button" data-scenario="preset" aria-pressed="false">预设加载失败</button>
-</div><p class="feedback" role="status" data-preset-result>配置就绪：手动入口可用；选择无限画布助手后，可以开始对话创作。安装不会替换原默认预设。</p>
+<section class="demo" id="demo-preset" aria-labelledby="preset-title">
+<div class="demo-heading"><span class="demo-badge">约束示意 · FR-01 / FR-13</span><h4 id="preset-title">多模态 Agent 模型资格</h4></div>
+<p class="demo-note">只说明预设的模型选择规则；不定义插件具体创作功能，也不调用模型或修改真实配置。</p>
 <div class="summary-box" data-demo-agent-model>
 <h5>无限画布助手的对话模型选择</h5>
 <p class="demo-note">本区域独立演示资格规则。示例模型只表示能力分类，不代表已接入任何真实服务。</p>
@@ -178,14 +218,13 @@ S -->|保存或同步失败| H
 <p class=""><strong>触发：</strong>用户从插件入口进入，选择或新建画布；未被 Agent 占用时为 C-01。</p>
 <p class=""><strong>处理与结果：</strong></p>
 <ul>
-<li>保留当前的目录、节点、提示词、模型参数、素材引用、上传、生成、结果预览、下载与任务查看流程。</li>
-<li>图片生成、视频生成、音频生成 / 配音和视频编辑使用独立、语义清楚的操作入口；只提供已经接入且合法的能力。</li>
-<li>手动生成由用户操作触发。只连线、改提示词或拖动节点，不自动提交生成。</li>
-<li>保存、素材引用、历史结果与模型能力校验沿用当前有效规则。修改输入不改变已提交任务的快照，旧结果保持可查看。</li>
+<li>人工创作使用插件已定义的业务能力，Agent 使用对应的受控工具；二者操作相同的项目、素材和成果。</li>
+<li>人工意图由页面提交给共享服务；只进行观察的动作不触发创作，也不被误记为人工修改。</li>
+<li>Agent 接入不重新定义插件的媒体、保存和历史业务规则，具体功能随插件设计补充。</li>
 <li>从其他窗口打开正在由 Agent 创作的画布，进入同一只读观察状态；要修改仍须通过 FR-06 接管。</li>
 <li>纯人工画布没有关联会话时，不把操作记录发送给任意 Agent。用户明确在助手会话中选择该画布后，可把当前内容交给 Agent。</li>
 </ul>
-<p class=""><strong>例外：</strong>保存失败保留草稿；存在冲突时不覆盖其他已确认内容；有进行中任务的删除与重复生成行为遵守现有规则。人工编辑操作演示与 FR-06 / FR-07 共用下方控制权演示。</p>
+<p class=""><strong>例外：</strong>保存失败保留草稿；存在冲突时不覆盖其他已确认内容；进行中任务相关操作遵守实际功能规则。控制权示意仅解释交接，不规定创作功能的界面。</p>
 <p class="demo-ref"><a href="#demo-creation">查看对应的控制权与续作演示 ↗</a></p>
 <h3 id="fr-03">FR-03 对话创作自动准备目录与画布</h3>
 <p class=""><strong>触发：</strong>无限画布助手收到一条需要实际创作的用户指令，并已确定目标范围。</p>
@@ -207,18 +246,20 @@ S -->|保存或同步失败| H
 <li>会话关闭或删除不连带删除文件夹、画布、素材与任务。画布不存在时保留对话记录，说明关联失效，不自动重建原项目。</li>
 </ul>
 <p class="demo-ref"><a href="#demo-creation">查看对应的控制权与续作演示 ↗</a></p>
-<h3 id="fr-04">FR-04 Agent 的画布创作能力</h3>
+<h3 id="fr-04">FR-04 原生工具的业务调用边界</h3>
 <p class=""><strong>触发：</strong>Agent 持有当前目标画布控制权，且正在处理用户的实际创作要求。</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">能力</th><th scope="col">输入与处理规则</th><th scope="col">已确认结果</th></tr></thead><tbody><tr><td>理解现有项目</td><td>读取目录、节点输入、已保存素材、引用、编辑内容、任务状态</td><td>得到真实基线，不把旧结果当成新输入的产物</td></tr><tr><td>组织项目</td><td>按要求新建 / 改名文件夹和画布，创建或修改节点</td><td>用户看见相同目录与节点</td></tr><tr><td>组织素材引用</td><td>使用明确的具体素材和合法目标；检查格式、数量与依赖关系</td><td>建立可见引用；不随预览切换而改绑</td></tr><tr><td>生成媒体</td><td>使用已配置的对应类型服务和合法参数，固定本次输入</td><td>一次明确的任务及其输出，不伪造模型结果</td></tr><tr><td>等待和查询</td><td>跟踪原任务；查询可暂时失败但不重复生成</td><td>状态与结果更新到原任务</td></tr><tr><td>编辑视频</td><td>使用 FR-09 规定的编辑对象、来源与操作</td><td>可修改的编辑内容及独立输出结果</td></tr><tr><td>继续下游</td><td>上游实际文件可用后再提交依赖它的下游动作</td><td>可追溯的输入、输出与实际执行顺序</td></tr></tbody></table></div>
+<p class="decision"><strong>[已确认]</strong> Agent 发出业务操作意图，由原生工具调用共享服务完成；Agent 不直接操作数据库、媒体目录或浏览器。工具用于表达插件允许的操作，而非提供任意执行通道。</p>
+<p class="">每次调用应有清楚的输入约束和结构化结果。实际执行身份来自 Harness 的调用上下文，不能信任模型自行填写的身份或授权声明。服务先核对目标、能力与操作者，再处理业务；返回成功、拒绝、冲突或结果待确认等真实结论。</p>
 <p class=""><strong>处理规则：</strong></p>
 <ul>
-<li>Agent 可在本轮要求内自行安排创作步骤与互不依赖的任务；受同一套能力、队列和资源规则约束。</li>
-<li>并行操作也必须在画布上呈现其确认结果。不得以并行为理由跳过控制权检查。</li>
-<li>对尚无输出的节点可以先展示编辑草稿和计划中的下游节点，但不能把不存在的文件连接为可用输入。</li>
-<li>没有对应能力时说明局限；不能静默换供应商、用其他媒体类型代替或扩大生成次数。</li>
-<li>失败时保留已有成果；不会自动重新付费生成不明是否成功的任务。新增付费调用的授权范围见 D-03。</li>
-<li>用户内容中的提示词、文件名和人工摘要属于创作数据，不自动被当作新的系统指令。</li>
+<li>读取结果只包含该操作所需的内容；需要理解媒体时，通过受控媒体读取与适配提供真实内容。</li>
+<li>修改由共享服务按实际功能规则校验，并返回已确认结果；未执行的计划不当作已保存内容。</li>
+<li>重复调用核对同一次操作，不能重复产生项目或外部效果。响应不明时先核对，不盲目重做。</li>
+<li>取消信号需要传递到可取消的工作；真正写入前仍核对控制权，不能只依赖取消通知。</li>
+<li>工具失败不清空已确认成果；服务或预设不可用时明确停止相应能力，不绕过到数据库或浏览器。</li>
+<li>用户素材与人工摘要是创作数据，不自动成为新的系统指令。面向模型的结果与面向用户的解释分别呈现，但采用同一事实来源。</li>
 </ul>
+<p class="">工具名称、数量、每项操作的参数、返回字段、生成与编辑规则均待插件具体功能确定后补充。本节不预先列出一套尚未完成的创作工具清单。</p>
 <p class="demo-ref"><a href="#demo-creation">查看对应的控制权与续作演示 ↗</a></p>
 <h3 id="fr-05">FR-05 只读观察与过程可视化</h3>
 <p class=""><strong>布局：</strong>Harness 对话负责说明需求和回复；右侧无限画布负责显示目录、目标项目、节点、引用、实际结果与任务入口。画布顶部常驻当前操作者及“人工接管”按钮；这不增加节点内部状态文字。</p>
@@ -254,7 +295,7 @@ S -->|保存或同步失败| H
 <h3 id="fr-07">FR-07 人工操作自动转换为文本</h3>
 <p class=""><strong>触发：</strong>人工接管后，用户完成一项创作性修改且保存成功。记录归属于当前画布与人工修改批次；不要求用户逐次录入操作说明。</p>
 <p class=""><strong>摘要依据：</strong>以已保存修改和真实结果为依据；自动摘要不能因为模型推测而补出用户未做的动作。记录既保留必要过程，也提供当前有效改动，供续作使用。</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">人工操作</th><th scope="col">转换成的语义信息</th><th scope="col">不应记录成什么</th></tr></thead><tbody><tr><td>新建、删除、改名节点</td><td>类型、对象身份、名称变化及关联影响</td><td>用户删除了不相关的整套项目</td></tr><tr><td>修改提示词 / 模型 / 参数</td><td>对象身份、旧值与新值或必要变化片段</td><td>把历史任务参数改成了新值</td></tr><tr><td>新增 / 移除引用</td><td>源素材、目标节点、输入关系</td><td>仅凭节点相邻位置推测引用</td></tr><tr><td>手动上传或提交生成</td><td>新素材或任务的真实身份、输入概要与最新状态</td><td>把未结束生成写成已完成</td></tr><tr><td>更换使用的结果</td><td>明确选用的素材与受影响目标</td><td>仅预览另一结果就改写下游引用</td></tr><tr><td>视频编辑</td><td>片段来源、截取区间、顺序、音轨位置等有效改变</td><td>覆盖原始媒体文件</td></tr><tr><td>移动节点</td><td>合并同一次拖动为一次布局变化</td><td>每一帧鼠标位置都变成一条对话</td></tr><tr><td>观察、选择、视口变化、播放 / 下载</td><td>不作为创作修改；必要时另提供当前选择上下文</td><td>无意义的海量操作消息</td></tr></tbody></table></div>
+<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">人工操作</th><th scope="col">转换成的语义信息</th><th scope="col">不应记录成什么</th></tr></thead><tbody><tr><td>新建、删除、改名节点</td><td>类型、对象身份、名称变化及关联影响</td><td>用户删除了不相关的整套项目</td></tr><tr><td>修改提示词 / 模型 / 参数</td><td>对象身份、旧值与新值或必要变化片段</td><td>把历史任务参数改成了新值</td></tr><tr><td>新增 / 移除引用</td><td>源素材、目标节点、输入关系</td><td>仅凭节点相邻位置推测引用</td></tr><tr><td>手动上传或提交生成</td><td>新素材或任务的真实身份、输入概要与最新状态</td><td>把未结束生成写成已完成</td></tr><tr><td>更换使用的结果</td><td>明确选用的素材与受影响目标</td><td>仅预览另一结果就改写下游引用</td></tr><tr><td>后续新增的创作 / 编辑操作</td><td>按已定义功能记录对象、输入变化与确认结果</td><td>从尚未定义的编辑能力臆造用户操作</td></tr><tr><td>移动节点</td><td>合并同一次拖动为一次布局变化</td><td>每一帧鼠标位置都变成一条对话</td></tr><tr><td>观察、选择、视口变化、播放 / 下载</td><td>不作为创作修改；必要时另提供当前选择上下文</td><td>无意义的海量操作消息</td></tr></tbody></table></div>
 <p class=""><strong>合并与撤销：</strong></p>
 <ul>
 <li>连续输入与同一次拖动在语义完成时合并，保留重要最终值；不把每个按键或每帧运动发给 Agent。</li>
@@ -263,7 +304,7 @@ S -->|保存或同步失败| H
 <li>保存失败的本地草稿标注尚未保存，不进入“已完成修改”摘要；续作前必须先处理保存问题。</li>
 </ul>
 <p class=""><strong>可见性与交付：</strong>在关联会话提供“人工修改摘要”的查看位置；用户不需要复制粘贴。人工编辑期间不把每条记录作为新用户消息发送，也不自动开始回复。成功交接时，未同步批次作为上下文一次性送入，保留与会话的关联证据。</p>
-<p class=""><strong>示例（格式示意，不是实际发生的操作）：</strong>“人工接管后，将节点‘封面’的提示词改为暖色室内场景；新增音频节点‘旁白’，提交了任务，当前等待结果；将视频片段二调整到片段一之前；其他素材引用未改变。”</p>
+<p class=""><strong>示例（仅说明摘要表达）：</strong>“人工接管后，用户修改了项目内容，已保存；本轮新要求尚未执行。继续前请读取当前项目，并保留人工已经确认的修改。”实际摘要必须记录真实对象和变化，不能使用此泛化示例代替实际操作事实。</p>
 <p class="">密钥、签名链接、鉴权请求、未经需要读取的宿主文件内容不进入摘要。长文本保留必要变化及完整内容的可读取对象引用；不得静默截掉影响续作的参数、素材或未完成任务。</p>
 <p class="">给 Agent 的上下文保留识别对象所需的身份信息；用户可见摘要优先使用素材名称和改动效果。不能把一串内部 ID、接口字段或编辑对象结构直接当作面向普通用户的解释。两种表达来自同一份已确认操作事实。</p>
 <p class="demo-ref"><a href="#demo-creation">查看对应的控制权与续作演示 ↗</a></p>
@@ -289,69 +330,33 @@ S -->|保存或同步失败| H
 <p class="">重复发送、重连或收到晚到回执时，不能据此重复创建画布或付费生成。交接成功回执与任务创建不明的恢复分别处理。</p>
 
 <section class="demo" id="demo-creation" data-demo-creation aria-labelledby="creation-title">
-<div class="demo-heading"><span class="demo-badge">交互评审 · FR-02–FR-08 / FR-11</span><h4 id="creation-title">对话创作 → 人工接管 → 修改 → 对话续作</h4></div>
-<p class="demo-note">这是有限画布中的行为示意。目录、节点、回复和任务仅在本页内存模拟；没有真实媒体文件。可测试晚到写入、保存失败及断线。</p>
+<div class="demo-heading"><span class="demo-badge">交接理念示意 · FR-02–FR-08 / FR-11</span><h4 id="creation-title">原生工具调用、人工接管与上下文交接</h4></div>
+<p class="demo-note">以合格模型和正常服务为前提，只模拟控制权与已确认事实。按钮不代表实际创作工具清单，页面不模拟具体媒体操作。</p>
 <div class="demo-grid">
 <div class="demo-chat">
-<label for="creative-request">本轮创作要求</label>
-<textarea id="creative-request" rows="3" data-request>为夏日饮品做一段宣传视频，包含封面、画面和旁白。</textarea>
-<div class="button-row"><button class="primary" type="button" data-start>发送创作 / 续作要求</button><button type="button" data-query>只询问进度</button></div>
+<h5>Harness 会话</h5>
+<div class="button-row"><button class="primary" type="button" data-start>模拟创作 / 续作要求</button><button type="button" data-query>仅询问状态</button></div>
 <p class="reply-status" data-reply>当前没有进行中的示例回复。</p>
-<ol class="conversation-log" data-log aria-label="示例对话与操作记录" aria-live="polite"></ol>
-<div class="button-row"><button type="button" data-chat-stop>在对话中停止</button></div>
+<ol class="conversation-log" data-log aria-label="会话与交接示意记录" aria-live="polite"></ol>
 </div>
 <div class="demo-canvas">
 <div class="canvas-heading"><strong data-control>C-01 人工编辑</strong><button class="primary" type="button" data-takeover>人工接管</button></div>
 <p class="project-path" data-project>尚未准备目录与画布</p>
-<div class="demo-board" data-board aria-label="示例画布"><p>发送创作要求后，自动准备项目。</p></div>
-<div class="button-row"><button type="button" data-manual-create>创建画布（人工）</button><button type="button" data-agent-step>模拟 Agent 下一步</button></div>
-<div class="human-editor">
-<h5>人工编辑封面节点</h5>
-<label for="human-node-name">名称<input id="human-node-name" data-human-name value="暖色封面"></label>
-<label for="human-node-prompt">提示词<textarea id="human-node-prompt" data-human-prompt rows="2">暖色室内，夏日饮品的产品特写。</textarea></label>
-<button type="button" data-human-save>保存人工修改</button><p class="small" data-unsaved>已确认内容可用。</p>
+<p class="feedback" data-service-result>共享服务尚未确认创作操作。</p>
+<div class="button-row"><button type="button" data-agent-step>模拟工具调用被服务确认</button><button type="button" data-finish>模拟本轮结束</button></div>
+<div class="human-editor"><h5>人工操作事实</h5><button type="button" data-human-save>模拟一项人工修改保存</button><p class="small">保存成功后摘要自动产生，不要求用户手写操作说明。</p><p class="small" data-unsaved>尚无人工修改。</p></div>
 </div>
 </div>
-</div>
-<div class="summary-box"><h5>自动整理的人工修改摘要</h5><p data-summary>当前人工批次没有有效的已保存创作修改。</p><p class="small">成功交付的修改批次：<strong data-batch-count>0</strong>。摘要只在续作时作为上下文同步，不自动唤醒 Agent。</p></div>
-<div class="button-row">
-<button type="button" data-late-write>模拟旧 Agent 晚到写入</button>
-<button type="button" data-task-result>模拟原语音任务结果到达</button>
-<button type="button" data-reset-creation>重置演示</button>
-</div>
+<div class="summary-box"><h5>自动形成的人工修改上下文</h5><p data-summary>尚无未同步的已保存人工修改。</p><p class="small">成功交付的批次：<strong data-batch-count>0</strong>。续作读取最新状态并同步未交付事实；人工编辑不自动唤醒 Agent。</p></div>
+<div class="button-row"><button type="button" data-late-write>模拟旧 Agent 晚到写入</button><button type="button" data-task-result>模拟原后台任务结果到达</button><button type="button" data-reset-creation>重置示意</button></div>
 <div class="scenario-row"><label><input type="checkbox" data-save-fail>模拟保存 / 同步失败</label><label><input type="checkbox" data-offline>模拟断线（取消勾选即重连）</label></div>
 <noscript><p class="feedback">当前未启用 JavaScript。上文的状态表和需求正文完整说明流程；演示按钮不可运行。</p></noscript>
 </section>
 
-<h3 id="fr-09">FR-09 视频编辑与媒体组合</h3>
-<p class="decision"><strong>[已确认]</strong> 视频编辑属于插件的核心赋能能力；人工与 Agent 两种入口应能操作同一种编辑内容，并在画布上看到来源、编辑步骤和结果。</p>
-<p class="decision"><strong>[Assumption, TBD] 首批完整编辑流程建议：</strong>选择已有视频 / 图片 / 音频 → 设置片段与顺序 → 安排音轨 → 预览编辑内容 → 制作并得到独立视频文件。以下动作进入 D-01 评审，不能视为已经确认了完整剪辑软件范围。</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">建议的首批动作</th><th scope="col">输入与规则</th><th scope="col">可观察结果</th></tr></thead><tbody><tr><td>截取视频片段</td><td>来源必须可读；区间在实际时长内；结束时间大于开始时间</td><td>显示来源与截取范围，不改原视频</td></tr><tr><td>调整片段顺序、拼接</td><td>使用明确的片段顺序；图片加入视频时需明确持续时长</td><td>顺序与总时长按有效编辑内容计算</td></tr><tr><td>加入配音 / 已有音频</td><td>显示来源、开始位置、有效范围与原音轨保留情况</td><td>用户能理解哪段声音在哪段画面出现</td></tr><tr><td>制作独立视频结果</td><td>输入和编辑内容校验通过后固定本次版本</td><td>结果独立保留，可预览、下载或引用</td></tr></tbody></table></div>
-<p class=""><strong>布局原则：</strong>画布显示素材来源与编辑节点；编辑区域展示片段区间、排列顺序和音轨安排。是否采用独立时间线、首批输出格式、画面比例与编码规则均为 D-01 待定项。文档中的片段列表用于评审行为，不锁定最终界面。</p>
-<p class=""><strong>处理与状态：</strong></p>
-<ul>
-<li>人工在 C-01 编辑；Agent 在 C-02 操作；只读观察能查看相同编辑内容，不能拖动片段或改音轨。</li>
-<li>原媒体不被破坏，引用保持明确。修改编辑内容不改变已经开始制作的版本。</li>
-<li>未确认是否删除原音轨时，不静默移除；画面与音轨时长不匹配时展示影响，具体补齐 / 截断规则在 D-01 明确。</li>
-<li>素材缺失、区间无效、时长不明或格式不支持时，保留草稿并阻止制作，指出具体对象。</li>
-<li>接管按 FR-06 停止 Agent 编辑和后续制作步骤；已生成或晚到的独立结果按原任务保留。</li>
-<li>后续修改后再制作产生新结果，不覆盖先前媒体，也不静默替换其他节点已经引用的旧版本。</li>
-</ul>
-<p class="">字幕、转场、滤镜、复杂特效和多轨精细混音不因“视频编辑”四字自动进入首批范围；如需支持，应补充具体规则后评审。</p>
-
-<section class="demo" id="demo-editing" data-demo-editing aria-labelledby="editing-title">
-<div class="demo-heading"><span class="demo-badge">交互评审 · FR-09 · 首批动作待确认</span><h4 id="editing-title">片段区间、顺序与音轨位置</h4></div>
-<p class="demo-note">使用一段 12 秒的示例视频记录和示例音轨；没有真实文件。片段列表只说明行为，不确定正式剪辑界面。</p>
-<div data-clips class="clips">
-<p>片段一：0–4 秒；片段二：4–8 秒。启用 JavaScript 后可编辑。</p>
-</div>
-<label class="audio-offset" for="audio-offset">音轨开始位置（秒）<input id="audio-offset" type="number" min="0" step="0.1" value="0" data-audio-offset></label>
-<div class="button-row"><button type="button" data-reorder>交换片段顺序</button><button type="button" data-invalid-edit>模拟无效区间</button><button class="primary" type="button" data-export-edit>校验并模拟制作结果</button><button type="button" data-reset-edit>重置</button></div>
-<p class="feedback" role="status" data-edit-result>请选择区间、顺序与音轨位置；制作不会改变原媒体。</p>
-<ol data-edit-outputs class="editing-outputs" aria-label="独立的示例结果记录"></ol>
-<p class="small">此演示不决定真实输出格式、编码、音轨截断规则，也不提供下载视频。</p>
-</section>
-
+<h3 id="fr-09">FR-09 具体创作功能的后续补充边界</h3>
+<p class="decision"><strong>[已确认]</strong> 图片、视频、音频生成与视频编辑属于产品方向。Agent 通过插件已实现的能力创作；本次先确定架构，不定义具体功能清单。</p>
+<p class="">待插件功能确定后，逐项补充人工行为、Agent 可调用范围、输入 / 输出语义、失败与取消规则、模型和媒体支持范围。只有完成这些定义与实现的能力，才能注册为预设可用工具或在指导中宣称可用。</p>
+<p class="">具体媒体操作、编辑动作、参数范围、界面与工具契约当前均为 <strong>[TBD]</strong>，不在本次通过示例演示提前确定。</p>
 <h3 id="fr-10">FR-10 结果交付与本轮结束</h3>
 <p class=""><strong>触发：</strong>本轮目标完成，或因明确失败、停止、接管而结束。</p>
 <ul>
@@ -402,7 +407,7 @@ S -->|保存或同步失败| H
 <div class="demo-heading"><span class="demo-badge">话术评审 · FR-12</span><h4 id="guidance-title">同一种创作能力，按用户理解程度沟通</h4></div>
 <p class="demo-note">以下是预设行为的示例说明，不是正式产品中的专业程度切换控件，也不调用聊天模型。</p>
 <div class="button-row"><button type="button" data-audience="beginner" aria-pressed="true">普通用户引导</button><button type="button" data-audience="professional" aria-pressed="false">专业用户要求</button><button type="button" data-audience="error" aria-pressed="false">错误解释</button></div>
-<div class="summary-box"><h5>用户</h5><p data-guidance-user>我想给新开的咖啡店做个宣传视频，但我不会剪辑。</p><h5>Agent 建议话术</h5><p data-guidance-agent>可以。我来帮你做画面、配上介绍声音，再合成视频。你最想展示店里的什么？</p></div>
+<div class="summary-box"><h5>用户</h5><p data-guidance-user>我想创作一份内容，但我不懂怎么操作画布。</p><h5>Agent 建议话术</h5><p data-guidance-agent>你可以先说希望做出什么样的内容，我来帮你整理想法。你最希望别人看到或听到什么？</p></div>
 <p class="feedback" data-guidance-note role="status">先问一个影响内容的问题，不要求用户理解节点、连线或模型参数。</p>
 </section>
 
@@ -433,9 +438,9 @@ S -->|保存或同步失败| H
 <li><strong>加载与主题：</strong>沿用既定节点加载与 Harness 主题规范。控制权提示放在画布级区域，任务详情负责解释状态，不重复增加节点状态文字。</li>
 <li><strong>保存兼容：</strong>现有画布、媒体、结果与任务身份保留。新增会话关联与操作者记录的具体数据设计属于后续技术设计，本 PRD 不指定数据库表、接口或取消实现。</li>
 </ul></section><section class="chapter" id="section-6"><h2><span class="chapter-number">06</span>待评审的关键决策</h2><p class="">用户明确的双入口、只读观察、自动项目准备、强制接管、人工修改自动反馈、用户引导与多模态 Agent 模型限制是本稿固定前提。以下事项是理念未限定的具体边界；本轮先完整列出，不把建议当成既定需求。</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">ID</th><th scope="col">需要确定的内容</th><th scope="col">本稿建议 / 不确定性</th></tr></thead><tbody><tr><td>D-01 视频编辑的首批能力与界面</td><td>截取、排序拼接、配音 / 音轨安排、独立输出；是否需要时间线；图片片段、音轨时长冲突、比例 / 格式规则</td><td>建议完成最小的可编辑到可交付视频流程；具体动作均待评审</td></tr><tr><td>D-02 视频和音频服务范围</td><td>首批真实视频模型；音频仅 TTS，还是包含音乐 / 音效；相应输入与输出能力</td><td>不能承诺当前尚未接入的服务，TTS 不等于所有音频生成</td></tr><tr><td>D-03 自由创作中的生成授权</td><td>Agent 可自行决定的生成数量、模型选择、重试和新增调用范围</td><td>建议本轮明确创作要求授权其必要操作；不逐节点确认；超出要求的新增调用需新授权。具体数量与费用边界 [TBD]</td></tr><tr><td>D-04 接管对已提交媒体任务的影响</td><td>尚未向外部派发的任务、外部已接受任务、可取消的本地制作如何处置</td><td>建议不再派发未发送的 Agent 任务，保留外部已接受任务的追踪与结果；不宣称已取消远端任务</td></tr><tr><td>D-05 恢复后的自动执行范围</td><td>刷新 / 断线 / 关闭对话 / 宿主重启后，Agent 是否自动继续，以及控制状态落点</td><td>建议核对前 C-06；核对后恢复已确认人工控制到 C-01，原 Agent 中断到 C-03；中断交接按 FR-11 收束，由用户明确续作，不自动重放</td></tr><tr><td>D-06 控制按钮与观察细节</td><td>“人工托管”是否最终显示为“人工接管”；完成后是否保持只读待命；自动定位与视口跟随规则</td><td>建议按钮叫“人工接管”，完成后保持 Agent 待命，用户主动移动视口后不再抢焦点</td></tr><tr><td>D-07 多模态 Agent 模型的能力确认范围</td><td>首批合格模型清单；图片、音频、视频输入的支持与确认方式</td><td>禁止非多模态模型已确认；具体模态支持范围据实际能力确认，不用模型名称或生成能力代替判断</td></tr></tbody></table></div>
-<p class="">本稿不附开发排期、不把交互演示视为实现。需求评审后，再形成插件能力接口、停止边界、事件记录与数据兼容的技术方案。</p></section></main><footer id="section-7"><div class="sources"><h2><span class="chapter-number">07</span>依据与版本说明</h2><ol><li id="cite-1">用户，2026-10-28 本轮设计理念与补充：Harness 媒体赋能；人工与 Agent 双入口；自动打开侧栏与准备目录；只读观察；强制接管；人工操作转换为文本并支持续作；同时面向专业创作者和普通用户，预设必须引导用户并避免难懂表达；无限画布助手必须使用多模态模型，非多模态模型在对话模型选择器中禁止选择。</li><li id="cite-2"><a href="../docs/business.md">业务与功能参考</a>：当前有效的目录、节点、生成、TTS、对象存储、媒体、保存与任务规则。该文档是当前实现参考。</li><li id="cite-3"><a href="../DeepSeek-Harness-Canvas-PRD-v0.1.html">PRD v0.1 原稿</a>与<a href="../docs/adr/0034-conversation-sidebar-canvas.md">对话右侧画布 ADR-0034</a>：分别提供历史需求与当前侧栏边界。v0.2 提议改变的会话绑定与操作者机制尚未落地。</li><li id="cite-4"><a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/preset/agent-preset/README.zh.md" target="_blank" rel="noopener">Harness 预设定义</a>、<a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/preset/agent-preset-registry/README.zh.md" target="_blank" rel="noopener">预设注册与组合包分发</a>与<a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-agent-preset/README.zh.md" target="_blank" rel="noopener">Web 预设选择</a>：上一轮已核对；本机安装的 0.2.1-rc.2 包声明包含预设配置与选择接口。官方机制支持方案方向，不代表本插件已经接入。</li></ol></div><p class=small>本稿首次编制：2026-10-28。v0.2 的新增需求以本稿与后续评审修订为依据；现有功能事实仍以当前业务与验证文档为准。</p></footer></article></div>
+<div class="table-wrap" tabindex="0" role="region" aria-label="需求明细表"><table><thead><tr><th scope="col">ID</th><th scope="col">需要确定的内容</th><th scope="col">本稿建议 / 不确定性</th></tr></thead><tbody><tr><td>D-01 插件具体创作功能</td><td>媒体生成与视频编辑的首批操作、业务规则与界面</td><td>本次不定义，待插件功能完善后补充</td></tr><tr><td>D-02 Agent 工具契约与服务范围</td><td>已确定功能如何映射为工具，以及输入 / 输出与媒体服务能力</td><td>工具依赖业务定义，不先列固定清单或承诺尚未接入的能力</td></tr><tr><td>D-03 自由创作中的生成授权</td><td>Agent 可自行决定的生成数量、模型选择、重试和新增调用范围</td><td>建议本轮明确创作要求授权其必要操作；不逐节点确认；超出要求的新增调用需新授权。具体数量与费用边界 [TBD]</td></tr><tr><td>D-04 接管对已提交媒体任务的影响</td><td>尚未向外部派发的任务、外部已接受任务、可取消的本地制作如何处置</td><td>建议不再派发未发送的 Agent 任务，保留外部已接受任务的追踪与结果；不宣称已取消远端任务</td></tr><tr><td>D-05 恢复后的自动执行范围</td><td>刷新 / 断线 / 关闭对话 / 宿主重启后，Agent 是否自动继续，以及控制状态落点</td><td>建议核对前 C-06；核对后恢复已确认人工控制到 C-01，原 Agent 中断到 C-03；中断交接按 FR-11 收束，由用户明确续作，不自动重放</td></tr><tr><td>D-06 控制按钮与观察细节</td><td>“人工托管”是否最终显示为“人工接管”；完成后是否保持只读待命；自动定位与视口跟随规则</td><td>建议按钮叫“人工接管”，完成后保持 Agent 待命，用户主动移动视口后不再抢焦点</td></tr><tr><td>D-07 多模态 Agent 模型的能力确认范围</td><td>首批合格模型清单；图片、音频、视频输入的支持与确认方式</td><td>禁止非多模态模型已确认；具体模态支持范围据实际能力确认，不用模型名称或生成能力代替判断</td></tr></tbody></table></div>
+<p class="">原生工具、共享服务、预设作用域与随包交付的方案已确认，不再作为选型待定项。后续基于本稿补齐具体功能，再形成工具契约、停止边界、事件记录与数据兼容的技术设计。</p></section></main><footer id="section-7"><div class="sources"><h2><span class="chapter-number">07</span>依据与版本说明</h2><ol><li id="cite-1">用户，2026-10-28 本轮设计理念与补充：Harness 媒体赋能；人工与 Agent 双入口；自动打开侧栏与准备目录；只读观察；强制接管；人工操作转换为文本并支持续作；同时面向专业创作者和普通用户，预设必须引导用户并避免难懂表达；无限画布助手必须使用多模态模型，非多模态模型在对话模型选择器中禁止选择。</li><li id="cite-2"><a href="../docs/business.md">业务与功能参考</a>：当前有效的目录、节点、生成、TTS、对象存储、媒体、保存与任务规则。该文档是当前实现参考。</li><li id="cite-3"><a href="../DeepSeek-Harness-Canvas-PRD-v0.1.html">PRD v0.1 原稿</a>与<a href="../docs/adr/0034-conversation-sidebar-canvas.md">对话右侧画布 ADR-0034</a>：分别提供历史需求与当前侧栏边界。v0.2 提议改变的会话绑定与操作者机制尚未落地。</li><li id="cite-4"><a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/preset/agent-preset/README.zh.md" target="_blank" rel="noopener">Harness 预设定义</a>、<a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/preset/agent-preset-registry/README.zh.md" target="_blank" rel="noopener">预设注册与组合包分发</a>与<a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-agent-preset/README.zh.md" target="_blank" rel="noopener">Web 预设选择</a>：上一轮已核对；本机安装的 0.2.1-rc.2 包声明包含预设配置与选择接口。官方机制支持方案方向，不代表本插件已经接入。</li><li id="cite-5"><a href="https://deepseek-harness.github.io/deepseek-harness/develop/practice/" target="_blank" rel="noopener">Harness 能力分层</a>与<a href="https://deepseek-harness.github.io/deepseek-harness/reference/cookbook/adding-a-tool" target="_blank" rel="noopener">原生工具编写约定</a>：服务与工具职责分开；工具注册、输入 / 输出、取消与上下文行为的依据。</li><li id="cite-6"><a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/mcp/mcp-client/README.zh.md" target="_blank" rel="noopener">Harness MCP 桥接</a>与<a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/fs/tool-fs/README.zh.md" target="_blank" rel="noopener">图片读取</a>：MCP 接入同一工具系统，当前媒体结果与附件支持有具体边界。</li><li id="cite-7"><a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent/README.zh.md" target="_blank" rel="noopener">Harness Agent 接口</a>与<a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/jobs/jobs-local/README.zh.md" target="_blank" rel="noopener">进程内后台任务</a>：公开取消、上下文注入与运行时责任的依据；进程内任务不等同于持久媒体队列。</li></ol></div><p class=small>本稿首次编制：2026-10-28；Agent 架构修订：2026-10-29。用户本次明确确认原生工具方案，并要求先写架构理念、暂缓具体功能定义。官方资料与本机 0.2.1-rc.2 的核对是设计依据；实施时仍须核对所支持版本的实际公开契约。现有功能事实以当前业务与验证文档为准。</p></footer></article></div>
 <script src="./_shared/js/echarts.min.js"></script>
 <script src="./_shared/js/mermaid.min.js"></script>
-<script src="./assets/demos.js"></script>
+<script src="./assets/agent-preset.js"></script>
 </body></html>

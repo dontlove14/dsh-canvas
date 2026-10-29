@@ -93,7 +93,7 @@ export class SqliteStore {
       if (tts) { this.ttsConfig = TtsConfigSchema.parse(tts); this.ttsKey = await this.vault.read(this.ttsConfig.credentialRef) }
       await atomicJson(join(this.root, 'model-bindings.json'), this.bindings)
       await this.load()
-      await this.db.batch([sql("UPDATE upload_sessions SET state='failed',updated_at=? WHERE state='receiving'", [Date.now()]), sql('UPDATE task_details SET lease_owner=NULL,lease_until=NULL')])
+      await this.db.batch([sql('UPDATE task_details SET lease_owner=NULL,lease_until=NULL')])
     } catch (error) { await this.close(); throw error }
   }
   private async readJson(filename: string, fallback: any): Promise<any> {
@@ -469,7 +469,7 @@ export class SqliteStore {
     return row.file_hash
   }
   stagePath(name: string): string {
-    if (!/^[a-f0-9-]+\.(raw|media|upload)$/.test(name)) throw new CanvasError('无效暂存文件引用')
+    if (!/^[a-f0-9-]+\.(raw|media|upload|resume\.json)$/.test(name)) throw new CanvasError('无效暂存文件引用')
     return join(this.root, 'staging', name)
   }
   async actualPath(canvas: string, storage: string, filename: string): Promise<string> {

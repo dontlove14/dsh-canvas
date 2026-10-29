@@ -4,6 +4,12 @@
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
 
+0.2.71由Client的CREATABLE_NODES / createCanvasNode统一底部添加、空白右键和输出拉线到空白三个入口。useNodeCreationMenu适配React Flow公开事件，确认实际空白命中并冻结坐标 / 输出asset；UiPointMenu复用Harness公共Menu / portal与画布禁选作用域。直接连线和快捷创建共用connectReference，useCanvas.getGraph及同步edit updater在最新图上返回完整节点 / 边，沿用Seedance归一和GraphMutation；临时线只在ViewportPortal显示，不持久化或调用生成。新增类型必须同时维护三个入口与默认 / 校验 / 渲染 / 测试，见[ADR-0066](adr/0066-shared-node-creation-entrances.md)。
+
+0.2.67的canvasFileDrop在window捕获文件拖放，按可见画布矩形、最终坐标和顶层命中决定唯一接收方；画布内停止传播并直接调用当前上传回调，画布外保留Harness原document附件监听。首次接管调用无载荷dragend清理原Agent蒙版，隔离画布来源的dragleave以保持跨区深度。回调引用随提交更新，隐藏 / 卸载移除监听，原上传协议、五槽 / 胶囊和两库保持，见[ADR-0065](adr/0065-exclusive-canvas-file-drop.md)。
+
+0.2.65的CanvasApi共享ResumableUploads管理器缓存原Blob / UUID后最多占五个槽，其余排队；GET upload-status与POST upload字节仍分为buffered / streaming，Host journal与幂等导入保持。UploadCapsules只投影当前画布前五项和剩余计数，最多五个真实BorderBeam；复用NodeLoadingContext的主题 / 暂停。身份或数字位数改变时只测量最多六个小元素，用原生animate变换平滑补位，连续完成先保留当前动画位移；进度变化不测量媒体、不重播入场。见[ADR-0063](adr/0063-resumable-uploads-and-progress-capsules.md)与[ADR-0064](adr/0064-bounded-upload-capsules-and-five-transfers.md)。
+
 0.2.55的CanvasReviewState先从掩码settings推导任一家configured，再按画布读取预审状态；按钮仅订阅共享布尔可用性，未配置不请求状态 / 云端组。已有设置保存 / 关闭与激活刷新路径沿用，不增Host路由或持久格式。HistoryNode合并折叠操作栏；0.2.56画布根的单个非passive捕获监听将节点操作栏普通wheel与修饰键wheel都转交renderer原生处理，分别平移 / 缩放，保留坐标、两轴惯性与倍率限制，隐藏 / 卸载移除监听。
 
 0.2.57 ReviewButton额外订阅当前asset的结果，两家Active才隐藏；SeedanceReviewDialog从掩码配置与原任务推导可选供应商，切到另一家清空人物组 / 路径，成功详情不渲染。UiSelect复用公开Menu的ReactNode label携带悬停原因，原生与独立模式均校验disabled，全部不可用时保留无选项占位。ProjectList用同一UiModal / UiInput替换浏览器prompt，新建 / 改名共用NameDialog，原CatalogCommand身份 / revision / folderId保持，错误保留本地输入；Host与两库不改变。
@@ -70,6 +76,7 @@ flowchart LR
 | [sqlite-store](../src/host/sqlite-store.ts) | 单写者锁、图 / 目录事务、宿主投影、任务详情、对象定位与发布 / 搬移清单；store.ts 保留类型 / 重导出 |
 | [persistence](../src/host/persistence/database.ts) | SQL RPC、Worker 单连接、FK / CAS / token 校验，schema 为可执行字典 |
 | [media/files](../src/host/media/files.ts)、[uploads](../src/host/media/uploads.ts) | 安全名称、流接收 / hash / fsync、固定目标暂存与后台OSS发布、导入任务 |
+| [resumableUploads](../src/client/resumableUploads.ts)、[uploadCache](../src/client/uploadCache.ts)、[uploadJournal](../src/host/media/uploadJournal.ts) | 原Blob / UUID先缓存，4MiB块与确认offset，独立原子journal，Runtime恢复 / 停止收尾、幂等导入与引用连接；两库DDL不变 |
 | [object-storage](../src/host/object-storage/service.ts) / [aliyun](../src/host/object-storage/aliyun.ts) / [derived](../src/host/object-storage/derived.ts) | 厂商隔离、SHA / ETag / version身份校验、V4签名与2048项缓存、探测、临时解码和派生对象定位 |
 | [media/previews](../src/host/media/previews.ts) | 独立封面缓存、sharp / ffmpeg解码；不修改资产 / 任务 / DDL，Service停止时取消并等待处理 |
 | [media/waveforms](../src/host/media/waveforms.ts) / [AudioNode](../src/client/AudioNode.tsx) / [AudioPlayer](../src/client/AudioPlayer.tsx) | 真实PCM流式幅度、小JSON派生缓存、仅输出的音频卡片 / 自定义定位播放；复用认证media与共享媒体事件，不写原资产或任务 |

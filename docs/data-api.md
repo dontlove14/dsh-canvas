@@ -131,21 +131,24 @@ POST graph：
 | GET task-search | taskId / folderName / canvasName / type / startTime / endTime可选；page默认1、pageSize默认20、upperBound可选 | `{items,total,page,pageSize,upperBound}`，owner范围未删除画布，目录派生DTO；不需要canvas |
 | GET task | canvas、id | TaskDetail，不返回私有下载 URL / Key |
 | POST task | id、action retry-save/resume-query/abandon | `{ok:true}` |
-| POST upload-start | requestId、filename、kind、position | 201 `{id,nodeId}`，资源占位已保存 |
-| POST upload | canvas、id 会话、kind；原始字节流、URL编码 x-canvas-filename | 202 `{taskId,nodeId}`，完整接收后导入任务已提交 |
+| POST upload-start | requestId、filename、kind、position、size? | 201 `{id,nodeId}`；size开启续传，同UUID不同输入409 REQUEST_REUSED |
+| GET upload-status | canvas、id | `{id,nodeId,size,offset,chunkBytes,state,taskId?}`；服务器已持久确认的offset，独立buffered路由，no-store |
+| POST upload | canvas、id、kind、offset；原始分块、URL编码x-canvas-filename、x-canvas-chunk-sha256 | 200 UploadStatus；严格边界与hash，进度冲突409 UPLOAD_OFFSET_MISMATCH；旧无size / offset全文件流仍返回202导入 |
+| POST upload-complete | canvas；`{id}` | 202 `{taskId,nodeId}`；仅完整 / 格式验证后接受，重复返回原任务，未完成409 |
+| POST upload-cancel | canvas；`{id}` | `{ok:true}`；仅结束未接受上传，已接受导入不受影响 |
 | GET / HEAD media | canvas、id；download可选；variant=original/preview/waveform、v=1可选 | original / preview为307到对应方法签名URL；waveform为200同源JSON，HEAD无正文；均no-store |
 | GET / POST storage | POST StorageInput：requestId、revision、id?、type=aliyun-oss、name、region、bucket、endpoint、prefix、accessKeyId?、accessKeySecret? | ObjectStorageSettings：configured、activeProviderId、revision、providers、moving、failed；AK仅掩码 |
 | POST storage-test | 同StorageInput，仅测试不切换 | `{ok:true}` |
 | POST media-urls | canvas；items 1–100个 `{assetId,variant?}`、force默认false | `{items:[{assetId,variant,url,expiresAt}或{assetId,variant,error}]}`；逐项隔离失败 |
 | POST storage-retry | 无 | `{ok:true}`，失败清单重新排队 |
 
-共20个注册路径（19个v2路径和旧workspace GET）。旧 `/api/canvas/workspace`仅GET投影保留，旧mutation不写入；服务内legacy models alias保留，Harness仅注册新models。旧JSON / 媒体不扫描、不导入。
+共29个注册路径（28个v2路径和旧workspace GET）。旧 `/api/canvas/workspace`仅GET投影保留，旧mutation不写入；服务内legacy models alias保留，Harness仅注册新models。旧JSON / 媒体不扫描、不导入。
 
 常规Key掩码采用头3 / 星号8 / 尾3，长度≤6全遮，不返回原Key；storage provider新增可选accessKeySecretMask。EP字段保持原模型配置格式并在UI默认遮罩。显式settings-secret响应只含当前单字段，客户端不持久化 / 不放入保存草稿，取消与隐藏拒绝迟到结果；参见[ADR-0058](adr/0058-masked-settings-and-explicit-secret-reveal.md)。
 
 Mock模型来自[固定共享定义](../src/shared/mockModels.ts)，不写入models.json，不需要凭据。任务快照仍是严格ModelRecord，只有身份 / 名称 / 协议 / 地址全部匹配内置记录时才允许无凭据本地执行。mock-generate的幂等hash包含mock:true，与generate不可共用requestId。输出ID由任务ID和序号确定，写入同一task_outputs / canvas_assets，复用既有尺寸 / 时长字段；不新增表、节点、边或持久任务DTO字段。0.2.11的主图默认端点规则仍用于单次批量，0.2.44多次提交展开时派生逐素材端点；展开状态不进入增量DTO，旧边assetId保持。
 
-上传为 streaming，不是 multipart / Base64 控制请求。按实际流检查大小与格式，不能以 MIME / 声明长度跳过检查。202 不代表任务成功，接收中断没有可恢复后台导入承诺。
+上传为streaming，默认4MiB分块，按实际字节、SHA-256及最终格式检查，不以MIME / 声明长度跳过检查。独立staging/<UUID>.resume.json记录size、offset、块hash与文件身份，fsync字节后原子提交日志；不修改两库DDL。中断 / 5xx / 不明回执先GET进度再重试，旧无size上传不支持续传。202表示导入任务持久接受，不代表OSS保存成功；见[ADR-0063](adr/0063-resumable-uploads-and-progress-capsules.md)。0.2.65浏览器共享管理器最多五个并发流程，前五枚与其余+N仅为Client投影；不改变HTTP契约或后台OSS导入并发，见[ADR-0064](adr/0064-bounded-upload-capsules-and-five-transfers.md)。
 
 media-urls校验当前画布素材归属，不接受任意key。Host缓存最多2048项，签名方法 / 用途 / 版本 / 凭据纳入身份；默认GET 3600秒，剩余不足300秒刷新；force绕开缓存。graph读取不签名，JSON与307均no-store。HEAD独立签名；下载携带UTF-8 Content-Disposition签名参数。OSS应配置私有Bucket、CORS GET / HEAD和Range所需头；真实响应行为需用户验收。
 

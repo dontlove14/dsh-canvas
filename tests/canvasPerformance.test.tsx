@@ -10,6 +10,8 @@ import { emptyGraph, capabilitiesFor, defaultTtsParams, FISH_TTS_ENDPOINT, type 
 import { BUILTIN_MODELS } from '../src/shared/modelCatalog'
 import type { CanvasSnapshot, TaskSummary } from '../src/shared/v2'
 import { shareCanvasSnapshot } from '../src/client/canvasSharing'
+import { File as NativeFile } from 'node:buffer'
+import { ResumableUploads, type UploadTransport } from '../src/client/resumableUploads'
 
 // Real workspace, bodies, media and editor; only geometry/network are replaced.
 const probe = vi.hoisted(() => ({
@@ -225,4 +227,61 @@ it('retains dirty positions and exposes a conflict when a remote revision arrive
   expect((probe.data.get(f.moving.id) as any).node.position).toEqual({ x: 60, y: 2 })
   expect((probe.data.get(f.moving.id) as any).node.title).toBe(f.moving.title)
   expect(f.submit).not.toHaveBeenCalled()
+})
+
+it('keeps upload entry enabled while receiving, adds new files from button and drop, and tracks separate capsules without refreshing existing media bodies', async () => {
+  const f = await fixture(), records = new Map<string, any>()
+  const release = new Map<string, () => void>()
+  const reportProgress = new Map<string, (bytes: number) => void>()
+  const transport: UploadTransport = {
+    start: async (_canvas, input) => { records.set(input.requestId, input) },
+    status: async (_canvas, id) => ({ id, nodeId: id, state: 'receiving', size: records.get(id).size, offset: 0, chunkBytes: 4 }),
+    chunk: async (job, _offset, blob, _sha, progress) => {
+      reportProgress.set(job.filename, progress)
+      await new Promise<void>((resolve) => release.set(job.filename, resolve))
+      progress(blob.size)
+      return { id: job.requestId, nodeId: job.requestId, state: 'received', taskId: job.requestId, size: blob.size, offset: blob.size, chunkBytes: 4 }
+    },
+    complete: async (_canvas, id) => ({ nodeId: id, taskId: id }), cancel: async () => ({}), link: async () => {},
+  }
+  // Retain acknowledged state for the manager's follow-up GET.
+  const originalChunk = transport.chunk, originalStatus = transport.status
+  transport.chunk = async (...args) => {
+    const accepted = await originalChunk(...args)
+    records.get(args[0].requestId).accepted = accepted
+    return accepted
+  }
+  transport.status = async (...args) => records.get(args[1]).accepted ?? originalStatus(...args)
+  const uploads = new ResumableUploads(transport, { list: async () => [], put: async () => {}, remove: async () => {} }, 1)
+  vi.spyOn(f.api, 'uploads', 'get').mockReturnValue(uploads)
+  // Re-render the workspace effect to subscribe to the same shared API manager.
+  await act(async () => root!.unmount()); root = undefined
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => root!.render(<ReactFlowProvider><CanvasWorkspace api={f.api} workspace="w" title="Test" onBack={() => {}} /></ReactFlowProvider>))
+  const input = host.querySelector('input[type="file"]')!
+  await act(async () => {
+    Object.defineProperty(input, 'files', { configurable: true, value: [new NativeFile(['ab'], 'first.png', { type: 'image/png' })] })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await act(async () => vi.waitFor(() => expect(release.has('first.png')).toBe(true)))
+  const button = [...host.querySelectorAll('button')].find((item) => item.textContent === '上传素材')!
+  expect(button.disabled).toBe(false)
+  await act(async () => {
+    const area = host.querySelector('.dc-canvas-area')!
+    vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({ x: 400, y: 0, left: 400, top: 0, right: 900, bottom: 600, width: 500, height: 600, toJSON: () => ({}) })
+    const drop = new MouseEvent('drop', { bubbles: true, cancelable: true, clientX: 450, clientY: 100 })
+    Object.defineProperty(drop, 'dataTransfer', { value: { types: ['Files'], files: [new NativeFile(['cd'], 'second.png', { type: 'image/png' })], dropEffect: 'none' } })
+    area.dispatchEvent(drop)
+  })
+  await act(async () => vi.waitFor(() => expect(release.has('second.png')).toBe(true)))
+  expect(host.querySelectorAll('.dc-upload-capsule')).toHaveLength(2)
+  probe.bodies.clear()
+  await act(async () => reportProgress.get('second.png')!(1))
+  expect(probe.bodies.size).toBe(0)
+  expect(host.querySelectorAll('.dc-upload-capsule')[1].getAttribute('aria-valuenow')).toBe('50')
+  await act(async () => { release.get('second.png')!(); await vi.waitFor(() => expect(uploads.activities('w')).toHaveLength(1)) })
+  expect(host.querySelectorAll('.dc-upload-capsule')).toHaveLength(1)
+  expect(host.querySelector('.dc-upload-capsule')?.getAttribute('aria-label')).toContain('first.png')
+  await act(async () => { release.get('first.png')!(); await vi.waitFor(() => expect(uploads.activities('w')).toHaveLength(0)) })
+  expect(host.querySelector('.dc-upload-capsules')).toBeNull()
 })

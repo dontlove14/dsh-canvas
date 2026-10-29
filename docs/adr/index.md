@@ -72,6 +72,10 @@
 | [ADR-0060](0060-canvas-text-selection-opt-in.md) | 画布文字默认禁选与显式开放 | 画布 / portal统一默认、原生输入 / 可编辑 / 复制区域开放、保留节点框选与原子标签 | 已采纳 |
 | [ADR-0061](0061-dependency-backed-media-pixel-loading.md) | 媒体文件像素Loading | 真实ImageGeneration、Harness黑白主题、共享GPU / 暂停 / 静态兼容与隐藏署名 | 已采纳；媒体阶段部分替代0046 / 0047 |
 | [ADR-0062](0062-harness-node-delete-confirmation.md) | Harness节点删除确认 | 原生Delete / Backspace、Modal / Button、异步取消与最新任务检查、保留媒体 / 下游结果 | 已采纳 |
+| [ADR-0063](0063-resumable-uploads-and-progress-capsules.md) | 断点续传与进度胶囊 | 原UUID / Blob恢复、持久分块与幂等导入、顶部圆环叠放、多文件追加、保持两库结构 | 并发 / 展示由0064部分替代，其余已采纳 |
+| [ADR-0064](0064-bounded-upload-capsules-and-five-transfers.md) | 五路上传与有界胶囊动效 | 五槽 / 五枚及+N、轻悬浮 / 真实Beam、主题 / 暂停、进入与连续完成补位 | 已采纳；部分替代0063 |
+| [ADR-0065](0065-exclusive-canvas-file-drop.md) | 画布文件拖放与宿主附件互斥 | 可见区域 / 最终落点、window捕获、跨区蒙版清理、原文件唯一接收、隐藏与卸载 | 已采纳 |
+| [ADR-0066](0066-shared-node-creation-entrances.md) | 统一节点创建与拉线快捷入口 | 共用注册 / 工厂、空白右键、固定输出引用、节点与边原子保存、扩展三入口维护 | 已采纳 |
 
 ## 如何使用
 

@@ -25,6 +25,7 @@ export class CanvasRuntime {
     this.uploads = new Uploads(store, config.maxMediaBytes)
   }
   async start(): Promise<void> {
+    await this.uploads.recover()
     for (const state of this.store.allStates()) for (const task of state.tasks) {
       if (!TRACKED_STATUSES.has(task.status)) continue
       const data = await this.store.taskPrivate(task.id).catch(() => null)
@@ -173,6 +174,7 @@ export class CanvasRuntime {
   async close(): Promise<void> {
     if (this.timer) clearInterval(this.timer)
     this.controller.abort()
+    await this.uploads.close()
     await this.scanWork
     await this.maintenance
     await Promise.allSettled([...this.active.values()])

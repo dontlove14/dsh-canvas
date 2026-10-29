@@ -32,6 +32,7 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     if (next === graphRef.current) return
     graphRef.current = next; setGraph(next); setSaveStatus(blocked.current ? '保存冲突 · 草稿保留' : '待保存')
   }, [])
+  const getGraph = useCallback(() => graphRef.current, [])
   const flush = useCallback(async (): Promise<number> => {
     if (!ready.current) throw new Error('画布尚未载入')
     if (blocked.current) throw new Error('请先处理保存冲突')
@@ -117,5 +118,5 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     const timer = setTimeout(() => { void flush().catch(() => {}) }, 650)
     return () => clearTimeout(timer)
   }, [graph, flush])
-  return { graph, state, saveStatus, error, conflict, edit, flush, refresh, reload, report, clearError: () => setError('') }
+  return { graph, state, saveStatus, error, conflict, edit, getGraph, flush, refresh, reload, report, clearError: () => setError('') }
 }

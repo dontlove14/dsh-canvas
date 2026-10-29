@@ -1,13 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MiniMap,
-  useReactFlow, useViewport, useStoreApi, ConnectionLineType, SelectionMode, type Node, type NodeProps, type NodeChange, type Connection,
+  useReactFlow, useViewport, useStoreApi, ViewportPortal, getBezierPath, Position, ConnectionLineType, SelectionMode, type Node, type NodeProps, type NodeChange, type Connection,
 } from '@xyflow/react'
 import {
   NodeLabels, defaultParams, isGeneration, nodeMediaKind, nodeResults, latestTask,
-  TaskStatusLabels, validateGraph, defaultTtsParams, isTtsParams,
+  TaskStatusLabels, isTtsParams,
   validateGeneration, ModelRecordSchema,
-  type CanvasNode, type CanvasGraph, type NodeKind, type Asset, type PublicModel, type MediaKind, type TaskAction, type GenerationParams,
+  type CanvasNode, type CanvasGraph, type Asset, type PublicModel, type MediaKind, type TaskAction, type GenerationParams,
 } from '../shared/contracts'
 import { type CanvasChoice, type TaskSummary, type TaskDetail } from '../shared/v2'
 import { CanvasApi } from './api'
@@ -20,7 +20,7 @@ import { SignedImage } from './SignedMedia'
 import { MediaIcon } from './MediaIcon'
 import { ProjectList } from './ProjectList'
 import { ResourceNode } from './ResourceNode'
-import { UiActionMenu, UiButton, UiInput, UiModal as Modal, UiMediaModal, UiSelect } from './ui'
+import { UiActionMenu, UiButton, UiInput, UiModal as Modal, UiMediaModal, UiSelect, UiPointMenu } from './ui'
 import { canvasScrollGestures, useCanvasActionBarGestures } from './gestures'
 import { VideoPlayer } from './VideoPlayer'
 import { mockRecord, validateMockGeneration } from '../shared/mockModels'
@@ -30,7 +30,7 @@ import { ModelPicker, selectableModels } from './ModelPicker'
 import { GenerationNode } from './GenerationNode'
 import { GenerationParameters } from './GenerationParameters'
 import { CanvasHandle } from './CanvasHandle'
-import { connectionAsset, generationFrame, nodeEditorVisible } from './generationLayout'
+import { generationFrame, nodeEditorVisible } from './generationLayout'
 import { mediaFrame } from './mediaLayout'
 import { CanvasSelectionContext } from './CanvasSelection'
 import { useMarqueeSelection } from './useMarqueeSelection'
@@ -47,7 +47,7 @@ import { RelationshipEdge, relationshipEdges, type RelationshipFlowEdge } from '
 import { NodeLoading, NodeLoadingContext, useNodeLoadingEnvironment } from './NodeLoading'
 import { createLoadingResolutionStore, LoadingResolutionContext } from './loadingResolution'
 import { HistoryNode } from './HistoryNode'
-import { generationHistory, hasGenerationHistory, historyFrame, historyEditorAnchor, resultHandle, type GenerationCard } from './generationHistory'
+import { generationHistory, historyFrame, historyEditorAnchor, resultHandle, type GenerationCard } from './generationHistory'
 import { useGenerationSubmission } from './useGenerationSubmission'
 import { useHistoryInspection, type HistoryInspection } from './useHistoryInspection'
 import { GenerationSnapshotEditor } from './GenerationSnapshotEditor'
@@ -59,6 +59,11 @@ import { CanvasReviewState, ReviewContext } from './reviewState'
 import { SeedanceReviewDialog } from './SeedanceReviewDialog'
 import { CanvasTextSelectionProvider } from './canvasTextSelection'
 import { useNodeDeleteConfirmation } from './useNodeDeleteConfirmation'
+import type { UploadActivity } from './resumableUploads'
+import { UploadCapsules } from './UploadCapsules'
+import { useCanvasFileDrop } from './canvasFileDrop'
+import { CREATABLE_NODES, createCanvasNode, connectReference, resolveOutput, type CreatableNodeKind } from './nodeCreation'
+import { useNodeCreationMenu } from './useNodeCreationMenu'
 
 const EMPTY_TASKS: TaskSummary[] = []
 const EMPTY_ASSETS: Asset[] = []
@@ -67,6 +72,7 @@ const EMPTY_CARDS: GenerationCard[] = []
 export function CanvasApp({ api, active = true }: { api: CanvasApi; active?: boolean }) {
   const [workspace, setWorkspace] = useState<CanvasChoice | null>(null)
   const [folder, setFolder] = useState('all')
+  useEffect(() => { void api.resumeUploads().catch(() => {}) }, [api])
   return <div className="dc-app dc-canvas-host">
     {workspace
       ? <ReactFlowProvider key={workspace.id}><CanvasWorkspace api={api} active={active} workspace={workspace.id} title={workspace.name} onBack={() => setWorkspace(null)} /></ReactFlowProvider>
@@ -187,8 +193,14 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   const [showSettings, setShowSettings] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('storage')
   const [preview, setPreview] = useState<Asset | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [preparingUploads, setPreparingUploads] = useState(0)
+  const [uploadActivity, setUploadActivity] = useState<UploadActivity[]>([])
+  useEffect(() => {
+    const update = () => setUploadActivity(api.uploads.activities(workspace))
+    update()
+    return api.uploads.subscribe(update)
+  }, [api, workspace])
+  const uploading = preparingUploads > 0 || uploadActivity.length > 0
   const [showTasks, setShowTasks] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const container = useRef<HTMLDivElement>(null)
@@ -349,44 +361,32 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
       return nodes === current.nodes && edges === current.edges ? current : { ...current, nodes, edges }
     })
   }, [edit, marquee.blocksNativeSelection])
+  const creationEnvironment = useMemo(() => ({ assets, tasks, models, expandedGroups }), [assets, tasks, models, expandedGroups])
+  const selectCreated = useCallback((id: string) => { setSelected([id]); setSelectedEdges([]); setPlayingNode(null) }, [])
+  const creation = useNodeCreationMenu({
+    container, enabled: active && pageVisible && !!state && !showSettings && !showTasks && !preview && !reviewAsset && !nodeDeletion.modal && !leaving,
+    workspace, graph, getGraph: canvas.getGraph, environment: creationEnvironment, screenToFlowPosition: flow.screenToFlowPosition,
+    edit, onCreated: selectCreated, report,
+  })
   const connect = useCallback((connection: Connection) => {
-    const source = graph.nodes.find((node) => node.id === connection.source)
-    const target = graph.nodes.find((node) => node.id === connection.target)
-    const history = source && hasGenerationHistory(source, tasks)
-    const outputs = source && history ? generationHistory(source.id, tasks, assets).flatMap((card) => card.results) : source ? nodeResults(source.id, tasks, assets) : []
-    const asset = source && connectionAsset(source, assets, outputs, connection.sourceHandle, !!history, !!expandedGroups[source.id])
-    if (!source || !target || !asset || !isGeneration(target.kind)) { report(new Error('请从已有素材连接到生成节点')); return }
-    if (target.kind === 'tts-generation') { report(new Error('语音生成节点不支持输入连线')); return }
-    const model = models.find((item) => item.id === target.modelId)
-    if (asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime)) {
-      report(new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')); return
-    }
-    const previousReferenceIds = graph.edges.filter((edge) => edge.target === target.id).map((edge) => edge.assetId)
-    const params = target.params && !isTtsParams(target.params) && model?.protocol === 'seedance-video'
-      ? seedanceGenerationParams(target.params, previousReferenceIds) : target.params
-    const caps = model && seedanceInputCapabilities(model, !isTtsParams(params) ? params : null)
-    if (caps && (!caps.referenceKinds.includes(asset.kind) || graph.edges.filter((edge) => edge.target === target.id).length >= caps.maxReferences)) {
-      report(new Error('当前模型不支持这份素材，或引用数量已达上限')); return
-    }
-    if (!model && asset.kind !== 'image') { report(new Error('请先选择支持这类素材的模型')); return }
-    const next = { ...graph, edges: [...graph.edges, { id: crypto.randomUUID(), source: source.id, target: target.id, assetId: asset.id }] }
+    creation.close()
     try {
-      if (model?.protocol === 'seedance-video' && target.params && !isTtsParams(target.params))
-        validateSeedanceConnections(seedanceGenerationParams(params as GenerationParams, [...previousReferenceIds, asset.id]),
-          next.edges.filter((edge) => edge.target === target.id).map((edge) => assets.find((asset) => asset.id === edge.assetId)!), model.model_id)
-      validateGraph(next, assets, tasks); edit(next)
+      edit((current) => {
+        const reference = resolveOutput(current, connection.source, connection.sourceHandle, creationEnvironment)
+        if (!reference) throw new Error('请从已有素材连接到生成节点')
+        return connectReference(current, reference, connection.target, creationEnvironment)
+      })
     } catch (error) { report(error) }
-  }, [graph, assets, tasks, models, expandedGroups, edit, report])
-  const addNode = (kind: NodeKind) => {
+  }, [creation.close, creationEnvironment, edit, report])
+  const addNode = (kind: CreatableNodeKind) => {
+    creation.close()
     const rect = container.current?.getBoundingClientRect()
     const position = flow.screenToFlowPosition({ x: (rect?.left ?? 0) + (rect?.width ?? 900) / 2 - 150, y: (rect?.top ?? 0) + (rect?.height ?? 600) / 2 - 150 })
-    const model = models.find((model) => model.kind === nodeMediaKind(kind) && modelConfigured(model))
-    const node: CanvasNode = {
-      id: crypto.randomUUID(), kind, title: `${NodeLabels[kind]} ${graph.nodes.filter((node) => node.kind === kind).length + 1}`,
-      position, modelId: isGeneration(kind) ? model?.id ?? null : null,
-      params: kind === 'tts-generation' ? defaultTtsParams() : isGeneration(kind) && model ? defaultParams(model) : null, prompt: '', assetId: null, selectedResultId: null,
-    }
-    edit((current) => ({ ...current, nodes: [...current.nodes, node] })); setSelected([node.id])
+    edit((current) => {
+      const result = createCanvasNode(current, kind, position, creationEnvironment)
+      selectCreated(result.node.id)
+      return result.graph
+    })
   }
   const askImport = useCallback((kind: MediaKind, target?: string) => {
     importIntent.current = { kind, target }
@@ -396,37 +396,23 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     const guessed = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : undefined
     const intent = importIntent.current ?? (guessed ? { kind: guessed } : null)
     if (!intent) { report(new Error('请选择图片、视频或音频文件')); return }
-    setUploading(true); setUploadProgress(0)
+    setPreparingUploads((count) => count + 1)
     try {
       await canvas.flush()
       const target = graph.nodes.find((node) => node.id === intent.target)
       const rect = container.current?.getBoundingClientRect()
       const position = point ?? (target ? { x: target.position.x - 420, y: target.position.y } : flow.screenToFlowPosition({ x: (rect?.left ?? 0) + 200, y: (rect?.top ?? 0) + 170 }))
-      const result = await api.upload(workspace, file, intent.kind, position, canvas.refresh, setUploadProgress)
+      const result = await api.upload(workspace, file, intent.kind, position, canvas.refresh, undefined, target?.id)
       await canvas.refresh()
       setSelected([result.nodeId])
-      if (target) {
-        for (let attempt = 0; attempt < 20; attempt++) {
-          const response = await api.state(workspace)
-          const resource = response.graph.nodes.find((n) => n.id === result.nodeId)
-          if (resource?.assetId) {
-            await canvas.refresh()
-            const currentTarget = response.graph.nodes.find((node) => node.id === target.id), model = models.find((model) => model.id === currentTarget?.modelId)
-            if (model?.protocol === 'seedance-video' && currentTarget?.params && !isTtsParams(currentTarget.params)) {
-              const references = response.graph.edges.filter((edge) => edge.target === target.id)
-              const params = seedanceGenerationParams(currentTarget.params, references.map((edge) => edge.assetId))
-              validateSeedanceConnections(seedanceGenerationParams(params, [...references.map((edge) => edge.assetId), resource.assetId]),
-                [...references.map((edge) => response.assets.find((asset) => asset.id === edge.assetId)!), response.assets.find((asset) => asset.id === resource.assetId)!], model.model_id)
-            }
-            edit((current) => ({ ...current, edges: [...current.edges, { id: crypto.randomUUID(), source: result.nodeId, target: target.id, assetId: resource.assetId! }] }))
-            break
-          }
-          await new Promise((resolve) => setTimeout(resolve, 500))
-        }
-      }
     } catch (error) { report(error) }
-    finally { setUploading(false); importIntent.current = null }
+    finally { setPreparingUploads((count) => count - 1) }
   }
+  useCanvasFileDrop(container, active && pageVisible, (files, screenPoint) => {
+    importIntent.current = null
+    const point = flow.screenToFlowPosition(screenPoint)
+    for (const [i, file] of files.entries()) void uploadFile(file, { x: point.x + i * 350, y: point.y })
+  })
   const taskAction = useCallback(async (task: TaskSummary, action: TaskAction) => {
     if (action === 'abandon' && !window.confirm('结束本地等待不会取消模型服务上的任务。再次生成可能重复计费，是否继续？')) return
     try { await api.taskAction(workspace, task.id, action); await canvas.refresh() } catch (error) { report(error) }
@@ -448,19 +434,14 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     <CanvasTextSelectionProvider><div className="dc-canvas-area" ref={container} tabIndex={-1} data-gpu-compositing={gpu.enabled ? 'enabled' : 'disabled'} data-gpu-reason={gpu.reason}
       data-marquee-selecting={marquee.selecting}
       onPointerDownCapture={(event) => {
+        // Portal events still traverse this React ancestor before the menu row.
+        if (event.target instanceof Element && event.target.closest('.dc-node-creation-menu')) return
+        creation.close()
         if (event.target instanceof HTMLElement && event.target.closest('.react-flow__pane')) event.currentTarget.focus({ preventScroll: true })
         marquee.onPointerDownCapture(event)
       }} onPointerUpCapture={marquee.onPointerUpCapture}
-      onPointerUp={marquee.onPointerUp} onPointerCancel={marquee.onPointerCancel}
-      onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }}
-      onDrop={(event) => {
-        event.preventDefault()
-        if (uploading) return
-        importIntent.current = null
-        const files = [...event.dataTransfer.files]
-        const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-        void (async () => { for (const [i, file] of files.entries()) await uploadFile(file, { x: point.x + i * 350, y: point.y }) })()
-      }}>
+      onPointerUp={marquee.onPointerUp} onPointerCancel={() => { creation.close(); marquee.onPointerCancel() }}
+    >
       {!state ? <div className="dc-loading">载入本地画布…</div> : <ReactFlow<FlowNode, RelationshipFlowEdge>
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={edgeOptions} connectionLineType={ConnectionLineType.Bezier}
         onNodesChange={onNodesChange} onEdgesChange={(changes) => {
@@ -473,7 +454,9 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
           const removed = new Set(changes.filter((change) => change.type === 'remove').map((change) => 'id' in change ? change.id : ''))
           if (removed.size) edit((current) => ({ ...current, edges: current.edges.filter((edge) => !removed.has(edge.id)) }))
         }}
-        onConnect={connect} defaultViewport={graph.viewport} minZoom={0.1} maxZoom={2.5}
+        onConnect={connect} onConnectStart={creation.onConnectStart} onConnectEnd={creation.onConnectEnd}
+        onPaneContextMenu={creation.onPaneContextMenu} onMoveStart={() => creation.close()}
+        defaultViewport={graph.viewport} minZoom={0.1} maxZoom={2.5}
         onMoveEnd={(_event, viewport) => edit((current) => ({ ...current, viewport }))}
         onPaneClick={() => { setSelected([]); setPlayingNode(null) }}
         onNodeClick={(_event, node) => {
@@ -489,19 +472,31 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="var(--dc-grid)" />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable nodeColor="var(--dc-accent)" maskColor="var(--dc-minimap-mask)" />
+        {creation.menu?.reference && creation.menu.from && <ViewportPortal><svg className="dc-pending-connection" width="1" height="1" aria-hidden="true">
+          <path d={getBezierPath({ sourceX: creation.menu.from.x, sourceY: creation.menu.from.y, sourcePosition: Position.Right,
+            targetX: creation.menu.position.x, targetY: creation.menu.position.y, targetPosition: Position.Left })[0]}
+            fill="none" stroke="var(--dc-accent)" strokeWidth="1.7" strokeDasharray="5 4" />
+        </svg></ViewportPortal>}
         {active && pageVisible && !marquee.selecting && activeNode && (inspectionAnchor || history.restoring) &&
           <GenerationSnapshotEditor api={api} workspace={workspace} snapshot={history.snapshot} assets={assets} error={history.error} restoring={history.restoring}
             anchor={inspectionAnchor ?? { position: activeNode.position, size: mediaSizes[activeNode.id] ?? { width: 320, height: 180 } }} />}
         {active && !marquee.selecting && activeNode && !history.restoring && nodeEditorVisible(activeNode, previewFor(activeNode), !!expandedGroups[activeNode.id]) && <FloatingEditor node={activeNode} graph={graph} assets={assets} tasks={tasks} models={models} api={api} workspace={workspace}
           ttsConfigured={ttsConfigured} ttsConfigurationError={ttsConfigurationError}
           nodeSize={mediaSizes[activeNode.id]} onResult={onResult}
-          patchNode={patchNode} edit={edit} generate={generate} report={report} uploading={uploading} submitting={submitting}
+          patchNode={patchNode} edit={edit} generate={generate} report={report} uploading={false} submitting={submitting}
           askImport={askImport} taskAction={taskAction} onOpen={onOpen} />}
       </ReactFlow>}
+      <UploadCapsules uploads={uploadActivity} />
+      {creation.menu && <UiPointMenu label={creation.menu.reference ? '引用该节点生成' : '添加节点'} point={creation.menu.screen}
+        bounds={() => container.current?.getBoundingClientRect()} onClose={() => creation.close(true)}
+        onSelect={(kind) => creation.choose(kind as CreatableNodeKind)}
+        items={creation.choices.map((entry) => ({ id: entry.kind, label: NodeLabels[entry.kind],
+          icon: entry.icon === 'tts' ? <TtsIcon size={20} /> : <MediaIcon kind={entry.icon} size={20} />,
+          disabled: entry.disabled, disabledReason: entry.disabledReason, onSelect: () => creation.choose(entry.kind) }))} />}
       {state && !graph.nodes.length && <div className="dc-welcome"><span className="dc-welcome-symbol">✦</span><h1>从一个想法开始</h1><p>创建生成节点，或者导入你的素材。<br />连接参考图，让每一步创作都有迹可循。</p><div><UiButton variant="primary" onClick={() => addNode('image-generation')}><MediaIcon kind="image" size={22} />图片生成</UiButton><UiButton variant="outline" onClick={() => addNode('video-generation')}><MediaIcon kind="video" size={22} />视频生成</UiButton></div></div>}
       <div className="dc-tools"><UiActionMenu label="添加节点" variant="primary" disabled={!active || !state} side="top" gap={14}
-        items={(['image-generation', 'video-generation', 'tts-generation'] as const).map((kind) => ({ id: kind, label: NodeLabels[kind], icon: kind === 'tts-generation' ? <TtsIcon size={22} /> : <MediaIcon kind={nodeMediaKind(kind)} size={22} />, onSelect: () => addNode(kind) }))}>＋ 添加节点</UiActionMenu><span className="dc-tool-divider" />
-        <UiButton disabled={!state || uploading} onClick={() => { importIntent.current = null; if (fileInput.current) { fileInput.current.accept = 'image/*,video/*,audio/*'; fileInput.current.value = ''; fileInput.current.click() } }}>{uploading ? `上传 ${uploadProgress}%` : '上传素材'}</UiButton>
+        items={CREATABLE_NODES.map(({ kind, icon }) => ({ id: kind, label: NodeLabels[kind], icon: icon === 'tts' ? <TtsIcon size={22} /> : <MediaIcon kind={icon} size={22} />, onSelect: () => addNode(kind) }))}>＋ 添加节点</UiActionMenu><span className="dc-tool-divider" />
+        <UiButton disabled={!state} onClick={() => { importIntent.current = null; if (fileInput.current) { fileInput.current.accept = 'image/*,video/*,audio/*'; fileInput.current.value = ''; fileInput.current.click() } }}>上传素材</UiButton>
         <UiButton title="适应全部节点" aria-label="适应全部节点" onClick={() => void flow.fitView({ padding: 0.3, duration: 250 })}>⛶</UiButton>
         <UiButton title="保存画布" onClick={() => void canvas.flush().catch(() => {})}>保存</UiButton>
         <span className="dc-node-count">{graph.nodes.length} 节点</span>
@@ -510,7 +505,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
       {canvas.error && <div className="dc-toast" role="alert"><span>{canvas.error}</span><UiButton aria-label="关闭提示" onClick={canvas.clearError}>×</UiButton></div>}
       {canvas.conflict && <div className="dc-conflict"><strong>画布保存冲突，当前草稿仍保留</strong><UiButton variant="outline" onClick={() => downloadJson('canvas-draft.json', graph)}>导出草稿</UiButton><UiButton variant="outline" onClick={() => { if (window.confirm('重新载入将替换当前未保存草稿，请先导出。')) void canvas.reload().catch(report) }}>重新载入</UiButton></div>}
     </div></CanvasTextSelectionProvider>
-    <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = [...event.target.files ?? []]; void (async () => { for (const file of files) await uploadFile(file) })() }} />
+    <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = [...event.target.files ?? []]; for (const file of files) void uploadFile(file); importIntent.current = null }} />
     {nodeDeletion.modal}
     {active && showSettings && <Modal label="无限画布" onClose={() => { setShowSettings(false); loadModels(); void reviewState.refresh() }}><CanvasSettings api={api} initialTab={settingsTab} onChanged={() => { loadModels(); void reviewState.refresh() }} /></Modal>}
     {active && reviewAsset && <SeedanceReviewDialog key={reviewAsset.id} asset={reviewAsset} onClose={() => setReviewAsset(undefined)}
@@ -588,7 +583,7 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
       <div className="dc-generation-actions">
         <UiButton variant="outline" disabled={uploading || submitting || (!!inputCaps && !inputCaps.referenceKinds.includes('image')) || (!!inputCaps && references.length >= inputCaps.maxReferences)} onClick={() => askImport('image', node.id)}>{uploading ? '导入中…' : '＋ 上传'}</UiButton>
       </div>
-      <div className="dc-reference-row">
+      {references.length > 0 && <div className="dc-reference-row">
         {references.map((edge, index) => {
           const reference = assets.find((item) => item.id === edge.assetId)
           return <div className="dc-reference" key={edge.id} title={reference?.filename ?? '素材不可用'}>
@@ -599,8 +594,7 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
             <UiButton disabled={submitting} className="dc-ui-remove-reference" aria-label={`移除引用 ${index + 1}`} onClick={() => edit((current) => ({ ...current, edges: current.edges.filter((item) => item.id !== edge.id) }))}>×</UiButton>
           </div>
         })}
-        {!references.length && <small className="dc-muted">也可从素材节点拖入连线</small>}
-      </div>
+      </div>}
       <MentionPromptEditor key={node.id} ref={promptEditor} value={node.prompt} disabled={submitting}
         placeholder={node.kind === 'image-generation' ? '描述你想要生成的画面内容…' : '描述镜头、动作、场景与氛围…'}
         references={promptReferences} candidates={candidates} preview={(id) => api.preview(workspace, id)}

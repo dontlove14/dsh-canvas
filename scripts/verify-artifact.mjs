@@ -40,6 +40,10 @@ if (process.argv[2] === 'record') {
       credentials: { readRecord: async (id) => records.get(id), modifyRecord: async (id, mutate) => { const next = await mutate(records.get(id)); records.set(id, next); return next } },
       connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },
     }, { dataDir })
+    // Harness0.2.1-rc.2's streaming bridge always adds a body; WHATWG
+    // Request rejects GET/HEAD bodies before the plugin handler is reached.
+    for (const entry of routes.values()) if (entry.requestBody === 'streaming')
+      assert(entry.methods.every((method) => !['GET', 'HEAD'].includes(method)), 'Bodyless methods must use a buffered route')
     const route = routes.get('/api/canvas/v2/catalog')
     assert(route, 'missing catalog route')
     const create = await route.fetch(new Request('http://localhost/api/canvas/v2/catalog', { method: 'POST', body: JSON.stringify({ requestId: randomUUID(), operation: 'canvas-create', name: 'Artifact smoke' }) }))
@@ -73,7 +77,7 @@ if (process.argv[2] === 'record') {
     const { id } = await configuredCreate.json()
     const graph = await routes.get('/api/canvas/v2/graph').fetch(new Request(`http://localhost/api/canvas/v2/graph?canvas=${id}`))
     assert.equal(graph.status, 200); assert.equal((await graph.json()).graphRevision, 0)
-    assert.equal(routes.size, 26)
+    assert.equal(routes.size, 29)
     const reviewSettings = routes.get('/api/canvas/v2/seedance-review-settings')
     const masked = await reviewSettings.fetch(new Request('http://localhost/api/canvas/v2/seedance-review-settings'))
     assert.equal(masked.status, 200)
@@ -217,6 +221,38 @@ if (process.argv[2] === 'record') {
       method: 'POST', body: JSON.stringify({ requestId: randomUUID(), nodeId: node.id, revision: 1 }),
     }))
     assert.equal(noService.status, 400); assert.equal((await noService.json()).code, 'TTS_NOT_CONFIGURED')
+    // Compiled streaming resume survives a full Host / Worker restart. Invalid bytes
+    // make final format rejection offline: no object upload or model call is issued.
+    const uploadId = randomUUID(), chunkBytes = 4 * 1024 * 1024
+    const uploadStart = await routes.get('/api/canvas/v2/upload-start').fetch(new Request(`http://localhost/api/canvas/v2/upload-start?canvas=${id}`, {
+      method: 'POST', body: JSON.stringify({ requestId: uploadId, filename: 'offline.png', kind: 'image', size: chunkBytes + 4, position: { x: 0, y: 0 } }),
+    }))
+    assert.equal(uploadStart.status, 201)
+    const firstChunk = Buffer.alloc(chunkBytes, 3)
+    const receiveChunk = await routes.get('/api/canvas/v2/upload').fetch(new Request(`http://localhost/api/canvas/v2/upload?canvas=${id}&id=${uploadId}&kind=image&offset=0`, {
+      method: 'POST', body: firstChunk, headers: { 'x-canvas-filename': 'offline.png', 'x-canvas-chunk-sha256': digest(firstChunk) },
+    }))
+    assert.equal(receiveChunk.status, 200)
+    assert.equal((await receiveChunk.json()).offset, chunkBytes)
+    for (const dispose of cleanup.splice(0).reverse()) await dispose()
+    await apply({
+      effect: (setup) => { cleanup.push(setup()) },
+      credentials: { readRecord: async (key) => records.get(key), modifyRecord: async (key, mutate) => { const next = await mutate(records.get(key)); records.set(key, next); return next } },
+      connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },
+    }, { dataDir })
+    const resumed = await routes.get('/api/canvas/v2/upload-status').fetch(new Request(`http://localhost/api/canvas/v2/upload-status?canvas=${id}&id=${uploadId}`))
+    assert.equal(resumed.status, 200); assert.equal((await resumed.json()).offset, chunkBytes)
+    const lastChunk = Buffer.alloc(4, 3)
+    assert.equal((await routes.get('/api/canvas/v2/upload').fetch(new Request(`http://localhost/api/canvas/v2/upload?canvas=${id}&id=${uploadId}&kind=image&offset=${chunkBytes}`, {
+      method: 'POST', body: lastChunk, headers: { 'x-canvas-filename': 'offline.png', 'x-canvas-chunk-sha256': digest(lastChunk) },
+    }))).status, 200)
+    const rejected = await routes.get('/api/canvas/v2/upload-complete').fetch(new Request(`http://localhost/api/canvas/v2/upload-complete?canvas=${id}`, {
+      method: 'POST', body: JSON.stringify({ id: uploadId }),
+    }))
+    assert.equal(rejected.status, 415); assert.equal((await rejected.json()).code, 'UNSUPPORTED_MEDIA')
+    assert.equal((await routes.get('/api/canvas/v2/upload-cancel').fetch(new Request(`http://localhost/api/canvas/v2/upload-cancel?canvas=${id}`, {
+      method: 'POST', body: JSON.stringify({ id: uploadId }),
+    }))).status, 200)
     // Exercise the compiled same-origin waveform branch offline, before any OSS read.
     for (const dispose of cleanup.splice(0).reverse()) await dispose()
     const audioId = randomUUID(), audioHash = digest('offline-audio')
