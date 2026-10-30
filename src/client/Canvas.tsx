@@ -70,7 +70,9 @@ import { useNodeCreationMenu } from './useNodeCreationMenu'
 import { selectionDownloads, selectionOutputs } from './selectionOutputs'
 import { SelectionNode, selectionFrame, type SelectionFlowNode } from './SelectionNode'
 import { useCanvasConnections } from './useCanvasConnections'
-import { KeyboardGuide } from './KeyboardGuide'
+import { KeyboardGuide, Modifier, isMacPlatform } from './KeyboardGuide'
+import { useCanvasNodeClipboard, nativeClipboardTarget } from './useCanvasNodeClipboard'
+import { blankCanvasPoint } from './useNodeCreationMenu'
 
 const EMPTY_TASKS: TaskSummary[] = []
 const EMPTY_ASSETS: Asset[] = []
@@ -393,9 +395,37 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     ids: selected, connectable: selectionOutputs(graph, selected, creationEnvironment).length > 0,
     downloadable: downloads.length > 0, onDownload: downloadSelected,
   }) : undefined, [interactionEnabled, marquee.selecting, nodes, selectionId, selected, graph, creationEnvironment, downloads.length, downloadSelected])
+  const selectPasted = useCallback((ids: string[]) => { setSelected(ids); setSelectedEdges([]); setPlayingNode(null) }, [])
+  const clipboard = useCanvasNodeClipboard({
+    container, enabled: interactionEnabled, workspace, selected, environment: creationEnvironment,
+    getGraph: canvas.getGraph, getSizes: () => nodes, screenToFlowPosition: flow.screenToFlowPosition,
+    // Clipboard inputs were validated as a whole; do not infer modes through empty old references.
+    edit: editGraph, select: selectPasted, report, notifySuccess: canvas.notifySuccess, closeCreation: creation.close,
+  })
+  const copyAt = (event: React.MouseEvent | MouseEvent, ids: string[]) => {
+    if (!interactionEnabled || nativeClipboardTarget(event.target)) return
+    event.preventDefault(); event.stopPropagation()
+    clipboard.showCopy({ x: event.clientX, y: event.clientY }, ids)
+  }
+  const paneContextMenu = (event: React.MouseEvent | MouseEvent) => {
+    const screen = blankCanvasPoint(container.current, event)
+    if (!screen || !interactionEnabled) return
+    const position = flow.screenToFlowPosition(screen)
+    if (group && position.x >= group.position.x && position.x <= group.position.x + group.width!
+      && position.y >= group.position.y && position.y <= group.position.y + group.height!) {
+      copyAt(event, selected); return
+    }
+    creation.onPaneContextMenu(event); clipboard.probePaste(screen)
+  }
+  const shortcut = (key: string) => <><Modifier mac={isMacPlatform()} /><span>{key}</span></>
+  const clipboardIcon = (paste: boolean) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {paste ? <><path d="M9 5H6a2 2 0 0 0-2 2v13h16V7a2 2 0 0 0-2-2h-3" /><rect x="9" y="3" width="6" height="4" rx="1" /></>
+      : <><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V3H3v13h5" /></>}
+  </svg>
   const flowNodes = useMemo<CanvasFlowNode[]>(() => group ? [...nodes, group] : nodes, [nodes, group])
   const addNode = (kind: CreatableNodeKind) => {
-    creation.close()
+    creation.close(); clipboard.close()
     const rect = container.current?.getBoundingClientRect()
     const position = flow.screenToFlowPosition({ x: (rect?.left ?? 0) + (rect?.width ?? 900) / 2 - 150, y: (rect?.top ?? 0) + (rect?.height ?? 600) / 2 - 150 })
     edit((current) => {
@@ -453,11 +483,11 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
       onPointerDownCapture={(event) => {
         // Portal events still traverse this React ancestor before the menu row.
         if (event.target instanceof Element && event.target.closest('.dc-node-creation-menu')) return
-        creation.close()
+        creation.close(); clipboard.close()
         if (event.target instanceof HTMLElement && event.target.closest('.react-flow__pane')) event.currentTarget.focus({ preventScroll: true })
         marquee.onPointerDownCapture(event)
       }} onPointerUpCapture={marquee.onPointerUpCapture}
-      onPointerUp={marquee.onPointerUp} onPointerCancel={() => { connections.clear(); creation.close(); marquee.onPointerCancel() }}
+      onPointerUp={marquee.onPointerUp} onPointerCancel={() => { connections.clear(); creation.close(); clipboard.close(); marquee.onPointerCancel() }}
     >
       {!state ? <div className="dc-loading">载入本地画布…</div> : <ReactFlow<CanvasFlowNode, RelationshipFlowEdge>
         nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={edgeOptions} connectionLineType={ConnectionLineType.Bezier}
@@ -472,7 +502,11 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
           if (removed.size) edit((current) => ({ ...current, edges: current.edges.filter((edge) => !removed.has(edge.id)) }))
         }}
         onConnect={connections.onConnect} onConnectStart={connections.onConnectStart} onConnectEnd={connections.onConnectEnd}
-        onPaneContextMenu={creation.onPaneContextMenu} onMoveStart={() => creation.close()}
+        onPaneContextMenu={paneContextMenu} onMoveStart={() => { creation.close(); clipboard.close() }}
+        onNodeContextMenu={(event, node) => {
+          if (node.type === 'media') copyAt(event, selected.includes(node.id) ? selected : [node.id])
+        }}
+        onSelectionContextMenu={(event) => copyAt(event, selected)}
         defaultViewport={graph.viewport} minZoom={0.1} maxZoom={2.5}
         onMoveEnd={(_event, viewport) => edit((current) => ({ ...current, viewport }))}
         onPaneClick={() => { setSelected([]); setSelectedEdges([]); setPlayingNode(null) }}
@@ -510,16 +544,24 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
         <UploadCapsules uploads={uploadActivity} />
       </div>
       {creation.menu && <UiPointMenu label={creation.menu.reference ? '引用该节点生成' : '添加节点'} point={creation.menu.screen}
-        bounds={() => container.current?.getBoundingClientRect()} onClose={() => creation.close(true)}
-        onSelect={(kind) => creation.choose(kind as CreatableNodeKind)}
-        items={creation.choices.map((entry) => ({ id: entry.kind, label: NodeLabels[entry.kind],
+        bounds={() => container.current?.getBoundingClientRect()} onClose={() => { creation.close(true); clipboard.close() }}
+        onSelect={(kind) => {
+          if (kind === 'paste') void clipboard.paste()
+          else { clipboard.close(); creation.choose(kind as CreatableNodeKind) }
+        }}
+        items={[...creation.choices.map((entry) => ({ id: entry.kind, label: NodeLabels[entry.kind],
           icon: entry.icon === 'tts' ? <TtsIcon size={20} /> : <MediaIcon kind={entry.icon} size={20} />,
-          disabled: entry.disabled, disabledReason: entry.disabledReason, onSelect: () => creation.choose(entry.kind) }))} />}
+          disabled: entry.disabled, disabledReason: entry.disabledReason, onSelect: () => creation.choose(entry.kind) })),
+          ...(!creation.menu.reference ? [{ id: 'paste', label: '粘贴', icon: clipboardIcon(true), shortcut: shortcut('V'),
+            disabled: !!clipboard.pasteStatus, disabledReason: clipboard.pasteStatus, onSelect: () => void clipboard.paste() }] : [])]} />}
+      {clipboard.menu && <UiPointMenu label="节点操作" point={clipboard.menu.screen}
+        bounds={() => container.current?.getBoundingClientRect()} onClose={() => clipboard.close(true)}
+        onSelect={() => void clipboard.copy()}
+        items={[{ id: 'copy', label: '复制', icon: clipboardIcon(false), shortcut: shortcut('C'), onSelect: () => void clipboard.copy() }]} />}
       {state && !graph.nodes.length && <div className="dc-welcome"><span className="dc-welcome-symbol">✦</span><h1>从一个想法开始</h1><p>创建生成节点，或者导入你的素材。<br />连接参考图，让每一步创作都有迹可循。</p><div><UiButton variant="primary" onClick={() => addNode('image-generation')}><MediaIcon kind="image" size={22} />图片生成</UiButton><UiButton variant="outline" onClick={() => addNode('video-generation')}><MediaIcon kind="video" size={22} />视频生成</UiButton></div></div>}
       <div className="dc-tools"><UiActionMenu label="添加节点" variant="primary" disabled={!active || !state} side="top" gap={14}
         items={CREATABLE_NODES.map(({ kind, icon }) => ({ id: kind, label: NodeLabels[kind], icon: icon === 'tts' ? <TtsIcon size={22} /> : <MediaIcon kind={icon} size={22} />, onSelect: () => addNode(kind) }))}>＋ 添加节点</UiActionMenu><span className="dc-tool-divider" />
         <UiButton disabled={!state} onClick={() => { importIntent.current = null; if (fileInput.current) { fileInput.current.accept = 'image/*,video/*,audio/*'; fileInput.current.value = ''; fileInput.current.click() } }}>上传素材</UiButton>
-        <UiButton title="适应全部节点" aria-label="适应全部节点" onClick={() => void flow.fitView({ nodes: nodes.map((node) => ({ id: node.id })), padding: 0.3, duration: 250 })}>⛶</UiButton>
         <UiButton title="保存画布" onClick={() => void canvas.flush().catch(() => {})}>保存</UiButton>
         <span className="dc-node-count">{graph.nodes.length} 节点</span>
         <span className="dc-tool-divider" /><KeyboardGuide enabled={interactionEnabled} container={container} />

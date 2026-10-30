@@ -8,6 +8,8 @@ Wan 3.0与MiniMax H3的四渠道协议、参数与恢复边界见[模型协议](
 
 多选输出、仅下载工具栏、节点主体接线、@边删除确认与平台快捷键指引见[ADR-0068](adr/0068-selection-output-and-reference-interactions.md)，实际操作验收301–305见[手动清单](manual-tests.md)。
 
+同画布节点复制粘贴的原上游、参数快照、生成草稿与异步取消规则见[ADR-0070](adr/0070-node-clipboard-with-original-inputs.md)，人工操作307–313见[手动清单](manual-tests.md)。
+
 设计基线：[目标架构](proposals/canvas-plugin-architecture-v0.1.md)、[SQLite 设计](proposals/sqlite-canvas-storage-v0.2.md) 已标注实施与差异；实际职责、DDL / API 以当前架构与数据参考为准。官方用法与反例见 [ADR-0017](adr/0017-harness-official-cases-and-badcases.md)。[存储 v0.1](proposals/sqlite-canvas-storage-v0.1.md) 保留历史。
 
 代码与检查脚本链接面向项目源码目录；安装包只携带运行产物和说明文档，查看源码证据或执行开发检查需使用完整项目。

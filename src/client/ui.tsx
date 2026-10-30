@@ -150,7 +150,7 @@ export function pointMenuPosition(point: { x: number; y: number }, bounds: DOMRe
 /** Harness Menu anchored to a canvas point rather than a visible trigger. */
 export function UiPointMenu({ label, point, bounds, items, onClose, onSelect }: {
   label: string; point: { x: number; y: number }; bounds: () => DOMRect | undefined
-  items: readonly (UiAction & { disabledReason?: string })[]
+  items: readonly (UiAction & { disabledReason?: string; shortcut?: ReactNode })[]
   onClose: () => void; onSelect: (id: string) => void
 }) {
   const ui = useContext(UiContext), textScope = useCanvasTextSelectionScope()
@@ -162,7 +162,9 @@ export function UiPointMenu({ label, point, bounds, items, onClose, onSelect }: 
     const position = pointMenuPosition(point, rect, { width: list?.offsetWidth || 208, height: list?.offsetHeight || 158 })
     return new DOMRect(position.x, position.y - 4, 0, 0)
   }, [bounds, id, point])
-  const entries = items.map((item) => ({ ...item, label: <span title={item.disabledReason}>{item.label}</span> }))
+  const entries = items.map(({ shortcut, ...item }) => ({ ...item, label: <span className="dc-point-menu-label" title={item.disabledReason}>
+    <span>{item.label}</span>{shortcut && <span className="dc-point-menu-shortcut">{shortcut}</span>}
+  </span> }))
   const className = `dc-ui-popup dc-node-creation-menu nodrag nopan nowheel ${textScope} ${id}`
   const choose = (value: string) => { if (items.some((item) => item.id === value && !item.disabled)) onSelect(value) }
   return ui ? <ui.Menu open anchor={null} portal autoFocus side="bottom" align="start" getAnchorRect={getAnchorRect}

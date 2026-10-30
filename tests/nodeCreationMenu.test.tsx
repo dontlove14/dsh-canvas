@@ -8,20 +8,23 @@ import { CanvasWorkspace } from '../src/client/Canvas'
 import { CanvasApi } from '../src/client/api'
 import { HarnessUiProvider, pointMenuPosition } from '../src/client/ui'
 import { blankCanvasPoint } from '../src/client/useNodeCreationMenu'
-import { emptyGraph, type Asset, type CanvasNode } from '../src/shared/contracts'
+import { emptyGraph, capabilitiesFor, defaultParams, type Asset, type CanvasNode, type PublicModel } from '../src/shared/contracts'
+import { BUILTIN_MODELS } from '../src/shared/modelCatalog'
 import type { CanvasSnapshot } from '../src/shared/v2'
 import { harnessPrimitives } from './support/harnessPrimitives'
+import { copyCanvasNodes } from '../src/client/nodeClipboard'
 
 vi.mock('../src/client/useGpu', () => ({ useGpuCapability: () => ({ enabled: false, reason: 'test' }) }))
 let root: Root | undefined
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined
   document.body.replaceChildren(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  delete (navigator as any).clipboard
 })
 const menu = () => document.querySelector<HTMLElement>('.dc-node-creation-menu')
 const item = (text: string) => [...menu()!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === text)!
 
-async function fixture(native = true, mime = 'image/png', sourceCount = 1) {
+async function fixture(native = true, mime = 'image/png', sourceCount = 1, customize?: (snapshot: CanvasSnapshot) => PublicModel[]) {
   vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('ResizeObserver', class { observe() {}; unobserve() {}; disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {}; disconnect() {} })
@@ -42,9 +45,10 @@ async function fixture(native = true, mime = 'image/png', sourceCount = 1) {
   }
   let snapshot: CanvasSnapshot = { version: 1, workspaceId: 'w', graphRevision: 1, graph: { ...emptyGraph(), nodes: sources }, assets,
     tasks: [], updatedAt: 1, commitHash: 'a'.repeat(64), hashes: { nodes: {}, edges: {}, viewport: '' } }
+  const models = customize?.(snapshot) ?? []
   const api = new CanvasApi()
   vi.spyOn(api, 'state').mockImplementation(async () => structuredClone(snapshot))
-  vi.spyOn(api, 'models').mockResolvedValue([]); vi.spyOn(api, 'ttsSettings').mockResolvedValue({ has_api_key: false } as any)
+  vi.spyOn(api, 'models').mockResolvedValue(models); vi.spyOn(api, 'ttsSettings').mockResolvedValue({ has_api_key: false } as any)
   vi.spyOn(api, 'reviewSettings').mockResolvedValue({ profiles: [] })
   vi.spyOn(api, 'mediaUrls').mockResolvedValue({ items: [] })
   const generate = vi.spyOn(api, 'generate'), ttsGenerate = vi.spyOn(api, 'ttsGenerate')
@@ -106,7 +110,7 @@ it('opens from real right mouse down/up, creates at transformed click and saves 
   await act(async () => f.flow().setViewport({ x: 100, y: -50, zoom: 2 }, { duration: 0 }))
   await f.right()
   expect(menu()?.classList.contains('dc-canvas-text-scope')).toBe(true)
-  expect(menu()?.textContent).toContain('添加节点'); expect(menu()?.querySelectorAll('[role="menuitem"]')).toHaveLength(3)
+  expect(menu()?.textContent).toContain('添加节点'); expect(menu()?.querySelectorAll('[role="menuitem"]')).toHaveLength(4)
   await f.clickItem(item('语音生成'))
   const node = f.flow().getNodes().find((node) => node.id !== f.source.id)!
   expect(node.position).toEqual({ x: 300, y: 175 }); expect(node.selected).toBe(true)
@@ -203,7 +207,7 @@ it('leaves no empty menu or temporary wire when no creation type accepts the out
   expect(f.flow().getNodes()).toHaveLength(1); expect(f.flow().getEdges()).toHaveLength(0)
   expect(f.save).not.toHaveBeenCalled(); expect(f.generate).not.toHaveBeenCalled()
   await f.right()
-  expect([...menu()!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['图片生成', '视频生成', '语音生成'])
+  expect([...menu()!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['图片生成', '视频生成', '语音生成', expect.stringContaining('粘贴')])
 })
 
 async function addTarget(f: Awaited<ReturnType<typeof fixture>>) {
@@ -274,4 +278,166 @@ it('preserves native reverse handle wiring and does not create a blank menu', as
   expect(f.flow().getEdges()).toHaveLength(1)
   expect(f.flow().getEdges()[0]).toMatchObject({ source: f.source.id, target: target.id, assetId: f.asset.id })
   expect(menu()).toBeNull(); expect(f.generate).not.toHaveBeenCalled()
+})
+
+function clipboardEvent(type: 'copy' | 'paste', text = '') {
+  let value = text
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'clipboardData', { value: {
+    setData: vi.fn((_format: string, content: string) => { value = content }),
+    getData: vi.fn(() => value),
+  } })
+  return { event, text: () => value }
+}
+const actionItem = (label: string) => [...menu()!.querySelectorAll<HTMLButtonElement>('button')]
+  .find((button) => button.textContent?.startsWith(label))!
+async function selectSources(f: Awaited<ReturnType<typeof fixture>>) {
+  await act(async () => f.store().getState().addSelectedNodes(f.sources.map((node) => node.id)))
+  await act(async () => vi.advanceTimersByTimeAsync(40))
+  f.canvas.focus()
+}
+it('uses native copy/paste events for a selected batch, centers without a pointer, offsets repeats and saves once', async () => {
+  const f = await fixture(true, 'image/png', 2)
+  await selectSources(f)
+  const copied = clipboardEvent('copy')
+  await act(async () => f.canvas.dispatchEvent(copied.event))
+  expect(copied.event.defaultPrevented).toBe(true)
+  expect(JSON.parse(copied.text()).nodes).toHaveLength(2)
+  expect(f.host.querySelector('.dc-notification-capsule[data-tone="success"][role="status"]')?.textContent).toContain('已复制 2 个节点')
+  expect(f.host.querySelector('.dc-notification-capsule[role="alert"]')).toBeNull()
+  const pasted = clipboardEvent('paste', copied.text())
+  await act(async () => f.canvas.dispatchEvent(pasted.event))
+  const first = f.flow().getNodes().filter((node) => node.type === 'media' && !f.sources.some((source) => source.id === node.id))
+  expect(first).toHaveLength(2); expect(first.every((node) => node.selected)).toBe(true)
+  const bounds = JSON.parse(copied.text()).bounds
+  expect(first[0].position).toEqual({ x: 500 - bounds.width / 2, y: 350 - bounds.height / 2 })
+  await act(async () => f.canvas.dispatchEvent(clipboardEvent('paste', copied.text()).event))
+  const second = f.flow().getNodes().filter((node) => node.type === 'media' && !f.sources.some((source) => source.id === node.id) && !first.some((old) => old.id === node.id))
+  expect(second[0].position).toEqual({ x: first[0].position.x + 32, y: first[0].position.y + 32 })
+  expect(second.every((node) => node.selected)).toBe(true)
+  await f.saveNow()
+  expect(f.save.mock.calls[0][1].nodes).toHaveLength(4)
+  expect(f.save.mock.calls[0][1].edges).toHaveLength(0)
+  expect(f.generate).not.toHaveBeenCalled(); expect(f.ttsGenerate).not.toHaveBeenCalled()
+})
+it('places keyboard paste at the latest canvas pointer under pan and zoom', async () => {
+  const f = await fixture()
+  await selectSources(f)
+  await act(async () => f.flow().setViewport({ x: 100, y: -50, zoom: 2 }, { duration: 0 }))
+  await f.mouse(f.pane, 'pointermove', 700, 300)
+  const copy = clipboardEvent('copy')
+  await act(async () => f.canvas.dispatchEvent(copy.event))
+  await act(async () => f.canvas.dispatchEvent(clipboardEvent('paste', copy.text()).event))
+  expect(f.flow().getNodes().find((node) => node.id !== f.source.id)!.position).toEqual({ x: 300, y: 175 })
+})
+it.each(['input', 'textarea', 'contenteditable', 'selectable', 'outside'])('keeps native text clipboard behavior inside %s', async (boundary) => {
+  const f = await fixture(); await selectSources(f)
+  const target = document.createElement(boundary === 'input' || boundary === 'textarea' ? boundary : 'div')
+  if (boundary === 'contenteditable') target.setAttribute('contenteditable', 'true')
+  if (boundary === 'selectable') target.dataset.dcTextSelectable = 'true'
+  ;(boundary === 'outside' ? document.body : f.canvas).append(target)
+  const copy = clipboardEvent('copy'), paste = clipboardEvent('paste', copyCanvasNodes({ ...emptyGraph(), nodes: [f.source] }, [f.source.id], 'w', location.origin))
+  await act(async () => { target.dispatchEvent(copy.event); target.dispatchEvent(paste.event) })
+  expect(copy.event.defaultPrevented).toBe(false); expect(paste.event.defaultPrevented).toBe(false)
+  expect(f.flow().getNodes()).toHaveLength(1); expect(f.save).not.toHaveBeenCalled()
+})
+it('copies from a node card and pastes at a blank-menu point using the current system clipboard', async () => {
+  const f = await fixture()
+  let text = ''
+  const writeText = vi.fn(async (value: string) => { text = value }), readText = vi.fn(async () => text)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText, readText } })
+  const node = f.host.querySelector<HTMLElement>('.react-flow__node')!
+  await f.mouse(node, 'contextmenu', 100, 100, 2)
+  expect(menu()?.textContent).toContain('节点操作')
+  expect(menu()?.classList.contains('dc-canvas-text-scope')).toBe(true)
+  await f.clickItem(actionItem('复制'))
+  expect(writeText).toHaveBeenCalledTimes(1); expect(JSON.parse(text).nodes[0].id).toBe(f.source.id)
+  expect(f.host.querySelector('.dc-notification-capsule[data-tone="success"][role="status"]')?.textContent).toContain('已复制 1 个节点')
+  await f.right()
+  const paste = actionItem('粘贴'); expect(paste.disabled).toBe(false)
+  await f.clickItem(paste); await act(async () => paste.click())
+  expect(f.flow().getNodes()).toHaveLength(2); expect(menu()).toBeNull()
+  expect(f.flow().getNodes()[1].position).toEqual({ x: 700, y: 300 })
+  await f.saveNow(); expect(f.save.mock.calls[0][1].nodes).toHaveLength(1)
+  expect(f.generate).not.toHaveBeenCalled()
+})
+it.each(['node', 'padding'])('copies the existing selected batch from group %s right-click', async (surface) => {
+  const f = await fixture(true, 'image/png', 2); await selectSources(f)
+  const writeText = vi.fn(async (_value: string) => {})
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  if (surface === 'node') await f.mouse(f.host.querySelector<HTMLElement>('.react-flow__node')!, 'contextmenu', 100, 100, 2)
+  else await f.right(10, 10)
+  expect(menu()?.textContent).toContain('节点操作')
+  await f.clickItem(actionItem('复制'))
+  expect(JSON.parse(writeText.mock.calls[0][0] as unknown as string).nodes).toHaveLength(2)
+  expect(f.save).not.toHaveBeenCalled()
+})
+it.each(['outside', 'hide', 'new action', 'Escape'])('discards a late clipboard menu read after %s', async (boundary) => {
+  const f = await fixture()
+  const text = copyCanvasNodes({ ...emptyGraph(), nodes: [f.source] }, [f.source.id], 'w', location.origin)
+  let reads = 0, resolve!: (value: string) => void
+  const readText = vi.fn(() => ++reads === 1 ? Promise.resolve(text) : new Promise<string>((done) => { resolve = done }))
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText } })
+  await f.right(); await f.clickItem(actionItem('粘贴'))
+  expect(menu()).toBeNull()
+  if (boundary === 'outside') await f.mouse(f.pane, 'pointerdown', 800, 500)
+  if (boundary === 'hide') await f.hide()
+  if (boundary === 'new action') {
+    const copy = clipboardEvent('copy'); await selectSources(f); await act(async () => f.canvas.dispatchEvent(copy.event))
+  }
+  if (boundary === 'Escape') await f.key('Escape')
+  await act(async () => resolve(text))
+  expect(f.flow().getNodes()).toHaveLength(1); expect(f.save).not.toHaveBeenCalled()
+})
+it('never uses an earlier node copy when the system clipboard changes or cannot be read', async () => {
+  const f = await fixture()
+  const valid = copyCanvasNodes({ ...emptyGraph(), nodes: [f.source] }, [f.source.id], 'w', location.origin)
+  let text = valid
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: vi.fn(async () => text) } })
+  await f.right(); expect(actionItem('粘贴').disabled).toBe(false)
+  text = 'ordinary text'
+  await f.clickItem(actionItem('粘贴'))
+  expect(f.flow().getNodes()).toHaveLength(1)
+  await f.right(); expect(actionItem('粘贴').disabled).toBe(true)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: vi.fn().mockRejectedValue(new DOMException('Denied', 'NotAllowedError')) } })
+  await f.right(); expect(actionItem('粘贴').disabled).toBe(true)
+  expect(actionItem('粘贴').querySelector('[title]')?.getAttribute('title')).toContain('Command/Ctrl')
+})
+it('preserves actual video frame roles and prompt while saving fresh draft plus original-source references in one mutation', async () => {
+  let target!: CanvasNode
+  const f = await fixture(true, 'image/png', 2, (snapshot) => {
+    const record = BUILTIN_MODELS.find((model) => model.protocol === 'seedance-video')!
+    const model: PublicModel = { ...record, has_api_key: true, api_key_mask: '', capabilities: capabilitiesFor(record) }
+    const [a, b] = snapshot.graph.nodes
+    target = { ...a, id: crypto.randomUUID(), kind: 'video-generation', title: '视频', modelId: model.id, assetId: null,
+      position: { x: 700, y: 400 }, params: { ...defaultParams(model), videoMode: 'frames', firstFrameId: b.assetId!, lastFrameId: a.assetId! },
+      prompt: `保留 @[${a.assetId}] 与 @[${b.assetId}]` }
+    snapshot.graph = { ...snapshot.graph, nodes: [...snapshot.graph.nodes, target], edges: [
+      { id: crypto.randomUUID(), source: a.id, target: target.id, assetId: a.assetId! },
+      { id: crypto.randomUUID(), source: b.id, target: target.id, assetId: b.assetId! },
+    ] }
+    return [model]
+  })
+  await act(async () => f.store().getState().addSelectedNodes([target.id]))
+  f.canvas.focus()
+  const copy = clipboardEvent('copy')
+  await act(async () => f.canvas.dispatchEvent(copy.event))
+  await act(async () => f.canvas.dispatchEvent(clipboardEvent('paste', copy.text()).event))
+  const pasted = f.flow().getNodes().find((node) => node.type === 'media' && ![...f.sources.map((node) => node.id), target.id].includes(node.id))!
+  expect(pasted.data.node).toMatchObject({ prompt: target.prompt, params: target.params, selectedResultId: null, assetId: null })
+  await f.saveNow()
+  const mutation = f.save.mock.calls[0][1]
+  expect(mutation.nodes).toHaveLength(1); expect(mutation.nodes[0].value.params).toEqual(target.params)
+  expect(mutation.edges.map((entry) => [entry.value.source, entry.value.target, entry.value.assetId])).toEqual(
+    f.sources.map((node) => [node.id, pasted.id, node.assetId]))
+  expect(mutation.deleteNodes).toEqual([]); expect(mutation.deleteEdges).toEqual([])
+  expect(f.generate).not.toHaveBeenCalled()
+})
+it('suppresses a node context menu after right-button dragging', async () => {
+  const f = await fixture(), node = f.host.querySelector<HTMLElement>('.react-flow__node')!
+  await f.mouse(node, 'mousedown', 100, 100, 2)
+  await f.mouse(document, 'mousemove', 160, 100, 2)
+  await f.mouse(window, 'mouseup', 160, 100, 2)
+  await f.mouse(node, 'contextmenu', 160, 100, 2)
+  expect(menu()).toBeNull(); expect(f.save).not.toHaveBeenCalled()
 })

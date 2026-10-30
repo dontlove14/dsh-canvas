@@ -81,6 +81,7 @@ Wan / H3 四渠道、原生协议与共用视频行为见 [ADR-0067](0067-wan-an
 | [ADR-0067](0067-wan-and-minimax-native-video-protocols.md) | Wan 3.0与MiniMax H3双渠道原生协议 | 四渠道 / 十二组合、共用模式与独立能力、固定OSS参考、原任务恢复、原结构保持 | 已采纳 |
 | [ADR-0068](0068-selection-output-and-reference-interactions.md) | 临时分组选区输出与引用操作 | 原生端点 / 主体接线、批量校验与同次保存、仅下载、@边删除确认、平台快捷键 | 已采纳；补充0033 / 0062 / 0066 |
 | [ADR-0069](0069-non-commercial-modellink-attribution-license.md) | 非商业使用与 Model Link 署名许可 | LICENSE / NOTICE、商业边界、可点击署名、第三方许可、分发包与身份清单 | 已采纳 |
+| [ADR-0070](0070-node-clipboard-with-original-inputs.md) | 节点剪贴板快照与原上游输入 | 原生复制 / 粘贴、组内外原来源、固定参数与@、新草稿、整批校验与同次保存 | 已采纳 |
 
 ## 如何使用
 

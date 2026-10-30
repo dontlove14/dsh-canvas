@@ -84,6 +84,7 @@
 .dc-notification-capsule:is(:hover,:focus-within){z-index:1}
 .dc-notification-capsule-body{width:100%;height:100%;border-radius:18px;background:var(--dc-surface);display:flex;align-items:center;gap:7px;padding:0 8px}
 .dc-notification-icon{width:20px;height:20px;flex:none;color:var(--dc-danger)}
+.dc-notification-capsule[data-tone="success"] .dc-notification-icon{color:var(--dc-success)}
 .dc-notification-message{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dc-notification-capsule .dc-notification-close:is(button,[data-dc-ui]){flex:none;width:22px;min-width:22px;height:22px;min-height:22px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--dc-muted);font-size:17px;line-height:1}
 .dc-notification-capsule .dc-notification-close:is(button,[data-dc-ui]):hover{background:var(--dc-hover);color:var(--dc-text)}
@@ -621,6 +622,9 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-point-menu-fallback button{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;min-height:36px;border:0;border-radius:8px;background:transparent;color:inherit;text-align:left;font:inherit}
 .dc-point-menu-fallback button:hover:not(:disabled),.dc-point-menu-fallback button:focus-visible{background:var(--dc-hover)}
 .dc-point-menu-fallback button:disabled{opacity:.4}
+.dc-point-menu-label{display:flex;align-items:center;justify-content:space-between;gap:24px;flex:1;min-width:0}
+.dc-point-menu-shortcut{display:inline-flex;align-items:center;gap:4px;color:var(--dc-caption);font-size:11px}
+.dc-point-menu-shortcut kbd{display:inline-flex;align-items:center;font:inherit}
 .dc-pending-connection{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 .dc-model-form .dc-checkbox input{width:16px;height:16px;padding:0;flex:none}
 

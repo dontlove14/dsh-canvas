@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CapsuleBeam, CapsuleStack, CAPSULE_DISPLAY_LIMIT } from './CapsuleStack'
 import { UiButton } from './ui'
 
-export interface CanvasNotification { id: string; message: string }
+export interface CanvasNotification { id: string; message: string; tone?: 'success' | 'error' }
 export const NOTIFICATION_DURATION = 5000
 
 function NotificationCapsule({ notification, active, onDismiss }: {
@@ -14,6 +14,7 @@ function NotificationCapsule({ notification, active, onDismiss }: {
   const dismiss = useRef(onDismiss)
   dismiss.current = onDismiss
   const running = active && !hovered && !focused
+  const tone = notification.tone ?? 'error'
   useEffect(() => {
     if (!running) return
     const started = Date.now()
@@ -23,7 +24,8 @@ function NotificationCapsule({ notification, active, onDismiss }: {
       remaining.current = Math.max(0, remaining.current - (Date.now() - started))
     }
   }, [running, notification.id])
-  return <div className="dc-notification-capsule" role="alert" data-capsule-motion-id={notification.id}
+  return <div className="dc-notification-capsule" role={tone === 'success' ? 'status' : 'alert'}
+    data-tone={tone} data-capsule-motion-id={notification.id}
     title={notification.message}
     onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
     onFocusCapture={() => setFocused(true)}
@@ -33,8 +35,12 @@ function NotificationCapsule({ notification, active, onDismiss }: {
     <CapsuleBeam><div className="dc-notification-capsule-body">
       <svg className="dc-notification-icon" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-        <path d="M12 7.5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <circle cx="12" cy="16" r="1" fill="currentColor" />
+        {tone === 'success'
+          ? <path d="m7.5 12 3 3 6-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          : <>
+            <path d="M12 7.5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <circle cx="12" cy="16" r="1" fill="currentColor" />
+          </>}
       </svg>
       <span className="dc-notification-message">{notification.message}</span>
       <UiButton className="dc-notification-close" aria-label="关闭提示" onClick={() => onDismiss(notification.id)}>×</UiButton>

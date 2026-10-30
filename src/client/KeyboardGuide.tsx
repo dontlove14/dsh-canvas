@@ -12,7 +12,7 @@ export function isMacPlatform(): boolean {
   return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent)
 }
 function Key({ children }: { children: ReactNode }) { return <kbd>{children}</kbd> }
-function Modifier({ mac }: { mac: boolean }) {
+export function Modifier({ mac }: { mac: boolean }) {
   // Keep the supplied paths; trim Ctrl's square-export whitespace for a readable keycap.
   return <Key><svg width={mac ? 15 : 28} height="15" viewBox={mac ? '0 0 1024 1024' : '64 288 896 448'}
     fill="currentColor" aria-label={mac ? 'Command' : 'Ctrl'} role="img">
@@ -58,6 +58,8 @@ export function KeyboardGuide({ enabled, container }: { enabled: boolean; contai
     { title: '选择与连接', entries: [
       ['框选节点', <Key>左键拖动</Key>], ['追加框选', <><Key>Shift</Key><span>+</span><Key>左键拖动</Key></>],
       ['追加 / 取消选择', <><Modifier mac={mac} /><span>+</span><Key>单击</Key></>],
+      ['复制节点', <><Modifier mac={mac} /><span>+</span><Key>C</Key></>],
+      ['粘贴节点', <><Modifier mac={mac} /><span>+</span><Key>V</Key></>],
       ['连接引用', <Key>输出端点拖到节点</Key>], ['批量连接', <Key>框选输出端点拖动</Key>],
     ] },
     { title: '移动画布', entries: [

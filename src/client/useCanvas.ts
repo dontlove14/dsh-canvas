@@ -27,14 +27,17 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   const ready = useRef(false); const blocked = useRef(false); const mounted = useRef(true)
   const activeRef = useRef(active)
   activeRef.current = active
-  const report = useCallback((failure: unknown) => {
+  const notify = useCallback((message: string, tone: 'success' | 'error') => {
     if (!mounted.current) return
-    const message = failure instanceof Error ? failure.message : String(failure)
     if (!message) return
-    const notification = { id: crypto.randomUUID(), message }
+    const notification: CanvasNotification = { id: crypto.randomUUID(), message, tone }
     // Repeated polling failures share a notice while it is queued or visible.
-    setNotifications((current) => current.some((item) => item.message === message) ? current : [...current, notification])
+    setNotifications((current) => current.some((item) => item.message === message && (item.tone ?? 'error') === tone)
+      ? current : [...current, notification])
   }, [])
+  const report = useCallback((failure: unknown) =>
+    notify(failure instanceof Error ? failure.message : String(failure), 'error'), [notify])
+  const notifySuccess = useCallback((message: string) => notify(message, 'success'), [notify])
   const dismissNotification = useCallback((id: string) => {
     setNotifications((current) => current.filter((item) => item.id !== id))
   }, [])
@@ -130,6 +133,6 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     const timer = setTimeout(() => { void flush().catch(() => {}) }, 650)
     return () => clearTimeout(timer)
   }, [graph, flush])
-  return { graph, state, saveStatus, error: notifications.at(-1)?.message ?? '', notifications, dismissNotification,
-    conflict, edit, getGraph, flush, refresh, reload, report, clearError }
+  return { graph, state, saveStatus, error: notifications.filter((item) => item.tone !== 'success').at(-1)?.message ?? '', notifications, dismissNotification,
+    conflict, edit, getGraph, flush, refresh, reload, report, notifySuccess, clearError }
 }

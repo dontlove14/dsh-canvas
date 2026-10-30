@@ -164,6 +164,89 @@
     });
   }
 
+  var questionDemo = document.querySelector("[data-demo-question]");
+  if (questionDemo) {
+    var find = function (selector) { return questionDemo.querySelector(selector); };
+    var question = { state: "none", token: 0, draft: "", count: 0, result: "", ended: false };
+    function questionRefresh(message) {
+      var waiting = question.state === "waiting";
+      questionDemo.querySelectorAll("[data-question-option]").forEach(function (option) { option.disabled = !waiting; });
+      find("[data-question-custom]").disabled = !waiting;
+      ["[data-question-submit]", "[data-question-skip]", "[data-question-takeover]"].forEach(function (selector) { find(selector).disabled = !waiting; });
+      find("[data-question-ask]").disabled = waiting;
+      find("[data-question-duplicate]").disabled = question.state !== "answered";
+      find("[data-question-late]").disabled = !question.ended;
+      find("[data-question-count]").textContent = String(question.count);
+      find("[data-question-result]").textContent = question.result || "尚无确认答案；推荐、草稿、跳过和取消不形成授权。";
+      if (message) find("[data-question-state]").textContent = message;
+    }
+    function clearDraft() {
+      question.draft = "";
+      questionDemo.querySelectorAll("[data-question-option]").forEach(function (option) { option.checked = false; });
+      find("[data-question-custom]").value = "";
+    }
+    questionDemo.querySelectorAll("[data-question-option]").forEach(function (option) {
+      option.addEventListener("change", function () {
+        if (question.state !== "waiting") return;
+        question.draft = option.value;
+        find("[data-question-custom]").value = "";
+        questionRefresh("选项只是草稿，尚未提交；Agent 继续等待，不开始依赖此答案的操作。");
+      });
+    });
+    find("[data-question-custom]").addEventListener("input", function () {
+      if (question.state !== "waiting") return;
+      question.draft = "";
+      questionDemo.querySelectorAll("[data-question-option]").forEach(function (option) { option.checked = false; });
+      questionRefresh("文本只是草稿，提交前不是答案；单选自定义文本与选项互斥。");
+    });
+    questionDemo.addEventListener("click", function (event) {
+      var button = event.target.closest("button"); if (!button || button.disabled) return;
+      if (button.hasAttribute("data-question-ask")) {
+        question.token += 1; question.result = ""; question.ended = false; clearDraft();
+        if (find("[data-question-unavailable]").checked) {
+          question.state = "unavailable";
+          questionRefresh("应答界面不可用，提问失败；不声称已收到答案，也不执行依赖动作。");
+        } else {
+          question.state = "waiting";
+          questionRefresh("原生工具已发起示例问题，等待明确回答；画布控制权不因提问改变。");
+        }
+      } else if (button.hasAttribute("data-question-submit")) {
+        if (question.state !== "waiting") return;
+        var custom = find("[data-question-custom]").value.trim();
+        if (!custom && !question.draft) {
+          questionRefresh("尚未填写答案。请选择、输入，或明确跳过；不能自动使用推荐项。");
+          return;
+        }
+        if (find("[data-question-stale]").checked) {
+          question.state = "stale";
+          question.result = "收到答案，但原候选已经失效；该决定未应用。";
+          questionRefresh("最新业务校验拒绝应用旧选择；保留内容，按需重新获取候选并提问。");
+          return;
+        }
+        question.state = "answered"; question.count += 1;
+        question.result = JSON.stringify({ answers: [{ id: "creative_direction", selected: question.draft ? [question.draft] : [], ...(custom ? { custom: custom } : {}) }] });
+        questionRefresh("答案按问题 ID 读取，最新状态校验通过；一份回答只确认一次，不自动变成生成请求。");
+      } else if (button.hasAttribute("data-question-skip")) {
+        question.state = "skipped";
+        question.result = '{"answers":[{"id":"creative_direction","selected":[]}]}';
+        questionRefresh("用户跳过，没有明确决定；必要的依赖动作不执行，已有内容保留。");
+      } else if (button.hasAttribute("data-question-takeover")) {
+        question.state = "cancelled"; question.token += 1; question.ended = true;
+        question.result = "本轮提问已随接管取消；未提交草稿不形成授权。";
+        questionRefresh("人工接管立即结束旧等待与本轮回复；不等用户先答题，不恢复旧创作。");
+      } else if (button.hasAttribute("data-question-duplicate")) {
+        questionRefresh("重复回执已忽略；同一答案不再次确认，也不造成重复业务执行。");
+      } else if (button.hasAttribute("data-question-late")) {
+        questionRefresh("旧提问已失效，迟到提交不能恢复旧 Agent 或重新取得画布控制权。");
+      } else if (button.hasAttribute("data-question-reset")) {
+        question = { state: "none", token: 0, draft: "", count: 0, result: "", ended: false };
+        find("[data-question-unavailable]").checked = false; find("[data-question-stale]").checked = false;
+        clearDraft(); questionRefresh("尚未发起提问。");
+      }
+    });
+    questionRefresh();
+  }
+
   if (window.mermaid) {
     var style = getComputedStyle(document.documentElement);
     window.mermaid.initialize({

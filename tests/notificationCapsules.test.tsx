@@ -54,6 +54,19 @@ function mount(initial: CanvasNotification[] = []) {
 const messages = (host: HTMLElement) => [...host.querySelectorAll('.dc-notification-message')].map((item) => item.textContent)
 
 describe('canvas capsule notifications', () => {
+  it('renders successful copy as a status check and legacy failures as an alert, with shared expiry', () => {
+    const { host, dismiss } = mount([{ id: 'copied', message: '已复制 11 个节点', tone: 'success' }, notice('failure')])
+    const success = host.querySelector('[role="status"]')!, error = host.querySelector('[role="alert"]')!
+    expect(success.getAttribute('data-tone')).toBe('success')
+    expect(success.textContent).toContain('已复制 11 个节点')
+    expect(success.querySelector('.dc-notification-icon path')?.getAttribute('d')).toBe('m7.5 12 3 3 6-6')
+    expect(success.querySelectorAll('.dc-notification-icon circle')).toHaveLength(1)
+    expect(error.getAttribute('data-tone')).toBe('error')
+    expect(error.querySelectorAll('.dc-notification-icon circle')).toHaveLength(2)
+    tick(5000)
+    expect(dismiss).toHaveBeenCalledTimes(2)
+    expect(messages(host)).toEqual([])
+  })
   it('gives appended messages independent five-second lifetimes and slides remaining messages forward', () => {
     const { host, update, dismiss } = mount([notice('one')])
     tick(2000); update([notice('one'), notice('two')])
@@ -142,12 +155,24 @@ describe('canvas capsule notifications', () => {
     act(() => { canvas.report(new Error('图片过多')); canvas.report('上传失败'); canvas.report(new Error('图片过多')) })
     expect(messages(host)).toEqual(['图片过多', '上传失败'])
     expect(canvas.error).toBe('上传失败')
+    act(() => { canvas.notifySuccess('已复制 11 个节点'); canvas.notifySuccess('已复制 11 个节点') })
+    expect(messages(host)).toEqual(['图片过多', '上传失败', '已复制 11 个节点'])
+    expect(canvas.error).toBe('上传失败')
+    expect(host.querySelectorAll('[role="status"]')).toHaveLength(1)
+    // Equal text from separate outcomes must not hide an actual error.
+    act(() => canvas.report('已复制 11 个节点'))
+    expect(messages(host)).toEqual(['图片过多', '上传失败', '已复制 11 个节点', '已复制 11 个节点'])
+    expect(host.querySelectorAll('[role="alert"]')).toHaveLength(3)
+    act(() => canvas.dismissNotification(canvas.notifications.at(-1)!.id))
     const first = canvas.notifications[0].id
     act(() => canvas.dismissNotification(first))
-    expect(messages(host)).toEqual(['上传失败'])
+    expect(messages(host)).toEqual(['上传失败', '已复制 11 个节点'])
     act(() => canvas.report('图片过多'))
-    expect(messages(host)).toEqual(['上传失败', '图片过多'])
-    expect(canvas.notifications[1].id).not.toBe(first)
+    expect(messages(host)).toEqual(['上传失败', '已复制 11 个节点', '图片过多'])
+    expect(canvas.notifications[2].id).not.toBe(first)
+    act(() => canvas.notifications.filter((item) => item.tone !== 'success').forEach((item) => canvas.dismissNotification(item.id)))
+    expect(messages(host)).toEqual(['已复制 11 个节点'])
+    expect(canvas.error).toBe('')
     await act(async () => canvas.reload())
     expect(messages(host)).toEqual([])
     await act(async () => vi.advanceTimersByTimeAsync(5000))
