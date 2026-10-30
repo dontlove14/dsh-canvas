@@ -1,0 +1,122 @@
+# dsh-canvas 非商业使用与署名许可协议
+
+dsh-canvas Non-Commercial Attribution License, Version 1.0
+
+Copyright (c) 2026 dsh-canvas contributors.
+各著作权人保留未在本协议中明确授予的权利。
+
+指定署名：[Model Link](https://api.modellink.online)
+
+本协议是自定义的源码可用许可，包含禁止商业使用的限制，不属于
+OSI 定义的开源许可。请在使用、复制、修改或分发前阅读完整条款。
+
+## 1. 适用范围
+
+“本软件”指本仓库中由相应著作权人依本协议提供的源代码、构建产物、
+项目文档及其修改版本。“您”指行使本协议所授予权利的个人或组织。
+
+第三方依赖、第三方代码、素材及明确附有其他许可证的文件，继续适用
+各自的许可证。本协议不取代、限制或重新授权这些第三方内容。
+
+## 2. 非商业授权
+
+在遵守本协议全部条件的前提下，著作权人授予您免费的、非独占的许可，
+允许您仅为非商业目的使用、运行、研究、复制、修改及分发本软件和
+修改版本，包括个人学习、非商业教学、非商业研究和非商业交流。
+
+本许可不要求您公开未分发的修改；如果您分发本软件或修改版本，
+必须遵守第 4 条。仅公开源代码或保留署名，不会使商业使用获得授权。
+
+## 3. 禁止商业使用
+
+“商业使用”指主要意图或实际用途是获取直接或间接的商业利益、金钱
+报酬，或者支持经营活动的使用、运行、复制、修改或分发行为。
+本协议不授予任何商业使用权，包括但不限于：
+
+1. 销售、出租本软件或修改版本，收取许可费、订阅费、使用费或访问费。
+2. 提供收费托管、SaaS、API、代部署、定制开发、商业咨询或其他以
+   本软件为基础的收费产品或服务。
+3. 将本软件集成、捆绑或部署于商业产品、商业平台或企业经营流程，
+   包括企业内部生产、业务运营和为客户提供服务。
+4. 利用本软件生成或处理用于出售、商业交付、广告、营销或其他
+   经营活动的内容。
+5. 通过免费提供本软件或其功能获取广告收入、商业引流、付费转化
+   或其他间接商业利益。
+
+仅为纯粹的非商业使用支付必要的模型 API、云存储或设备费用，
+本身不构成商业使用；这些付款也不授予本软件的商业使用权。
+
+您自行提供的输入、画布数据及生成结果，不会仅因使用本软件而自动
+适用本项目代码的许可或署名要求，其权利仍由相应权利人和相关条款
+决定；这不解除本条对以商业目的使用本软件生成或处理内容的禁止。
+
+## 4. 必须保留的许可与 Model Link 署名
+
+您复制、分发或公开提供本软件及修改版本时，必须同时满足：
+
+1. 保留本协议完整文本、已有版权声明及随附的 NOTICE.md。
+2. 在仓库 README、分发说明或对应的许可 / 致谢页面中，清晰标明
+   本软件来源于 dsh-canvas，并保留以下可见、可点击的超链接：
+
+   [Model Link](https://api.modellink.online)
+
+   链接显示文字必须为“Model Link”，链接目标必须为
+   `https://api.modellink.online`。不得仅保留普通文字、替换目标，
+   或通过隐藏、不可见样式、禁用点击等方式使署名失去作用。
+3. 若您向他人提供有用户界面的部署或修改版本，还必须在用户能
+   正常访问的“关于”“设置”“致谢”页面或页脚中保留同一超链接；
+   仅在源代码注释或开发者工具中保留链接不满足该要求。
+4. 修改版本应清晰说明已作修改，不得暗示其为原版或得到原作者、
+   Model Link 的认可、担保或背书。
+5. 再分发的本软件及其修改部分须继续受本协议的非商业限制和署名
+   条件约束，不得删除这些条件、改用允许商用的许可，或授予您
+   本身未获得的权利。独立第三方内容仍按第 1 条适用自身许可证。
+
+指定署名不要求用户必须使用 Model Link 服务，也不表示任何服务、
+商标或第三方项目的权利已转让。本协议不授予商标使用权，除完成
+上述真实、准确的来源署名所需的引用外。
+
+## 5. 不提供担保与责任限制
+
+本软件按“现状”提供。在适用法律允许的范围内，著作权人和贡献者
+不提供任何明示或默示担保，包括适销性、特定用途适用性及不侵权
+担保，亦不对因使用或无法使用本软件导致的损失承担责任。
+
+本条不排除或限制适用法律规定不得排除或限制的责任。
+
+## 6. 许可终止
+
+违反本协议任何条件时，本协议向您授予的权利自动终止。您应停止
+未经授权的使用、复制、修改和分发；纠正违规行为不自动恢复许可，
+继续行使本协议权利须取得相应著作权人的书面确认。
+
+本协议不限制您依适用法律享有、且无需本许可即可行使的权利。
+某一条款依法不能执行时，其余条款在法律允许范围内继续有效。
+
+## 7. 文本与版本
+
+本协议的版本为 1.0，发布日期为 2026-10-30。上面的中文完整条款
+为本协议的正式文本；下面英文摘要仅供理解，不构成独立授权。
+未来许可变更须另行明确，不当然追溯撤销此前已有效授予的权利。
+
+## English summary (non-binding)
+
+This is a custom source-available license, not an OSI-approved open-source
+license. You may use, study, copy, modify and redistribute dsh-canvas only
+for non-commercial purposes and subject to all of the Chinese terms above.
+
+Commercial use is prohibited, including paid services, commercial products,
+business operations, commercial content production, and free offerings used
+for advertising revenue or other commercial benefit.
+
+Keep the full LICENSE, copyright notices and NOTICE.md. Redistributions
+must identify dsh-canvas and retain a visible, clickable link labelled
+"Model Link" pointing to https://api.modellink.online. User-facing
+deployments and modified applications must also show that link in an
+accessible About, Settings, Credits page or footer. Mark modifications and
+preserve the non-commercial and attribution conditions.
+
+Third-party components retain their own licenses. This license does not
+automatically license users' inputs, canvas data or generated outputs;
+using this software to produce or process commercial content is still
+prohibited. The software is provided as-is, subject to applicable law.

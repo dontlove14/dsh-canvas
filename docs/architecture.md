@@ -4,6 +4,8 @@
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
 
+0.2.78由SelectionNode临时投影多选边界及原生Handle，useCanvasConnections组合普通 / 批量 / 主体连接，selectionOutputs在同一edit中逐个执行connectReference。临时节点不进入getGraph / GraphMutation；只真实边走原模式归一和保存。删除hook按prompt中的确切asset标签决定边确认并重查异步身份，KeyboardGuide提供按平台展示的现有键盘操作。边界与取舍见[ADR-0068](adr/0068-selection-output-and-reference-interactions.md)。
+
 0.2.73增加Wan / H3四渠道原生协议：Client与Host共用shared/video模式 / 连接 / 比例校验，Host Providers各自提交 / 查询，固定任务OSS参考流式检查再签URL；原Runtime / Worker / Vault / DDL保持。新组合使用独立UUID，Seedance预审仍只处理Seedance。具体依赖与恢复见[ADR-0067](adr/0067-wan-and-minimax-native-video-protocols.md)。
 
 0.2.71由Client的CREATABLE_NODES / createCanvasNode统一底部添加、空白右键和输出拉线到空白三个入口。useNodeCreationMenu适配React Flow公开事件，确认实际空白命中并冻结坐标 / 输出asset；UiPointMenu复用Harness公共Menu / portal与画布禁选作用域。直接连线和快捷创建共用connectReference，useCanvas.getGraph及同步edit updater在最新图上返回完整节点 / 边，沿用Seedance归一和GraphMutation；临时线只在ViewportPortal显示，不持久化或调用生成。新增类型必须同时维护三个入口与默认 / 校验 / 渲染 / 测试，见[ADR-0066](adr/0066-shared-node-creation-entrances.md)。

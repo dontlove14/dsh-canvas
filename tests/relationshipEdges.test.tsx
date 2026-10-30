@@ -15,7 +15,7 @@ vi.mock('@xyflow/react', async (importOriginal) => {
   return {
     ...original,
     Background: () => null, Controls: () => null, MiniMap: () => null,
-    ReactFlow: ({ nodes, edges, edgeTypes, onNodesChange, onPaneClick }: any) => {
+    ReactFlow: ({ nodes, edges, edgeTypes, onNodesChange, onEdgesChange, onEdgeClick, onPaneClick }: any) => {
       store = original.useStoreApi()
       useEffect(() => {
         store.getState().setNodes(nodes)
@@ -29,7 +29,13 @@ vi.mock('@xyflow/react', async (importOriginal) => {
         <button data-clear onClick={onPaneClick}>清空选择</button>
         <svg>{edges.map((edge: any) => {
           const Component = edgeTypes[edge.type]
-          return <g key={edge.id} data-edge={edge.id}><Component {...edge} sourceX={0} sourceY={0} targetX={200} targetY={80}
+          return <g key={edge.id} data-edge={edge.id} onClick={(event) => {
+            onEdgesChange([
+              ...(!event.shiftKey ? edges.filter((item: any) => item.selected).map((item: any) => ({ type: 'select', id: item.id, selected: false })) : []),
+              { type: 'select', id: edge.id, selected: true },
+            ])
+            onEdgeClick(event, edge)
+          }}><Component {...edge} sourceX={0} sourceY={0} targetX={200} targetY={80}
             sourcePosition={original.Position.Right} targetPosition={original.Position.Left} /></g>
         })}</svg>
       </div>
@@ -78,7 +84,10 @@ async function workspace() {
     container.querySelector(`[data-node="${id}"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey }))
   })
   const flowing = () => [...container.querySelectorAll('[data-edge]')].filter((edge) => edge.querySelector('.dc-edge-flow')).map((edge) => edge.getAttribute('data-edge'))
-  return { container, click, flowing, show, snapshot, original, api, save }
+  const clickEdge = (id: string, shiftKey = false) => act(() => {
+    container.querySelector(`[data-edge="${id}"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey }))
+  })
+  return { container, click, clickEdge, flowing, show, snapshot, original, api, save }
 }
 
 describe('selected node relationship flow', () => {
@@ -91,6 +100,15 @@ describe('selected node relationship flow', () => {
     expect(edges).toEqual(before)
     expect(relationshipEdges(edges, null)).toBe(edges)
     expect(relationshipEdges(edges, 'c').filter((edge) => edge.data?.flowing).map((edge) => edge.id)).toEqual(['bc', 'cd'])
+  })
+  it('projects selected edges independently and preserves their stored identity', () => {
+    const edges = connections.map((edge) => ({ ...edge, selected: edge.id === 'cd' }))
+    const original = structuredClone(edges)
+    const focused = relationshipEdges(edges, null, true)
+    expect(focused.filter((edge) => edge.data?.flowing).map((edge) => edge.id)).toEqual(['cd'])
+    expect(focused[0]).toBe(edges[0]); expect(focused[1]).toBe(edges[1])
+    expect(edges).toEqual(original)
+    expect(relationshipEdges(edges, null)).toBe(edges)
   })
   it.each([false, true])('keeps source-to-target geometry, labels, markers and hitbox when destination is to the left=%s', (reverse) => {
     const props: EdgeProps<RelationshipFlowEdge> = {
@@ -136,6 +154,33 @@ describe('selected node relationship flow', () => {
     act(() => { document.dispatchEvent(new Event('visibilitychange')) })
     expect(flowing()).toEqual(['ab', 'bc'])
     expect(api.state).toHaveBeenCalledTimes(1); expect(save).not.toHaveBeenCalled()
+  })
+  it('switches flow from a node to clicked edges and clears it without saving', async () => {
+    const { container, click, clickEdge, flowing, save, snapshot, original } = await workspace()
+    click('b'); expect(flowing()).toEqual(['ab', 'bc'])
+    clickEdge('cd'); expect(flowing()).toEqual(['cd'])
+    clickEdge('xa'); expect(flowing()).toEqual(['xa'])
+    clickEdge('ab', true); expect(flowing()).toEqual(['ab', 'xa'])
+    act(() => { container.querySelector<HTMLButtonElement>('[data-clear]')!.click() })
+    expect(flowing()).toEqual([])
+    expect(save).not.toHaveBeenCalled(); expect(JSON.stringify(snapshot)).toBe(original)
+  })
+  it('suspends selected edge flow while hidden or during a marquee and restores it on cancellation', async () => {
+    const { clickEdge, flowing, show, save } = await workspace()
+    clickEdge('ab'); expect(flowing()).toEqual(['ab'])
+    await show(false); expect(flowing()).toEqual([])
+    await show(true); expect(flowing()).toEqual(['ab'])
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(flowing()).toEqual([])
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(flowing()).toEqual(['ab'])
+    act(() => { store.setState({ userSelectionRect: { x: 1000, y: 1000, width: 50, height: 50, startX: 1000, startY: 1000 } }) })
+    expect(flowing()).toEqual([])
+    act(() => { window.dispatchEvent(new Event('blur')) })
+    expect(flowing()).toEqual(['ab'])
+    expect(save).not.toHaveBeenCalled()
   })
   it('hides flow during an actual marquee gesture and restores it when that gesture is cancelled', async () => {
     const { click, flowing, save } = await workspace()

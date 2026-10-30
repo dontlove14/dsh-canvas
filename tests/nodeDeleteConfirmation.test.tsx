@@ -2,7 +2,7 @@
 import { webcrypto } from 'node:crypto'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
+import { ReactFlowProvider, useReactFlow, useStoreApi } from '@xyflow/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { CanvasWorkspace } from '../src/client/Canvas'
 import { CanvasApi } from '../src/client/api'
@@ -21,11 +21,15 @@ afterEach(async () => {
 })
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')
 const button = (text: string) => [...dialog()!.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === text)!
-async function fixture() {
+async function fixture(mentioned = false) {
   vi.useFakeTimers()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('crypto', webcrypto)
-  vi.stubGlobal('ResizeObserver', class { observe() {}; unobserve() {}; disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(target: Element) { this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver) }
+    unobserve() {}; disconnect() {}
+  })
   vi.stubGlobal('IntersectionObserver', class { observe() {}; disconnect() {} })
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1000)
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(700)
@@ -44,6 +48,7 @@ async function fixture() {
   const task: TaskSummary = { id: 'result-task', nodeId: nodes[2].id, workspaceId: 'w', status: 'completed',
     resultIds: [assets[2].id], createdAt: 1, updatedAt: 1 }
   const edges = [0, 1].map((index) => ({ id: crypto.randomUUID(), source: nodes[index].id, target: nodes[2].id, assetId: assets[index].id }))
+  if (mentioned) nodes[2].prompt = `参考 {{asset:${assets[0].id}}}，保留文字。`
   let snapshot: CanvasSnapshot = { version: 1, workspaceId: 'w', graphRevision: 1, graph: { ...emptyGraph(), nodes, edges },
     assets, tasks: [task], updatedAt: 1, commitHash: 'a'.repeat(64), hashes: { nodes: {}, edges: {}, viewport: '' } }
   const api = new CanvasApi()
@@ -66,13 +71,16 @@ async function fixture() {
   const confirm = vi.spyOn(window, 'confirm')
   const generate = vi.spyOn(api, 'generate'), ttsGenerate = vi.spyOn(api, 'ttsGenerate')
   let flow!: ReturnType<typeof useReactFlow>, active = true, workspace = 'w'
-  function Probe() { flow = useReactFlow(); return null }
+  let store!: ReturnType<typeof useStoreApi>
+  function Probe() { flow = useReactFlow(); store = useStoreApi(); return null }
   const host = document.createElement('div'); document.body.append(host)
   root = createRoot(host)
   const render = () => root!.render(<HarnessUiProvider components={harnessPrimitives}><ReactFlowProvider>
     <Probe /><CanvasWorkspace api={api} workspace={workspace} title="测试" active={active} onBack={() => {}} />
   </ReactFlowProvider></HarnessUiProvider>)
   await act(async () => render())
+  act(() => store.setState({ width: 1000, height: 700 }))
+  await act(async () => vi.advanceTimersByTimeAsync(40))
   const canvas = host.querySelector<HTMLElement>('.dc-canvas-area')!
   act(() => canvas.focus())
   const request = async (ids = [nodes[0].id]) => {
@@ -85,10 +93,12 @@ async function fixture() {
     await act(async () => target.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, bubbles: true, cancelable: true })))
   }
   return { host, canvas, nodes, assets, edges, task, save, confirm, generate, ttsGenerate, request, key,
-    flow: () => flow, state: () => snapshot,
+    flow: () => flow, store: () => store, state: () => snapshot,
     poll: () => act(async () => vi.advanceTimersByTimeAsync(2000)),
     saveNow: () => act(async () => host.querySelector<HTMLButtonElement>('[title="保存画布"]')!.click()),
     update: (tasks: TaskSummary[]) => { snapshot = { ...snapshot, tasks } },
+    changeEdges: () => { snapshot = { ...snapshot, graphRevision: snapshot.graphRevision + 1,
+      graph: { ...snapshot.graph, edges: snapshot.graph.edges.map((edge) => ({ ...edge, assetId: assets[1].id })) } } },
     hide: () => act(async () => { active = false; render() }),
     switchWorkspace: () => act(async () => { workspace = 'other'; render() }),
   }
@@ -185,4 +195,49 @@ it('retains edge-only deletion without a modal, and rejects requests with focus 
   f.host.querySelector<HTMLButtonElement>('.dc-header button')!.focus()
   expect(await (await f.request()).promise).toEqual({ deletedNodes: [], deletedEdges: [] })
   expect(dialog()).toBeNull(); expect(f.confirm).not.toHaveBeenCalled()
+})
+
+it.each(['Delete', 'Backspace'])('focuses a clicked edge and removes only its reference using real %s', async (key) => {
+  const f = await fixture()
+  await act(async () => f.host.querySelector<HTMLElement>(`.react-flow__node[data-id="${f.nodes[0].id}"]`)!.click())
+  f.host.querySelector<HTMLButtonElement>('.dc-header button')!.focus()
+  await act(async () => f.host.querySelector<HTMLElement>(`.react-flow__edge[data-id="${f.edges[0].id}"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  expect(document.activeElement).toBe(f.canvas)
+  expect(f.flow().getNodes().some((node) => node.selected)).toBe(false)
+  expect(f.host.querySelector(`.react-flow__edge[data-id="${f.edges[0].id}"] .dc-edge-flow`)).toBeTruthy()
+  expect(f.host.querySelector(`.react-flow__edge[data-id="${f.edges[1].id}"] .dc-edge-flow`)).toBeNull()
+  await f.key(key)
+  expect(dialog()).toBeNull()
+  expect(f.flow().getEdges().map((edge) => edge.id)).toEqual([f.edges[1].id])
+  expect(f.flow().getNodes()).toHaveLength(3)
+  expect(f.host.querySelector('.dc-edge-flow')).toBeNull()
+  await f.saveNow()
+  expect(f.save.mock.calls[0][1].deleteEdges).toEqual([f.edges[0].id]); expect(f.save.mock.calls[0][1].deleteNodes).toEqual([])
+})
+it.each(['取消', '删除', 'Escape', 'changed identity'])('requires exact prompt mention confirmation and handles %s without rewriting prompt or media', async (action) => {
+  const f = await fixture(true)
+  let promise!: ReturnType<ReturnType<typeof useReactFlow>['deleteElements']>
+  await act(async () => { promise = f.flow().deleteElements({ edges: f.edges.map((edge) => ({ id: edge.id })) }) })
+  expect(dialog()?.getAttribute('aria-label')).toBe('删除连线')
+  expect(dialog()?.textContent).toContain('有 1 条被提示词 @ 引用')
+  if (action === 'Escape') await f.key('Escape', button('取消'))
+  else {
+    if (action === 'changed identity') { f.changeEdges(); await f.poll() }
+    await act(async () => button(action === '取消' ? '取消' : '删除').click())
+  }
+  expect((await promise).deletedEdges).toHaveLength(action === '删除' ? 2 : 0)
+  expect(f.flow().getNodes()).toHaveLength(3)
+  if (action === '删除') {
+    await f.saveNow()
+    expect(f.save.mock.calls[0][1].nodes).toHaveLength(0)
+    expect(f.state().graph.nodes[2].prompt).toBe(f.nodes[2].prompt)
+    expect(f.state().assets).toEqual(f.assets); expect(f.state().tasks).toEqual([f.task])
+  }
+  expect(f.confirm).not.toHaveBeenCalled(); expect(f.generate).not.toHaveBeenCalled()
+})
+it('deletes an unmentioned edge immediately even if a different connected asset is mentioned', async () => {
+  const f = await fixture(true)
+  await act(async () => { await f.flow().deleteElements({ edges: [{ id: f.edges[1].id }] }) })
+  expect(dialog()).toBeNull()
+  expect(f.flow().getEdges().map((edge) => edge.id)).toEqual([f.edges[0].id])
 })

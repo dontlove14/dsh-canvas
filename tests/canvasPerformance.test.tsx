@@ -221,8 +221,14 @@ it('retains dirty positions and exposes a conflict when a remote revision arrive
   vi.mocked(f.api.save).mockImplementation(async () => { throw new Error('offline') })
   await f.drag()
   await act(async () => vi.advanceTimersByTimeAsync(650))
-  await act(async () => vi.waitFor(() => expect(f.host.querySelector('.dc-toast')?.textContent).toContain('offline')))
+  await act(async () => vi.waitFor(() => expect(f.host.querySelector('.dc-notification-capsule')?.textContent).toContain('offline')))
   await f.poll()
+  expect(f.host.querySelector('.dc-conflict')).toBeTruthy()
+  expect([...f.host.querySelectorAll('.dc-notification-message')].map((item) => item.textContent)).toEqual([
+    'offline', '画布已更新，请导出当前草稿后重新载入',
+  ])
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect(f.host.querySelector('.dc-notification-capsule')).toBeNull()
   expect(f.host.querySelector('.dc-conflict')).toBeTruthy()
   expect((probe.data.get(f.moving.id) as any).node.position).toEqual({ x: 60, y: 2 })
   expect((probe.data.get(f.moving.id) as any).node.title).toBe(f.moving.title)

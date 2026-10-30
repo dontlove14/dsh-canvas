@@ -4,9 +4,9 @@ import { BaseEdge, EdgeText, getBezierPath, type Edge, type EdgeProps } from '@x
 export type RelationshipFlowEdge = Edge<{ flowing?: boolean }, 'relationship'>
 
 /** Selection is a view projection; stored edges and unrelated objects stay untouched. */
-export function relationshipEdges(edges: RelationshipFlowEdge[], nodeId: string | null): RelationshipFlowEdge[] {
-  if (!nodeId) return edges
-  return edges.map((edge) => edge.source === nodeId || edge.target === nodeId
+export function relationshipEdges(edges: RelationshipFlowEdge[], nodeId: string | null, includeSelected = false): RelationshipFlowEdge[] {
+  if (!nodeId && !includeSelected) return edges
+  return edges.map((edge) => (nodeId && (edge.source === nodeId || edge.target === nodeId)) || (includeSelected && edge.selected)
     ? { ...edge, data: { ...edge.data, flowing: true } } : edge)
 }
 

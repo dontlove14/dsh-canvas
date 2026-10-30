@@ -135,7 +135,7 @@ describe('strict native canvas marquee selection', () => {
     event('pointerdown', 10, 10); event('pointermove', 30, 30); event('pointerup', 30, 30)
     expect(ids()).toEqual([])
   })
-  it('removes floating action DOM and editors during marquee/multiselection and restores confirmed single-node UI', async () => {
+  it('removes single-node UI during marquee, shows only group download on release, and restores single-node UI', async () => {
     const { container, store, event } = await setup()
     act(() => store.getState().addSelectedNodes(['node-0']))
     expect(container.querySelector('[aria-label="图片操作"]')).toBeTruthy()
@@ -146,7 +146,13 @@ describe('strict native canvas marquee selection', () => {
     expect(container.querySelector('.dc-editor')).toBeNull()
     expect(container.querySelector('[role="toolbar"]')).toBeNull()
     event('pointerup', 1200, 300)
-    expect(container.querySelector('[role="toolbar"]')).toBeNull()
+    expect(container.querySelector('[aria-label="框选操作"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="框选操作"]')?.querySelectorAll('button')).toHaveLength(1)
+    expect(container.querySelector('.dc-selection-handle')).toBeTruthy()
+    const group = store.getState().nodes.find((node) => node.type === 'selection')!
+    expect(group.position.y).toBeLessThan(90 - 40)
+    expect(container.querySelector('[aria-label="框选操作"]')?.getAttribute('data-id')).toBe(group.id)
+    expect(container.querySelector('.dc-edge-flow')).toBeNull()
     expect(container.querySelector('.dc-group-actions')).toBeNull()
     event('pointerdown', 50, 60); event('pointermove', 420, 300); event('pointerup', 420, 300)
     expect(container.querySelector('[aria-label="图片操作"]')).toBeTruthy()

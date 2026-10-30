@@ -3,12 +3,13 @@ import { emptyGraph, type CanvasGraph } from '../shared/contracts'
 import { browserHash, type CanvasSnapshot, type GraphMutation } from '../shared/v2'
 import { ApiError, CanvasApi } from './api'
 import { shareCanvasSnapshot } from './canvasSharing'
+import type { CanvasNotification } from './NotificationCapsules'
 
 export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   const [graph, setGraph] = useState<CanvasGraph>(emptyGraph)
   const [state, setState] = useState<CanvasSnapshot | null>(null)
   const [saveStatus, setSaveStatus] = useState('载入中')
-  const [error, setError] = useState('')
+  const [notifications, setNotifications] = useState<CanvasNotification[]>([])
   const [conflict, setConflict] = useState(false)
   const graphRef = useRef(graph)
   const snapshotRef = useRef<CanvasSnapshot | null>(null)
@@ -26,7 +27,18 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   const ready = useRef(false); const blocked = useRef(false); const mounted = useRef(true)
   const activeRef = useRef(active)
   activeRef.current = active
-  const report = useCallback((failure: unknown) => { if (mounted.current) setError(failure instanceof Error ? failure.message : String(failure)) }, [])
+  const report = useCallback((failure: unknown) => {
+    if (!mounted.current) return
+    const message = failure instanceof Error ? failure.message : String(failure)
+    if (!message) return
+    const notification = { id: crypto.randomUUID(), message }
+    // Repeated polling failures share a notice while it is queued or visible.
+    setNotifications((current) => current.some((item) => item.message === message) ? current : [...current, notification])
+  }, [])
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications((current) => current.filter((item) => item.id !== id))
+  }, [])
+  const clearError = useCallback(() => setNotifications([]), [])
   const edit = useCallback((change: CanvasGraph | ((graph: CanvasGraph) => CanvasGraph)) => {
     const next = typeof change === 'function' ? change(graphRef.current) : change
     if (next === graphRef.current) return
@@ -102,7 +114,7 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     const response = acceptSnapshot(received)
     graphRef.current = response.graph; baseline.current = response.graph; revision.current = response.graphRevision; hashes.current = response.hashes
     ready.current = true; blocked.current = false; pending.current = null
-    setGraph(response.graph); setState(response); setConflict(false); setError(''); setSaveStatus('已保存到本机')
+    setGraph(response.graph); setState(response); setConflict(false); setNotifications([]); setSaveStatus('已保存到本机')
   }, [api, workspace, acceptSnapshot])
   useEffect(() => {
     mounted.current = true
@@ -118,5 +130,6 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     const timer = setTimeout(() => { void flush().catch(() => {}) }, 650)
     return () => clearTimeout(timer)
   }, [graph, flush])
-  return { graph, state, saveStatus, error, conflict, edit, getGraph, flush, refresh, reload, report, clearError: () => setError('') }
+  return { graph, state, saveStatus, error: notifications.at(-1)?.message ?? '', notifications, dismissNotification,
+    conflict, edit, getGraph, flush, refresh, reload, report, clearError }
 }

@@ -309,7 +309,7 @@ if (process.argv[2] === 'record') {
     assert.equal(waveform.headers.get('location'), null)
     const original = await routes.get('/api/canvas/v2/media').fetch(new Request(`http://localhost/api/canvas/v2/media?canvas=${id}&id=${audioId}`))
     assert.equal(original.status, 307)
-    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), ...await files('designs'), 'README.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'vitest.config.ts', 'cordis.patch.yml']
+    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), ...await files('designs'), 'README.md', 'LICENSE', 'NOTICE.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'vitest.config.ts', 'cordis.patch.yml']
     const source = await hashes(sourcePaths)
     const manifest = { name: pkg.name, version: pkg.version, node: process.version, npm: execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim(), source, sourceHash: digest(JSON.stringify(source)), lib, libHash: digest(JSON.stringify(lib)), reproducible: true, compiledHostSmoke: 'passed' }
     await writeFile(`${pkg.name}-${pkg.version}.manifest.json`, JSON.stringify(manifest, null, 2))

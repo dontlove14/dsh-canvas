@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MiniMap,
-  useReactFlow, useViewport, useStoreApi, ViewportPortal, getBezierPath, Position, ConnectionLineType, SelectionMode, type Node, type NodeProps, type NodeChange, type Connection,
+  useReactFlow, useViewport, useStoreApi, ViewportPortal, getBezierPath, Position, ConnectionLineType, SelectionMode, type Node, type NodeProps, type NodeChange,
 } from '@xyflow/react'
 import {
   NodeLabels, defaultParams, isGeneration, nodeMediaKind, nodeResults, latestTask,
@@ -63,9 +63,14 @@ import { CanvasTextSelectionProvider } from './canvasTextSelection'
 import { useNodeDeleteConfirmation } from './useNodeDeleteConfirmation'
 import type { UploadActivity } from './resumableUploads'
 import { UploadCapsules } from './UploadCapsules'
+import { NotificationCapsules } from './NotificationCapsules'
 import { useCanvasFileDrop } from './canvasFileDrop'
-import { CREATABLE_NODES, createCanvasNode, connectReference, resolveOutput, type CreatableNodeKind } from './nodeCreation'
+import { CREATABLE_NODES, createCanvasNode, type CreatableNodeKind } from './nodeCreation'
 import { useNodeCreationMenu } from './useNodeCreationMenu'
+import { selectionDownloads, selectionOutputs } from './selectionOutputs'
+import { SelectionNode, selectionFrame, type SelectionFlowNode } from './SelectionNode'
+import { useCanvasConnections } from './useCanvasConnections'
+import { KeyboardGuide } from './KeyboardGuide'
 
 const EMPTY_TASKS: TaskSummary[] = []
 const EMPTY_ASSETS: Asset[] = []
@@ -114,6 +119,7 @@ interface NodeData extends Record<string, unknown> {
   onRotate: (id: string, assetId: string) => void; onPlay: (id: string) => void; onStop: (id: string) => void; onSize: (id: string, width: number, height: number) => void
 }
 type FlowNode = Node<NodeData, 'media'>
+type CanvasFlowNode = FlowNode | SelectionFlowNode
 const MediaNode = memo(function MediaNode({ data, selected }: NodeProps<FlowNode>) {
   const { node, asset, task, results, api, workspace, onOpen, onResult } = data
   const generation = isGeneration(node.kind)
@@ -139,7 +145,7 @@ const MediaNode = memo(function MediaNode({ data, selected }: NodeProps<FlowNode
     <CanvasHandle type="source" disabled />
   </article>
 }, (a, b) => a.selected === b.selected && sameNodeContent(a.data.node, b.data.node) && sameFields(a.data, b.data, 'node'))
-const nodeTypes = { media: MediaNode }
+const nodeTypes = { media: MediaNode, selection: SelectionNode }
 const edgeTypes = { relationship: RelationshipEdge }
 const edgeOptions = { type: 'relationship', style: { stroke: 'var(--dc-edge)', strokeWidth: 1.7 } }
 function formatBytes(bytes: number): string { return bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB` }
@@ -208,7 +214,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   const container = useRef<HTMLDivElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const importIntent = useRef<{ kind: MediaKind; target?: string } | null>(null)
-  const flow = useReactFlow<FlowNode, RelationshipFlowEdge>()
+  const flow = useReactFlow<CanvasFlowNode, RelationshipFlowEdge>()
   useViewportCompositing(container, gpu.enabled && active)
   useCanvasActionBarGestures(container, active && pageVisible)
   const loadModels = useCallback(() => {
@@ -266,8 +272,8 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   const { tasks, submitting, generate } = useGenerationSubmission({
     api, workspace, tasks: state?.tasks ?? EMPTY_TASKS, flush: canvas.flush, refresh: canvas.refresh, report,
   })
-  const nodeDeletion = useNodeDeleteConfirmation<FlowNode, RelationshipFlowEdge>({
-    active, pageVisible, workspace, submitting, tasks, nodes: graph.nodes, container, report,
+  const nodeDeletion = useNodeDeleteConfirmation<CanvasFlowNode, RelationshipFlowEdge>({
+    active, pageVisible, workspace, submitting, tasks, nodes: graph.nodes, edges: graph.edges, container, report,
   })
   const history = useHistoryInspection({ api, workspace, active: active && pageVisible, node: activeNode,
     expanded: !!activeNode && !!expandedGroups[activeNode.id], tasks, authoritative: state?.tasks ?? EMPTY_TASKS, patchNode })
@@ -343,9 +349,13 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     })
     return edgeCache.current = shareItems(edgeCache.current, next)
   }, [graph.edges, graph.nodes, projection, selectedEdges])
-  const flowingNodeId = active && pageVisible && !marquee.selecting ? activeNode?.id ?? null : null
-  const edges = useMemo(() => relationshipEdges(baseEdges, flowingNodeId), [baseEdges, flowingNodeId])
-  const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
+  const flowEnabled = active && pageVisible && !marquee.selecting
+  const flowingNodeId = flowEnabled ? activeNode?.id ?? null : null
+  const flowingSelectedEdges = flowEnabled && selected.length === 0
+  const edges = useMemo(() => relationshipEdges(baseEdges, flowingNodeId, flowingSelectedEdges), [baseEdges, flowingNodeId, flowingSelectedEdges])
+  const selectionId = `selection:${workspace}`
+  const onNodesChange = useCallback((allChanges: NodeChange<CanvasFlowNode>[]) => {
+    const changes = allChanges.filter((change) => !('id' in change) || change.id !== selectionId)
     const selection = changes.filter((change) => change.type === 'select')
     if (selection.length && !marquee.blocksNativeSelection()) setSelected((current) => {
       const next = new Set(current)
@@ -362,24 +372,28 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
       const edges = removed.size ? shareItems(current.edges, current.edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target))) : current.edges
       return nodes === current.nodes && edges === current.edges ? current : { ...current, nodes, edges }
     })
-  }, [edit, marquee.blocksNativeSelection])
+  }, [edit, marquee.blocksNativeSelection, selectionId])
   const creationEnvironment = useMemo(() => ({ assets, tasks, models, expandedGroups }), [assets, tasks, models, expandedGroups])
   const selectCreated = useCallback((id: string) => { setSelected([id]); setSelectedEdges([]); setPlayingNode(null) }, [])
+  const interactionEnabled = active && pageVisible && !!state && !showSettings && !showTasks && !preview && !reviewAsset && !nodeDeletion.modal && !leaving
   const creation = useNodeCreationMenu({
-    container, enabled: active && pageVisible && !!state && !showSettings && !showTasks && !preview && !reviewAsset && !nodeDeletion.modal && !leaving,
+    container, enabled: interactionEnabled,
     workspace, graph, getGraph: canvas.getGraph, environment: creationEnvironment, screenToFlowPosition: flow.screenToFlowPosition,
     edit, onCreated: selectCreated, report,
   })
-  const connect = useCallback((connection: Connection) => {
-    creation.close()
-    try {
-      edit((current) => {
-        const reference = resolveOutput(current, connection.source, connection.sourceHandle, creationEnvironment)
-        if (!reference) throw new Error('请从已有素材连接到生成节点')
-        return connectReference(current, reference, connection.target, creationEnvironment)
-      })
-    } catch (error) { report(error) }
-  }, [creation.close, creationEnvironment, edit, report])
+  const connections = useCanvasConnections({ container, enabled: interactionEnabled, workspace, selectionId, selected,
+    environment: creationEnvironment, getGraph: canvas.getGraph, edit, report, creation })
+  const downloads = useMemo(() => selectionDownloads(graph, selected, creationEnvironment), [graph, selected, creationEnvironment])
+  const downloadSelected = useCallback(() => {
+    for (const asset of downloads) {
+      const link = document.createElement('a'); link.href = api.media(workspace, asset.id, true); link.download = asset.filename; link.click()
+    }
+  }, [downloads, api, workspace])
+  const group = useMemo(() => interactionEnabled && !marquee.selecting ? selectionFrame(nodes, selectionId, {
+    ids: selected, connectable: selectionOutputs(graph, selected, creationEnvironment).length > 0,
+    downloadable: downloads.length > 0, onDownload: downloadSelected,
+  }) : undefined, [interactionEnabled, marquee.selecting, nodes, selectionId, selected, graph, creationEnvironment, downloads.length, downloadSelected])
+  const flowNodes = useMemo<CanvasFlowNode[]>(() => group ? [...nodes, group] : nodes, [nodes, group])
   const addNode = (kind: CreatableNodeKind) => {
     creation.close()
     const rect = container.current?.getBoundingClientRect()
@@ -435,6 +449,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     </header>
     <CanvasTextSelectionProvider><div className="dc-canvas-area" ref={container} tabIndex={-1} data-gpu-compositing={gpu.enabled ? 'enabled' : 'disabled'} data-gpu-reason={gpu.reason}
       data-marquee-selecting={marquee.selecting}
+      data-selection-group={!!group}
       onPointerDownCapture={(event) => {
         // Portal events still traverse this React ancestor before the menu row.
         if (event.target instanceof Element && event.target.closest('.dc-node-creation-menu')) return
@@ -442,10 +457,10 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
         if (event.target instanceof HTMLElement && event.target.closest('.react-flow__pane')) event.currentTarget.focus({ preventScroll: true })
         marquee.onPointerDownCapture(event)
       }} onPointerUpCapture={marquee.onPointerUpCapture}
-      onPointerUp={marquee.onPointerUp} onPointerCancel={() => { creation.close(); marquee.onPointerCancel() }}
+      onPointerUp={marquee.onPointerUp} onPointerCancel={() => { connections.clear(); creation.close(); marquee.onPointerCancel() }}
     >
-      {!state ? <div className="dc-loading">载入本地画布…</div> : <ReactFlow<FlowNode, RelationshipFlowEdge>
-        nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={edgeOptions} connectionLineType={ConnectionLineType.Bezier}
+      {!state ? <div className="dc-loading">载入本地画布…</div> : <ReactFlow<CanvasFlowNode, RelationshipFlowEdge>
+        nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={edgeOptions} connectionLineType={ConnectionLineType.Bezier}
         onNodesChange={onNodesChange} onEdgesChange={(changes) => {
           const selection = changes.filter((change) => change.type === 'select')
           if (selection.length && !marquee.blocksNativeSelection()) setSelectedEdges((current) => {
@@ -456,12 +471,14 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
           const removed = new Set(changes.filter((change) => change.type === 'remove').map((change) => 'id' in change ? change.id : ''))
           if (removed.size) edit((current) => ({ ...current, edges: current.edges.filter((edge) => !removed.has(edge.id)) }))
         }}
-        onConnect={connect} onConnectStart={creation.onConnectStart} onConnectEnd={creation.onConnectEnd}
+        onConnect={connections.onConnect} onConnectStart={connections.onConnectStart} onConnectEnd={connections.onConnectEnd}
         onPaneContextMenu={creation.onPaneContextMenu} onMoveStart={() => creation.close()}
         defaultViewport={graph.viewport} minZoom={0.1} maxZoom={2.5}
         onMoveEnd={(_event, viewport) => edit((current) => ({ ...current, viewport }))}
-        onPaneClick={() => { setSelected([]); setPlayingNode(null) }}
+        onPaneClick={() => { setSelected([]); setSelectedEdges([]); setPlayingNode(null) }}
+        onEdgeClick={() => { container.current?.focus({ preventScroll: true }); setSelected([]); setPlayingNode(null) }}
         onNodeClick={(_event, node) => {
+          if (node.type !== 'media') return
           if (node.data.asset?.kind === 'video') setPlayingNode(node.id); else if (node.data.asset?.kind !== 'audio') setPlayingNode(null)
           if (!expandedGroups[node.id] && node.data.cards.length > 1) history.beginEditing(node.id)
         }}
@@ -472,8 +489,8 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
         ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': '放大', 'controls.zoomOut.ariaLabel': '缩小', 'controls.fitView.ariaLabel': '适应画布' }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="var(--dc-grid)" />
-        <Controls showInteractive={false} />
-        <MiniMap pannable zoomable nodeColor="var(--dc-accent)" maskColor="var(--dc-minimap-mask)" />
+        <Controls showInteractive={false} fitViewOptions={{ nodes: nodes.map((node) => ({ id: node.id })) }} />
+        <MiniMap pannable zoomable nodeColor={(node) => node.type === 'selection' ? 'transparent' : 'var(--dc-accent)'} maskColor="var(--dc-minimap-mask)" />
         {creation.menu?.reference && creation.menu.from && <ViewportPortal><svg className="dc-pending-connection" width="1" height="1" aria-hidden="true">
           <path d={getBezierPath({ sourceX: creation.menu.from.x, sourceY: creation.menu.from.y, sourcePosition: Position.Right,
             targetX: creation.menu.position.x, targetY: creation.menu.position.y, targetPosition: Position.Left })[0]}
@@ -488,7 +505,10 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
           patchNode={patchNode} edit={edit} generate={generate} report={report} uploading={false} submitting={submitting}
           askImport={askImport} taskAction={taskAction} onOpen={onOpen} />}
       </ReactFlow>}
-      <UploadCapsules uploads={uploadActivity} />
+      <div className="dc-canvas-capsules">
+        <NotificationCapsules notifications={canvas.notifications} active={active && pageVisible} onDismiss={canvas.dismissNotification} />
+        <UploadCapsules uploads={uploadActivity} />
+      </div>
       {creation.menu && <UiPointMenu label={creation.menu.reference ? '引用该节点生成' : '添加节点'} point={creation.menu.screen}
         bounds={() => container.current?.getBoundingClientRect()} onClose={() => creation.close(true)}
         onSelect={(kind) => creation.choose(kind as CreatableNodeKind)}
@@ -499,12 +519,11 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
       <div className="dc-tools"><UiActionMenu label="添加节点" variant="primary" disabled={!active || !state} side="top" gap={14}
         items={CREATABLE_NODES.map(({ kind, icon }) => ({ id: kind, label: NodeLabels[kind], icon: icon === 'tts' ? <TtsIcon size={22} /> : <MediaIcon kind={icon} size={22} />, onSelect: () => addNode(kind) }))}>＋ 添加节点</UiActionMenu><span className="dc-tool-divider" />
         <UiButton disabled={!state} onClick={() => { importIntent.current = null; if (fileInput.current) { fileInput.current.accept = 'image/*,video/*,audio/*'; fileInput.current.value = ''; fileInput.current.click() } }}>上传素材</UiButton>
-        <UiButton title="适应全部节点" aria-label="适应全部节点" onClick={() => void flow.fitView({ padding: 0.3, duration: 250 })}>⛶</UiButton>
+        <UiButton title="适应全部节点" aria-label="适应全部节点" onClick={() => void flow.fitView({ nodes: nodes.map((node) => ({ id: node.id })), padding: 0.3, duration: 250 })}>⛶</UiButton>
         <UiButton title="保存画布" onClick={() => void canvas.flush().catch(() => {})}>保存</UiButton>
         <span className="dc-node-count">{graph.nodes.length} 节点</span>
+        <span className="dc-tool-divider" /><KeyboardGuide enabled={interactionEnabled} container={container} />
       </div>
-      <div className="dc-hint">左键拖动框选 · 空格 + 左键拖动平移 · 滚轮 / 双指移动平移 · ⌘ / Ctrl + 滚轮缩放 · Delete 删除</div>
-      {canvas.error && <div className="dc-toast" role="alert"><span>{canvas.error}</span><UiButton aria-label="关闭提示" onClick={canvas.clearError}>×</UiButton></div>}
       {canvas.conflict && <div className="dc-conflict"><strong>画布保存冲突，当前草稿仍保留</strong><UiButton variant="outline" onClick={() => downloadJson('canvas-draft.json', graph)}>导出草稿</UiButton><UiButton variant="outline" onClick={() => { if (window.confirm('重新载入将替换当前未保存草稿，请先导出。')) void canvas.reload().catch(report) }}>重新载入</UiButton></div>}
     </div></CanvasTextSelectionProvider>
     <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = [...event.target.files ?? []]; for (const file of files) void uploadFile(file); importIntent.current = null }} />

@@ -16,8 +16,12 @@ const probe = vi.hoisted(() => ({ connect: undefined as any, remove: undefined a
 vi.mock('@xyflow/react', async (original) => ({
   ...await original<typeof import('@xyflow/react')>(),
   Background: () => null, Controls: () => null, MiniMap: () => null,
-  ReactFlow: ({ nodes, edges, onConnect, onEdgesChange, onNodesChange, children }: any) => {
-    probe.connect = onConnect; probe.remove = onEdgesChange; probe.select = onNodesChange; probe.nodes = nodes; probe.edges = edges
+  ReactFlow: ({ nodes, edges, onConnect, onConnectStart, onEdgesChange, onNodesChange, children }: any) => {
+    probe.connect = (connection: any) => {
+      onConnectStart(new MouseEvent('mousedown'), { nodeId: connection.source, handleId: connection.sourceHandle, handleType: 'source' })
+      onConnect(connection)
+    }
+    probe.remove = onEdgesChange; probe.select = onNodesChange; probe.nodes = nodes; probe.edges = edges
     return <div>{children}</div>
   },
 }))

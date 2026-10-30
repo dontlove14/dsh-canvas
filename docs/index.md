@@ -1,10 +1,12 @@
 # 文档导航与维护约定
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-26；复核周期：每次发布，最迟每月一次。
+文档类型：参考；负责人：项目维护者；最近核对：2026-10-30；复核周期：每次发布，最迟每月一次。
 
 本目录描述 SQLite / 多画布版本的当前实现。ADR-0001–0012 保留首版补录，0013–0017 记录存储 / Runtime 实施，0018 记录项目列表与编辑器导航；历史实现已标注替代关系。
 
 Wan 3.0与MiniMax H3的四渠道协议、参数与恢复边界见[模型协议](providers.md)和[ADR-0067](adr/0067-wan-and-minimax-native-video-protocols.md)。
+
+多选输出、仅下载工具栏、节点主体接线、@边删除确认与平台快捷键指引见[ADR-0068](adr/0068-selection-output-and-reference-interactions.md)，实际操作验收301–305见[手动清单](manual-tests.md)。
 
 设计基线：[目标架构](proposals/canvas-plugin-architecture-v0.1.md)、[SQLite 设计](proposals/sqlite-canvas-storage-v0.2.md) 已标注实施与差异；实际职责、DDL / API 以当前架构与数据参考为准。官方用法与反例见 [ADR-0017](adr/0017-harness-official-cases-and-badcases.md)。[存储 v0.1](proposals/sqlite-canvas-storage-v0.1.md) 保留历史。
 
@@ -15,6 +17,7 @@ Wan 3.0与MiniMax H3的四渠道协议、参数与恢复边界见[模型协议](
 | 内容 | 权威维护位置 | README 的处理 |
 | --- | --- | --- |
 | 项目用途、前提、首次启动与最短使用路径 | [README](../README.md) | 保留可直接执行的入门步骤 |
+| 项目许可、禁止商用与指定链接署名 | [LICENSE](../LICENSE)、[NOTICE](../NOTICE.md) | 保留许可摘要与可点击的 Model Link 链接；决策见[ADR-0069](adr/0069-non-commercial-modellink-attribution-license.md) |
 | 用户行为、状态、删除 / 引用 / 保存规则、功能边界 | [业务与功能](business.md) | 只保留影响首次使用的摘要和链接 |
 | 当前模块职责、依赖方向、数据流 | [架构说明](architecture.md) | 链接 |
 | 精确字段、接口、状态码、持久布局 | [数据与接口参考](data-api.md) | 链接 |

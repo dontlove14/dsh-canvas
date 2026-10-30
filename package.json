@@ -1,8 +1,9 @@
 {
   "name": "dsh-canvas",
-  "version": "0.2.76",
+  "version": "0.2.80",
   "private": true,
   "description": "Local image, video and FishTTS generation canvas plugin for DeepSeek Harness",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/host/index.d.ts",
@@ -21,6 +22,8 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
+    "LICENSE",
+    "NOTICE.md",
     "AGENTS.md",
     "docs",
     "scripts/patch-thinking-orbs.mjs"

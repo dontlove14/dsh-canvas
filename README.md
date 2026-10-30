@@ -4,7 +4,9 @@
 
 **运行基准：Node.js 22.13+、Harness 0.2.1-rc.2。** SQLite 保存目录、画布、任务和对象定位；图片 / 视频 / 音频及派生文件保存在私有阿里云 OSS。支持 OpenAI / Gemini / Seedream 图片、Seedance / Wan 3.0 / MiniMax H3视频，以及保留的Sora协议。
 
-文档类型：入门教程 / 项目入口；负责人：项目维护者；最近核对：2026-10-29。版本或启动方式变化时更新；详细维护规则见[文档导航](docs/index.md)。
+文档类型：入门教程 / 项目入口；负责人：项目维护者；最近核对：2026-10-30。版本或启动方式变化时更新；详细维护规则见[文档导航](docs/index.md)。
+
+**许可：仅限非商业使用，禁止商用。** 采用自定义[非商业使用与署名许可](LICENSE)，属于源码可用项目。复制、修改及再分发须遵守完整许可，并保留可点击的 [Model Link](https://api.modellink.online) 署名；有界面的部署或修改版本还须在用户可访问的关于、设置、致谢页或页脚保留该链接。署名写法见 [NOTICE](NOTICE.md)，第三方依赖继续适用各自许可证。
 
 Seedance预审可在设置单独配置Bytedance / BytePlus，图片、视频、音频操作栏盾牌发起异步审核；通过用Asset ID，其他情况继续URL生成。单次批量关注主图，多次历史逐输出送审，真人选择已认证人物组。使用与恢复见[运行指南](docs/operations.md)和[ADR-0059](docs/adr/0059-seedance-asset-review-and-frozen-generation-references.md)。
 
@@ -63,7 +65,7 @@ dsh --profile canvas-test --from-default-profile web --help
 安装并启动；按实际位置调整包路径：
 
 ```bash
-dsh plugin --profile canvas-test add /Users/bytedance/Documents/dsh-canvas/dsh-canvas-0.2.59.tgz
+dsh plugin --profile canvas-test add /Users/bytedance/Documents/dsh-canvas/dsh-canvas-0.2.79.tgz
 dsh --profile canvas-test --port 8080
 ```
 
