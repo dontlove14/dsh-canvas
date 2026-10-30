@@ -11,9 +11,15 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   const [saveStatus, setSaveStatus] = useState('载入中')
   const [notifications, setNotifications] = useState<CanvasNotification[]>([])
   const [conflict, setConflict] = useState(false)
+  const [readOnly, setReadOnly] = useState(false)
+  const readOnlyRef = useRef(false)
   const graphRef = useRef(graph)
   const snapshotRef = useRef<CanvasSnapshot | null>(null)
   const acceptSnapshot = useCallback((response: CanvasSnapshot) => {
+    const previous = snapshotRef.current
+    if (previous && (response.graphRevision < previous.graphRevision ||
+      (response.agentControl && previous.agentControl && response.agentControl.epoch < previous.agentControl.epoch))) return previous
+    if (response.agentControl) { readOnlyRef.current = response.agentControl.mode === 'agent'; if (mounted.current) setReadOnly(readOnlyRef.current) }
     const shared = shareCanvasSnapshot(snapshotRef.current, response)
     snapshotRef.current = shared
     if (mounted.current) setState(shared)
@@ -43,6 +49,7 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
   }, [])
   const clearError = useCallback(() => setNotifications([]), [])
   const edit = useCallback((change: CanvasGraph | ((graph: CanvasGraph) => CanvasGraph)) => {
+    if (readOnlyRef.current) return
     const next = typeof change === 'function' ? change(graphRef.current) : change
     if (next === graphRef.current) return
     graphRef.current = next; setGraph(next); setSaveStatus(blocked.current ? '保存冲突 · 草稿保留' : '待保存')
@@ -52,6 +59,10 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     if (!ready.current) throw new Error('画布尚未载入')
     if (blocked.current) throw new Error('请先处理保存冲突')
     if (saving.current) await saving.current
+    if (readOnlyRef.current) {
+      if (baseline.current !== graphRef.current || pending.current) throw new Error('Agent 正在操作，未保存草稿仍保留，请先人工接管')
+      return revision.current
+    }
     while (baseline.current !== graphRef.current || pending.current) {
       if (saving.current) { await saving.current; continue }
       const promise = (async () => {
@@ -134,5 +145,5 @@ export function useCanvas(api: CanvasApi, workspace: string, active = true) {
     return () => clearTimeout(timer)
   }, [graph, flush])
   return { graph, state, saveStatus, error: notifications.filter((item) => item.tone !== 'success').at(-1)?.message ?? '', notifications, dismissNotification,
-    conflict, edit, getGraph, flush, refresh, reload, report, notifySuccess, clearError }
+    conflict, readOnly, edit, getGraph, flush, refresh, reload, report, notifySuccess, clearError }
 }

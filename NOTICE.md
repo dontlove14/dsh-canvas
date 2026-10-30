@@ -29,3 +29,30 @@ HTML 署名写法：
 第三方依赖和明确附有其他许可证的文件继续遵循各自许可证，
 包括仓库中的第三方组件及开发技能。指定署名不要求使用 Model Link
 服务，不代表本项目取得第三方商标或内容的所有权。
+
+## 通用创作方法参考
+
+`src/host/agent/methods.ts` 是本项目维护的简短通用制作方法，参考以下 MIT 项目的资产前置、连续性与提示词生命周期经验；未整库复制、执行其脚本或安装为用户全局技能，未将其特定模型流程视为通用协议。
+
+- [kangarooking/director-skills](https://github.com/kangarooking/director-skills/tree/301e6e72199f28b8ea82cd48ff06ab9ae49d0ee5)，固定版本 `301e6e72199f28b8ea82cd48ff06ab9ae49d0ee5`，Copyright (c) 2026 kangarooking。
+- [aitippro/tipai-cinema-skills](https://github.com/aitippro/tipai-cinema-skills/tree/f6beda2e7e91bcb7d3073072f70c016a551e3400)，固定版本 `f6beda2e7e91bcb7d3073072f70c016a551e3400`，Copyright (c) 2026 TipAi。
+
+两项参考内容的 MIT 许可如下，仅适用于其相应内容，不替代本项目整体许可：
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

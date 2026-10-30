@@ -120,7 +120,7 @@ describe('historical generation inspection', () => {
       expect(text.textContent).toBe(f.inputs[index].prompt)
       expect(text.getAttribute('aria-readonly')).toBe('true')
       expect(text.getAttribute('contenteditable')).toBe('false')
-      expect(panel.querySelector('button,input,[role="combobox"],[contenteditable="true"]')).toBeNull()
+      expect(panel.querySelector('button:not(.dc-reference),input,[role="combobox"],[contenteditable="true"]')).toBeNull()
       expect(panel.textContent).toContain(kind === 'audio' ? `voice-${index}` : f.inputs[index].params.size)
       expect(panel.textContent).not.toContain('当前草稿不同')
       if (kind === 'image') {

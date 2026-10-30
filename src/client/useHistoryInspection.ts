@@ -9,10 +9,11 @@ export interface HistoryInspection { nodeId: string; identity: string; assetId?:
 interface SnapshotRead { key: string; snapshot?: AnyTaskSnapshot; error?: string }
 
 /** Viewing history has no write callback. Only an explicit return to editing restores inputs. */
-export function useHistoryInspection({ api, workspace, active, node, expanded, tasks, authoritative, patchNode }: {
+export function useHistoryInspection({ api, workspace, active, node, expanded, tasks, authoritative, patchNode, readOnly = false }: {
   api: CanvasApi; workspace: string; active: boolean; node?: CanvasNode; expanded: boolean
   tasks: readonly TaskSummary[]; authoritative: readonly TaskSummary[]
   patchNode: (id: string, fields: Partial<CanvasNode>) => void
+  readOnly?: boolean
 }) {
   const [inspection, setInspection] = useState<HistoryInspection>()
   const [restore, setRestore] = useState<string>()
@@ -22,8 +23,9 @@ export function useHistoryInspection({ api, workspace, active, node, expanded, t
   const inspect = useCallback((value: HistoryInspection) => setInspection(value), [])
   const beginEditing = useCallback((id: string, force = false) => {
     setInspection(undefined)
+    if (readOnly) { setRestore(undefined); return }
     if (force || !initialized.current.has(id)) { initialized.current.delete(id); setRestore(id) }
-  }, [])
+  }, [readOnly])
   const newest = tasks.filter((task) => task.nodeId === node?.id).reduce<TaskSummary | undefined>((last, task) =>
     !last || task.createdAt >= last.createdAt ? task : last, undefined)
   const inspectedTask = node && expanded && inspection?.nodeId === node.id
@@ -50,6 +52,7 @@ export function useHistoryInspection({ api, workspace, active, node, expanded, t
   }, [api, workspace, key, acknowledged, node?.kind])
   const snapshot = read?.key === key ? read.snapshot : undefined
   useEffect(() => {
+    if (readOnly) { if (restore) setRestore(undefined); return }
     if (!active || expanded || !node || restore !== node.id || !snapshot) return
     // Provider prompts contain numbered references. Restore UUID tokens, never edges.
     const prompt = isTtsSnapshot(snapshot) ? snapshot.prompt : snapshot.prompt.replace(/\[参考(图|视频|音频)(\d+)\]/g, (marker, _kind, number) =>
@@ -57,8 +60,8 @@ export function useHistoryInspection({ api, workspace, active, node, expanded, t
     const fields = { prompt, modelId: isTtsSnapshot(snapshot) ? null : snapshot.model.id, params: snapshot.params }
     if (node.prompt !== prompt || node.modelId !== fields.modelId || JSON.stringify(node.params) !== JSON.stringify(fields.params)) patchNode(node.id, fields)
     initialized.current.add(node.id); setRestore(undefined)
-  }, [active, expanded, node, restore, snapshot, patchNode])
+  }, [active, expanded, node, restore, snapshot, patchNode, readOnly])
   return { inspection: inspectedTask ? inspection : undefined, inspect, beginEditing,
     snapshot, error: read?.key === key ? read.error : undefined,
-    restoring: !expanded && restore === node?.id }
+    restoring: !readOnly && !expanded && restore === node?.id }
 }

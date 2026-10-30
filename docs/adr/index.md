@@ -10,6 +10,8 @@
 
 Wan / H3 四渠道、原生协议与共用视频行为见 [ADR-0067](0067-wan-and-minimax-native-video-protocols.md)。
 
+通用创作主 / 专业预设、共享服务与人工接管见 [ADR-0071](0071-shared-canvas-agent-preset-and-control.md)。
+
 | 编号 | 决策 | 覆盖范围 | 状态 |
 | --- | --- | --- | --- |
 | [ADR-0001](0001-harness-plugin-boundaries.md) | 使用 Harness 公开扩展边界与 owner 认证 | 插槽、工作区、宿主 / 浏览器、开发载体 | 已采纳（补录） |
@@ -82,9 +84,15 @@ Wan / H3 四渠道、原生协议与共用视频行为见 [ADR-0067](0067-wan-an
 | [ADR-0068](0068-selection-output-and-reference-interactions.md) | 临时分组选区输出与引用操作 | 原生端点 / 主体接线、批量校验与同次保存、仅下载、@边删除确认、平台快捷键 | 已采纳；补充0033 / 0062 / 0066 |
 | [ADR-0069](0069-non-commercial-modellink-attribution-license.md) | 非商业使用与 Model Link 署名许可 | LICENSE / NOTICE、商业边界、可点击署名、第三方许可、分发包与身份清单 | 已采纳 |
 | [ADR-0070](0070-node-clipboard-with-original-inputs.md) | 节点剪贴板快照与原上游输入 | 原生复制 / 粘贴、组内外原来源、固定参数与@、新草稿、整批校验与同次保存 | 已采纳 |
+| [ADR-0071](0071-shared-canvas-agent-preset-and-control.md) | 共享创作服务、Agent 预设与控制权 | 原生主 / 专业预设、持久草稿、权限 / 幂等 / 接管、多模态资格 | 已采纳 |
+| [ADR-0072](0072-agent-presentation-navigation-and-readonly-inspection.md) | Agent 操作呈现、原生窗口导航与只读检视 | 独立意图 / 真实回执、原标签 / 浮窗复用、实际中心、固定布局、跟随暂停 / 恢复 | 已采纳；补充0071 |
 
 ## 如何使用
 
 ADR 回答为什么，不替代当前[业务规则](../business.md)、[架构](../architecture.md)、[数据与接口](../data-api.md)、[模型协议](../providers.md)或[操作指南](../operations.md)。这些参考文档维护当前精确参数和行为，ADR 引用它们。
+
+方案全文预览与展示 / 执行调用 ID 的语义更正见 [ADR-0073](0073-native-canvas-plan-detail-preview.md)（已采纳；2026-10-30），补充 ADR-0071。
+
+用户附件真实参考、Agent 固定归档、过程短说明与受控工作区交付见 [ADR-0074](0074-agent-reference-import-workspace-and-progress.md)（已采纳；0.2.91；2026-10-30）。
 
 改变已采纳决定时新建连续编号记录，并把旧记录标为已替代、双向关联。未实施的新决定标为提议；验证证据不足不能写成通过。可逆性说明是重审依据，不构成未来开发承诺。

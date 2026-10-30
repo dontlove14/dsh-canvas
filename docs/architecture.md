@@ -1,8 +1,20 @@
 # 当前架构与执行流程
 
-文档类型：解释；负责人：项目维护者；最近核对：2026-10-29。每次模块 / SDK / 存储边界变化时复核。
+文档类型：解释；负责人：项目维护者；最近核对：2026-10-30。每次模块 / SDK / 存储边界变化时复核。
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
+
+0.2.91 主级受限工具增加附件 / 工作区模块：根会话真实 `user/message` durable ref → Harness `readImage` / `readFileStream` → 既有 Uploads / 持久导入 → 真实 referenceConnection。导入接收与提交均沿 signal / epoch guard，已接受任务仍由 Host 保存。新建目录先复用 owner 唯一「Agent 创作」，固定原目录输入用于重试。根会话 `workingDirectory.ensure/get` → 受限项目目录 → 流式摘要 / 无覆盖硬链接发布 → 现有 AgentLedger 文件回执；两库 DDL / CanvasGraph / 媒体生成身份不变。
+
+客户端以非独占 `uiConversation.events` Definition 投影真实 tool/call / result，注册插件自己的 `conversation.chat.node` 种类，`visibility=visible`、`groupTree=turn` 保证过程说明不藏在 native process 折叠内。主 / 子预设与普通工具记录保持，卸载由原生注册生命周期恢复；新增 Chat SDK 仅作编译类型依赖，不拷贝或修改 SDK。详见[ADR-0074](adr/0074-agent-reference-import-workspace-and-progress.md)与[过程专项](../tests/agentProgress.test.tsx)。
+
+0.2.90 方案审阅保留 UserQuestions 执行 `wait.callId`，展示 intent 移除历史 lookup ID；原生入口通过 `dsh-resource://plan-review` 和临时参数渲染完整正文。客户端仅装饰精确原生 actions slot 修复旧待确认画布卡片，晚注册 / 卸载可恢复，原生历史计划不受影响。未修改 SDK 文件或伪造历史事件，详见[ADR-0073](adr/0073-native-canvas-plan-detail-preview.md)。
+
+0.2.89 共享提交 → AgentPresentation 独立最新意图 → Harness Connection.fetch SSE / 一秒读取补偿 → 插件根窗口导航 → React Flow 实际视野与只读卡片 → 回执。已有原生 TabDomain 导航 revision + focus 保留停靠 / 浮窗；未打开用公开 openTab，模型包装只做资格。呈现等待在提交队列外，8 秒延后、接管 / 取消 / 关闭立即唤醒。独立 agent-presentation.json 仅保存最新意图与固定布局起点，前台 / 视野 / ack 有身份且临时；不改 CanvasGraph / 主库 / 媒体任务。窗口、只读检视和 DOM 回执分别核验，最终视觉由用户验收。见[ADR-0072](adr/0072-agent-presentation-navigation-and-readonly-inspection.md)。
+
+0.2.88 主预设显示名由「视频创作」改为「无限画布」，稳定 ID 仍为 `canvas-creator`。Host 仅包装原生预设 `remoteExportList` 的用户目录，过滤五个内部专业 ID；原生 Registry 的内部解析 / 挂载与官方 `startActivation` / spawn / structured_output 原样使用。卸载恢复原目录方法；不复制客户端菜单或修改 SDK 安装文件。原生模型标签定位实际菜单按钮，只在该预设作用域维护 disabled / title / ARIA 和键盘限制，使用原禁用样式；能力读取、菜单重开与目录变更保持更新，卸载恢复。详见[ADR-0071](adr/0071-shared-canvas-agent-preset-and-control.md)。
+
+0.2.84 增加共享创作服务与通用 Agent Bundle：Harness 对话 / 原生提问 → 主 Agent 受限工具 → CanvasAgentCoordinator 控制与幂等 → 现有 CanvasService / 持久任务 / OSS。主级通过 spawn 启动独立专业上下文，只回传结构化草稿；深度 1、同画布最多 2 个，主级负责提交。Client 绑定会话侧栏并观察控制 epoch，人工接管同步撤权、取消真实 Agent、提交前再验证；已外发任务继续保存结果，未外发旧任务停止。控制、资产规格版本、分镜、草稿依赖与交接快照保存到独立 0600 `agent-ledger.json`，由原 Store 锁独占，不更改 CanvasGraph / 主库 DDL。详见[ADR-0071](adr/0071-shared-canvas-agent-preset-and-control.md)。
 
 0.2.78由SelectionNode临时投影多选边界及原生Handle，useCanvasConnections组合普通 / 批量 / 主体连接，selectionOutputs在同一edit中逐个执行connectReference。临时节点不进入getGraph / GraphMutation；只真实边走原模式归一和保存。删除hook按prompt中的确切asset标签决定边确认并重查异步身份，KeyboardGuide提供按平台展示的现有键盘操作。边界与取舍见[ADR-0068](adr/0068-selection-output-and-reference-interactions.md)。
 

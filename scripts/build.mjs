@@ -41,6 +41,10 @@ await build({
   entryPoints: ['src/host/index.ts'], outfile: 'lib/index.js', bundle: true, platform: 'node', format: 'esm',
   target: 'node22', packages: 'external', external: ['./vendor/volcengine-signer.cjs'], sourcemap: true,
 })
+await build({
+  entryPoints: ['src/host/agent/preset.ts'], outfile: 'lib/agent-preset.js', bundle: true, platform: 'node', format: 'esm',
+  target: 'node22', packages: 'external', sourcemap: true,
+})
 // Bundling places Database's import.meta.url in lib/index.js.
 await copyFile('src/host/persistence/worker.mjs', 'lib/worker.mjs')
 await copyFile('src/host/persistence/schema.sql', 'lib/schema.sql')

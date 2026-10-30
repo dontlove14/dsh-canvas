@@ -38,10 +38,10 @@ export class Uploads {
     if (journal && (journal.canvas !== canvas || journal.id !== id)) throw new CanvasError('上传会话不匹配', 409, 'UPLOAD_CORRUPT')
     return journal
   }
-  async start(canvas: string, input: UploadStart) {
-    return this.exclusive(input.requestId, () => this.startSession(canvas, input))
+  async start(canvas: string, input: UploadStart, guard?: () => void) {
+    return this.exclusive(input.requestId, () => { guard?.(); return this.startSession(canvas, input, guard) })
   }
-  private async startSession(canvas: string, input: UploadStart) {
+  private async startSession(canvas: string, input: UploadStart, guard?: () => void) {
     if (input.size !== undefined && input.size > this.limit) throw new CanvasError('媒体文件超过大小限制', 413, 'MEDIA_TOO_LARGE')
     const title = NameSchema.parse(input.filename.replace(/\.[^.]+$/, '') || '上传素材')
     const node: CanvasNode = { id: randomUUID(), kind: `${input.kind}-asset`, title, position: input.position, modelId: null, prompt: '', params: null, assetId: null, selectedResultId: null }
@@ -68,7 +68,7 @@ export class Uploads {
     }, () => replay ? [] : [
       sql("INSERT INTO upload_sessions(id,canvas_id,node_id,state,stage_file,storage_id,created_at,updated_at) VALUES(?,?,?,'receiving',?,?,?,?)", [input.requestId, canvas, node.id, `${input.requestId}.upload`, storage, Date.now(), Date.now()]),
       sql('INSERT INTO catalog_mutations VALUES(?,?,?,?,?,?,?,?)', [this.store.owner, input.requestId, 'upload-start', 'upload', input.requestId, requestHash, JSON.stringify(result), Date.now()]),
-    ])
+    ], guard)
     return result
   }
   async status(canvas: string, id: string): Promise<UploadStatus> {
@@ -167,12 +167,12 @@ export class Uploads {
     }
   }
   async close() { this.controller.abort(); await Promise.allSettled([...this.work.values()]) }
-  async accept(canvas: string, id: string, body: Readable, kind: MediaKind, filename: string, signal?: AbortSignal) {
+  async accept(canvas: string, id: string, body: Readable, kind: MediaKind, filename: string, signal?: AbortSignal, guard?: () => void) {
     const combined = AbortSignal.any([this.controller.signal, ...(signal ? [signal] : [])])
     addAbortSignal(combined, body)
-    return this.exclusive(id, () => this.receive(canvas, id, body, kind, filename, combined)).finally(() => body.destroy())
+    return this.exclusive(id, () => { guard?.(); return this.receive(canvas, id, body, kind, filename, combined, guard) }).finally(() => body.destroy())
   }
-  private async receive(canvas: string, id: string, body: Readable, kind: MediaKind, filename: string, signal?: AbortSignal) {
+  private async receive(canvas: string, id: string, body: Readable, kind: MediaKind, filename: string, signal?: AbortSignal, guard?: () => void) {
     const session = await this.store.db.get('SELECT * FROM upload_sessions WHERE canvas_id=? AND id=?', [canvas, id])
     if (!session) throw new CanvasError('上传会话不存在', 404)
     if (session.state !== 'receiving') {
@@ -185,19 +185,20 @@ export class Uploads {
     if (await this.journal(canvas, id)) throw new CanvasError('请使用分块上传接口', 409, 'UPLOAD_RESUMABLE')
     try {
       const info = await receive(body, path, this.limit, kind, signal)
-      return await this.enqueue(canvas, id, session, kind, filename, info)
+      return await this.enqueue(canvas, id, session, kind, filename, info, guard)
     } catch (error) {
       await this.fail(id)
       throw error
     }
   }
-  private async enqueue(canvas: string, id: string, session: any, kind: MediaKind, filename: string, info: { bytes: number; mime: string; fileHash: string; width?: number; height?: number }) {
+  private async enqueue(canvas: string, id: string, session: any, kind: MediaKind, filename: string, info: { bytes: number; mime: string; fileHash: string; width?: number; height?: number }, guard?: () => void) {
     try {
       const node = this.store.state(canvas).graph.nodes.find((n) => n.id === session.node_id)
       if (!node || node.kind !== `${kind}-asset`) throw new CanvasError('上传节点已不存在', 409, 'UPLOAD_FAILED')
       const taskId = randomUUID()
       const descriptor = { id: randomUUID(), kind, filename, nodeId: session.node_id, taskId, createdAt: Date.now(), stageFile: session.stage_file, ...info }
       await this.store.serial(async () => {
+        guard?.()
         await this.store.db.batch([
           sql("INSERT INTO task_catalog(id,canvas_id,node_id,kind,title,queue_seq,status,created_at,updated_at) VALUES(?,?,?,'import',?,(SELECT COALESCE(MAX(queue_seq),0)+1 FROM task_catalog),'queued',?,?)", [taskId, canvas, session.node_id, node.title, Date.now(), Date.now()]),
           sql("INSERT INTO task_details(task_id,request_id,request_hash,phase,import_json,updated_at) VALUES(?,?,?,'import',?,?)", [taskId, id, hash({ kind, filename, ...info }), JSON.stringify(descriptor), Date.now()]),

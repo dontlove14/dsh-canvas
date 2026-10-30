@@ -13,7 +13,7 @@ const formatTime = (stamp: number) => `${dateText(new Date(stamp))} ${timeText(n
 const initialDraft = { taskId: '', folderName: '', canvasName: '', type: '' }
 const initialQuery: TaskSearchQuery = { page: 1, pageSize: 10 }
 
-export function TaskDialog({ api, onClose }: { api: CanvasApi; onClose: () => void }) {
+export function TaskDialog({ api, onClose, readOnly = false }: { api: CanvasApi; onClose: () => void; readOnly?: boolean }) {
   const [selected, setSelected] = useState<TaskRow | null>(null)
   const [revision, setRevision] = useState(0)
   const list = useRef<HTMLDivElement>(null)
@@ -25,7 +25,7 @@ export function TaskDialog({ api, onClose }: { api: CanvasApi; onClose: () => vo
   return <UiModal label={selected ? '任务详情' : '任务'} onClose={onClose} wide className="dc-tasks-modal">
     <div className="dc-task-dialog-body">
       <div ref={list} className="dc-task-list-view" hidden={!!selected}><TaskCatalog api={api} onDetail={setSelected} revision={revision} /></div>
-      {selected && <TaskDetails key={selected.id} api={api} row={selected} onBack={back} onChanged={() => setRevision((old) => old + 1)} />}
+      {selected && <TaskDetails key={selected.id} api={api} row={selected} readOnly={readOnly} onBack={back} onChanged={() => setRevision((old) => old + 1)} />}
     </div>
   </UiModal>
 }
@@ -118,7 +118,7 @@ export function TaskCatalog({ api, onDetail, revision = 0 }: { api: CanvasApi; o
     </div>
   </section>
 }
-function TaskDetails({ api, row, onBack, onChanged }: { api: CanvasApi; row: TaskRow; onBack: () => void; onChanged: () => void }) {
+function TaskDetails({ api, row, onBack, onChanged, readOnly }: { api: CanvasApi; row: TaskRow; onBack: () => void; onChanged: () => void; readOnly?: boolean }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -135,6 +135,7 @@ function TaskDetails({ api, row, onBack, onChanged }: { api: CanvasApi; row: Tas
     return () => { live = false; controller.abort() }
   }, [api, row.id, row.canvasId, retry])
   const act = async (action: TaskAction) => {
+    if (readOnly) return
     if (action === 'abandon' && !window.confirm('结束本地等待不会取消外部任务，是否继续？')) return
     setActing(true); setError('')
     try { await api.taskAction(row.canvasId, row.id, action); onChanged(); setRetry((old) => old + 1) }
@@ -165,9 +166,9 @@ function TaskDetails({ api, row, onBack, onChanged }: { api: CanvasApi; row: Tas
         <p>执行步骤：{detail.attempts.map((attempt) => `${attempt.step}（${attempt.outcome ?? '处理中'}）`).join(' → ') || detail.phase}</p>
       </div>
       {['unknown', 'save_failed'].includes(status) && <div className="dc-task-actions">
-        {status === 'save_failed' && <UiButton disabled={acting} variant="outline" onClick={() => void act('retry-save')}>重试保存结果</UiButton>}
-        {status === 'unknown' && detail.externalTaskId && <UiButton disabled={acting} variant="outline" onClick={() => void act('resume-query')}>恢复查询</UiButton>}
-        <UiButton disabled={acting} variant="outline" onClick={() => void act('abandon')}>结束本地等待</UiButton>
+        {status === 'save_failed' && <UiButton disabled={acting || readOnly} variant="outline" onClick={() => void act('retry-save')}>重试保存结果</UiButton>}
+        {status === 'unknown' && detail.externalTaskId && <UiButton disabled={acting || readOnly} variant="outline" onClick={() => void act('resume-query')}>恢复查询</UiButton>}
+        <UiButton disabled={acting || readOnly} variant="outline" onClick={() => void act('abandon')}>结束本地等待</UiButton>
       </div>}
     </>}
     </div>

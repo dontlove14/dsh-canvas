@@ -7,3 +7,82 @@
         requestTimeoutMs: 120000
         maxMediaBytes: 209715200
         maxReferenceBytes: 20971520
+    - id: preset-canvas-creator
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-creator
+        name: 无限画布
+        description: 通过对话创作图片、视频与语音，观察画布并随时人工接管
+        order: 70
+        plugins:
+          - id: canvas-creator
+            name: dsh-canvas/agent-preset
+            config:
+              role: main
+          - id: ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+            config:
+              mode: legacy
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+    - id: preset-canvas-story
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-story
+        name: 叙事草稿（主 Agent 调用）
+        order: 201
+        plugins:
+          - id: canvas-story
+            name: dsh-canvas/agent-preset
+            config:
+              role: story
+    - id: preset-canvas-assets
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-assets
+        name: 资产草稿（主 Agent 调用）
+        order: 202
+        plugins:
+          - id: canvas-assets
+            name: dsh-canvas/agent-preset
+            config:
+              role: assets
+    - id: preset-canvas-shots
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-shots
+        name: 镜头草稿（主 Agent 调用）
+        order: 203
+        plugins:
+          - id: canvas-shots
+            name: dsh-canvas/agent-preset
+            config:
+              role: shots
+    - id: preset-canvas-audio
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-audio
+        name: 音频草稿（主 Agent 调用）
+        order: 204
+        plugins:
+          - id: canvas-audio
+            name: dsh-canvas/agent-preset
+            config:
+              role: audio
+    - id: preset-canvas-review
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-review
+        name: 审查草稿（主 Agent 调用）
+        order: 205
+        plugins:
+          - id: canvas-review
+            name: dsh-canvas/agent-preset
+            config:
+              role: review

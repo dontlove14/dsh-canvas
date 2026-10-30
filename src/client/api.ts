@@ -9,6 +9,8 @@ import { UploadSessionSchema, UploadStatusSchema, UploadResultSchema, type Uploa
 import type { CachedUpload } from './uploadCache'
 import { isMultimodalVideo } from '../shared/modelCatalog'
 import { videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
+import type { CanvasControl, AgentSessionState } from '../shared/agent'
+import type { PresentationState, PresentationAck, ViewReport } from '../shared/presentation'
 export { ApiError } from './resumableUploads'
 
 export class CanvasApi {
@@ -58,6 +60,15 @@ export class CanvasApi {
     return this.request('catalog', {}, this.json({ ...input, requestId: crypto.randomUUID() }))
   }
   state(canvas: string): Promise<CanvasSnapshot> { return this.request('graph', { canvas }) }
+  agentSession(sessionId: string): Promise<AgentSessionState> { return this.request('agent-session', { sessionId }) }
+  presentation(sessionId: string): Promise<PresentationState> { return this.request('agent-presentation', { sessionId }, { cache: 'no-store', signal: AbortSignal.timeout(10000) }) }
+  reportView(view: ViewReport): Promise<{ ok: boolean }> { return this.request('agent-view', { canvas: view.canvasId }, this.json(view)) }
+  acknowledgePresentation(ack: PresentationAck): Promise<{ ok: boolean }> { return this.request('agent-presentation-ack', { canvas: ack.canvasId }, this.json(ack)) }
+  presence(sessionId: string, viewId: string, visible: boolean): Promise<{ ok: boolean }> { return this.request('agent-presence', {}, this.json({ sessionId, viewId, visible })) }
+  agentModels(): Promise<{ models: Array<{ provider: string; providerName: string; model: string; name: string; eligible: boolean }> }> { return this.request('agent-models', {}) }
+  control(canvas: string): Promise<CanvasControl> { return this.request('agent-control', { canvas }) }
+  delegate(canvas: string, sessionId: string, revision: number): Promise<CanvasControl> { return this.request('agent-control', { canvas }, this.json({ action: 'delegate', sessionId, revision })) }
+  takeover(canvas: string): Promise<CanvasControl> { return this.request('agent-control', { canvas }, this.json({ action: 'takeover' })) }
   save(canvas: string, mutation: GraphMutation): Promise<CanvasSnapshot> { return this.request('graph', { canvas }, this.json(mutation)) }
   generate(canvas: string, nodeId: string, revision: number, requestId = crypto.randomUUID()): Promise<TaskSummary> { return this.request('generate', { canvas }, this.json({ nodeId, revision, requestId })) }
   mockGenerate(canvas: string, nodeId: string, revision: number, requestId = crypto.randomUUID()): Promise<TaskSummary> { return this.request('mock-generate', { canvas }, this.json({ nodeId, revision, requestId })) }

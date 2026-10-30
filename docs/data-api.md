@@ -1,8 +1,60 @@
 # 数据与 HTTP 接口参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-29。契约 / Schema / 路由变更时复核。
+文档类型：参考；负责人：项目维护者；最近核对：2026-10-30。契约 / Schema / 路由变更时复核。
 
 可执行事实：[contracts](../src/shared/contracts.ts)、[v2](../src/shared/v2.ts)、[schema.sql](../src/host/persistence/schema.sql)、[service](../src/host/service.ts)。业务行为见[业务参考](business.md)，配置限额见[运行指南](operations.md)。
+
+## Agent 控制与工具
+
+0.2.91 仅主级增加三项工具，HTTP 注册数量仍为38。`canvas_inspect` 与动态上下文增加 `userMedia:[{type,attachmentId,messageId,name,bytes,mime?}]` 和实际 `workspace`；只接受根会话用户附件，子级不获取附件读写或文件工具。关键主级工具可提供 `note`（1–180字符），用于实际工具调用过程说明，不改变业务结果或生成授权。呈现 action 增加 `import`。
+
+| 工具 | 主要输入 | 成功 / 错误及重试 |
+| --- | --- | --- |
+| canvas_import_attachment | operationId(UUID)、revision、attachmentId、kind(image/video/audio)、purpose(1–500字符) | 真实 nodeId / taskId、queued、referenceReady=false；原任务成功后 inspect 获得 assetId 再 connect。不读任意路径或 URL；403 ATTACHMENT_FORBIDDEN、413 MEDIA_TOO_LARGE、415 UNSUPPORTED_MEDIA、409 AGENT_CONTROL_REVOKED。相同操作 ID 复用上传身份，改变内容拒绝 |
+| canvas_document | operationId、document:{title,content,category} | category 为方案/简报/资产/分镜/镜头/音频/审查/其他；Markdown≤32000字符；返回 file:{path,relativePath,bytes,sha256}；当前根受控写入，无任意目的地字段 |
+| canvas_export_media | operationId、assetId、userRequest(1–500字符) | 仅用户要求下载；当前画布 locator 流式读取并验证原 bytes / sha256，返回 assetId / file，不提交生成。413大小限制、409 FILE_HASH_MISMATCH |
+
+`canvas_open` 新建返回实际 folderName / folderCreated，先建立「Agent 创作」，已有画布与用户手动移改的重试不强制搬回。`canvas_review_plan` 在原生提问前保存完整方案，返回 approved / answers / file；`canvas_draft` 与主级 `canvas_specialist` 增加完整文档 file。工具仍用真实 Agent scope / 原 roster / epoch 约束。工作区目录拒绝符号链接，文件无覆盖发布；409 UNSAFE_PATH / FILE_COLLISION / WORKSPACE_CHANGED 不回放旧目录、不覆盖用户编辑。目录项目名和上传位置固定回执沿用 AgentLedger v1 的 receipts，不改持久 Schema。最小流程：inspect 获取用户附件 → open → import_attachment → task 查询至成功 → inspect 实际素材 → create_node / connect → 本轮授权下 generate。详见[ADR-0074](adr/0074-agent-reference-import-workspace-and-progress.md)。
+
+0.2.90 更正 `canvas_review_plan` 的原生服务参数：question.detail 仍为完整 Markdown，intent 为 `{kind:"plan-review",approve:"确认方案"}`，不带历史展示 `callId`；真实工具 ID 保留在 `wait.callId`。工具输入 / 返回和所有 HTTP 路由保持。正文用原生临时 `params.planReview.markdown` 展示，不建立永久历史计划资源，见[ADR-0073](adr/0073-native-canvas-plan-detail-preview.md)。
+
+0.2.89 增加五个 owner 认证呈现路径（V2 注册总数 38），只承载 UI 元数据。均复用 Harness 原 Connection.fetch 身份；agent-view / ack 的 URL canvas 必须等于 body.canvasId，session / epoch 必须匹配当前 Agent 控制。多余字段和非法值拒绝 400，旧身份返回 409 `PRESENTATION_STALE`，未呈现版本返回 `PRESENTATION_NOT_READY`，独立文件损坏返回 503 `PRESENTATION_INVALID`。读取和报告不提交任务、不修改图。
+
+| 路径（`/api/canvas/v2/`） | 输入 / 输出 | 语义 |
+| --- | --- | --- |
+| `GET agent-presentation?sessionId=...` | `{intent:null或{id,sessionId,canvasId,epoch,action,graphRevision,nodeIds,taskId?,createdAt}}` | 当前有效控制下最新意图，无则 null；no-store |
+| `GET agent-presentation-events?sessionId=...` | text/event-stream，data 为同一状态；2 秒心跳 | 初始与变化发送，重连读取最新状态，不重放旧操作；关闭流随 Host 释放 |
+| `POST agent-presence` | `{sessionId,viewId,visible}` → `{ok:true}` | 前台当前会话报告，5 秒时效 |
+| `POST agent-view?canvas=...` | `{sessionId,canvasId,epoch,viewId,sequence,visible,following,center?,width?,height?,zoom?,sizes?}` → `{ok:true}` | 有序实际容器坐标与节点尺寸；5 秒有效，30 秒清过期 |
+| `POST agent-presentation-ack?canvas=...` | `{sessionId,canvasId,epoch,viewId,presentationId,graphRevision,status,reason?}` → `{ok:true}` | status 为 presented / paused / deferred / failed，presented 要求新鲜可见跟随视野与对应版本 |
+
+最小报告：`POST agent-presence`，JSON `{"sessionId":"<当前会话>","viewId":"<本窗口UUID>","visible":true}`；成功 200。报告仅改变临时观察状态，不绕过控制权成为写接口。intent action 为 open / create / update / connect / generate；ID 包含当前 epoch，重复操作沿原回执，taskId 仍是原持久任务。
+
+`canvas_create_node` 原 position 变为可选；`placement:{group:"assets"|"shots"|"audio",anchorNodeId?:string}` 默认按节点种类选组，显式 position 优先。输出增加 `{placement:{position,source},presentationId,presentation:{id,status,reason?}}`，source 为 explicit / visible-viewport / fixed-origin / existing-node / saved-viewport。`canvas_inspect` 增加 presentation / 临时 view / 节点布局，写操作返回真实提交后的呈现结果；8 秒等待不占提交队列。失败 / 暂停 / 延后不得重提生成，先检查原 taskId 与当前控制 / 意图。
+
+0.2.84 共 33 个注册路径，新增四个 owner 认证接口。CanvasGraph 和主库 DDL 不变；独立 `agent-ledger.json` 格式版本 1 保存控制、草稿、幂等回执、任务提交归属和交接基线。原 `graph` 响应新增可选 `agentControl`。
+
+| 路径（`/api/canvas/v2/`） | 输入 / 输出 | 语义 |
+| --- | --- | --- |
+| `GET agent-session?sessionId=...` | `{preset,canvas}` | 是否为无限画布预设、最近附属画布；客户端自动打开侧栏 |
+| `GET agent-models` | `{models:[{provider,providerName,model,name,eligible}]}` | 明确 image 输入才 eligible；仅元数据核验 |
+| `GET agent-control?canvas=...` | `{canvasId,sessionId,mode,epoch,updatedAt,reason?}` | 只读控制状态 |
+| `POST agent-control?canvas=...` | `{action:"delegate",sessionId,revision}` 或 `{action:"takeover"}` → 控制状态 | 委托先保存当前 revision；接管先同步撤权 |
+| `GET agent-drafts?canvas=...` | `{drafts:[{id,canvasId,kind,title,content,version,dependencies,assetIds,author,createdAt,baseRevision,epoch,needsReview}]}` | 版本与依赖按明确身份保存，最多 10000 条 |
+
+最小控制请求：`POST /api/canvas/v2/agent-control?canvas=<真实画布ID>`，JSON `{"action":"delegate","sessionId":"<无限画布会话ID>","revision":<已保存版本>}`。成功 200；404 画布不存在；409 `GRAPH_CONFLICT`、`AGENT_CANVAS_BUSY`、`AGENT_SESSION_BUSY` 或 `AGENT_CONTROL_REVOKED` 时先读取新状态，不自动重提生成。协作期间人工写入返回 409 `CANVAS_READ_ONLY`。不合格模型返回 `AGENT_MULTIMODAL_REQUIRED`，记录读取失败关闭 Agent 功能，返回 `AGENT_LEDGER_INVALID`。开发实例无 Harness Agent 服务时返回 503 `AGENT_UNAVAILABLE`。
+
+0.2.85 原生 Typert `agentPresets/list` 保持 `{presets:[...]}` 协议，只从用户目录过滤五个精确内部预设 ID，主级显示为「视频创作」。默认标记、排序、其他预设和原请求权限保持；内部原生 `resolve` / `mount` / `list` 仍包含子预设供 spawn 使用，稳定 ID 与历史会话不迁移。
+
+0.2.88 主级展示名改为「无限画布」，原生协议与稳定 ID 不变。创作模式继续使用 Harness 原模型选择器，directory / load / select 原对象与方法保持，不过滤或替换模型目录。客户端读取 `agent-models`，以精确 provider / model 路由维护原按钮禁用和 title；非多模态提示「非多模态模型，当前 Agent 不支持使用」，未知能力及读取失败分别暂禁。能力请求在菜单打开和目录变更时去重刷新，离开作用域后丢弃迟到结果并恢复原属性。资格仍由原生 `SessionController.selectModel` 和实际 Agent 请求 guard 核验，不合格请求拒绝并返回原生错误。
+
+原生工具由真实 Agent scope 直接调用，不能以客户端参数伪造身份。主级开放 `canvas_open`、`canvas_inspect`、`canvas_method`、`canvas_view_image`、`canvas_task`、`canvas_create_node`、`canvas_update_node`、`canvas_connect`、`canvas_generate`、`canvas_draft`、`canvas_specialist`、`canvas_review_plan` 及 Harness `ask_user_question`。专业级只有五个读取 / 方法 / 查询 / 原生 `structured_output` 工具，不写入、付费生成、再次委派或提问。
+
+0.2.86 新增主级工具 `canvas_review_plan`：`{plan,title?,question?}`，plan 为去首尾空白后 1–32000 字符的 Markdown；title 1–160 字符，默认「创作方案」；question 1–500 字符，默认「请审阅方案，确认后我会按方案继续。」。未知字段与超限输入在打开卡片前拒绝。最小调用 `{"plan":"# 方案\n\n先设计角色，再生成一个5秒镜头。"}`，成功输出 `{approved:boolean,answers:[{id,selected,custom?}]}`。只精确单选「确认方案」且无非空自定义意见时 approved=true；其余有效反馈为 false。
+
+工具直接调用官方 `ctx.userQuestions.ask`，单题 detail 承载完整方案，intent 为 `{kind:"plan-review",approve:"确认方案",callId:<当前原生调用ID>}`；wait 绑定同一调用身份，agent / signal 全程保留，调用与答案进入原生日志。它只展示和返回意见，不写画布、不提交媒体、不持久缓存批准；重复调用会再次询问，提示词要求已有有效授权不重复调用。等待失败沿用原生 `ASK_ABORTED` / `NO_PROVIDER` 等错误，不算通过，不自动重试；接管返回 `AGENT_CONTROL_REVOKED`，未绑定画布的审阅期间若新绑定画布则返回 `AGENT_REVIEW_STALE`，先核对新状态。稳定身份由执行上下文提供，不能在工具参数伪造。普通提问协议不变，后续只做可选字段的兼容扩展；非阻塞计时 / 跨重启恢复问答不属于本次接入。
+
+写入使用稳定 UUID `operationId`，图操作还需当前 `revision`；相同内容复用回执，ID 改内容返回 `REQUEST_REUSED`。生成 requestId 从画布与 operationId 派生，隔离手动请求和其他画布；原任务幂等管线保存实际 taskId。专业委派中断后同 ID 返回 `SPECIALIST_INCOMPLETE`，并发超过 2 返回 `SPECIALIST_CAPACITY`，不会自动重提。工具参数与边界以[预设](../src/host/agent/preset.ts)、[共享契约](../src/shared/agent.ts)为准。
 
 ## Seedance预审接口
 

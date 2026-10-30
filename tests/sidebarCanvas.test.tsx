@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject } from '../src/client/index'
 import { CanvasApi } from '../src/client/api'
 import { useCanvas } from '../src/client/useCanvas'
+import { CanvasApp } from '../src/client/Canvas'
 import { emptyGraph, type CanvasNode } from '../src/shared/contracts'
 import type { CanvasSnapshot, GraphMutation } from '../src/shared/v2'
 import type { SidebarRightTabDefinition } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -46,11 +47,14 @@ function registration() {
   const waiting = new Map<string, () => () => void>()
   const cleanups: Array<() => void> = []
   const ctx = {
+    inject: () => () => {},
+    on: () => () => {},
     effect: (setup: () => () => void) => { cleanups.push(setup()) },
     sidebarRightTabs: { register: (definition: SidebarRightTabDefinition) => {
       definitions.set(definition.id, definition); return () => { definitions.delete(definition.id) }
     } },
     slots: {
+      entries: () => [],
       inject: (name: string, setup: () => () => void) => {
         waiting.set(name, setup)
         cleanups.push(() => { waiting.delete(name) })
@@ -71,6 +75,29 @@ const snapshot = (): CanvasSnapshot => ({
   updatedAt: 1, commitHash: 'a'.repeat(64), hashes: { nodes: {}, edges: {}, viewport: '' },
 })
 describe('Harness conversation sidebar canvas', () => {
+  it('retries a late catalog, re-enters on native revision, and respects a manual return across visibility changes', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('ResizeObserver', class { observe() {}; disconnect() {} })
+    const api = new CanvasApi()
+    let ready = false
+    vi.spyOn(api, 'catalog').mockImplementation(async () => ({ folders: [], canvases: ready
+      ? [{ id: 'w', name: 'Agent目标', folderId: null, revision: 1, hash: '', moving: false }] : [] }))
+    vi.spyOn(api, 'state').mockResolvedValue(snapshot())
+    const { root, container } = render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={1} />)
+    await act(async () => { await Promise.resolve() })
+    expect(container.querySelector('.dc-workspace-title')).toBeNull()
+    ready = true
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+    expect(container.querySelector('.dc-workspace-title')?.textContent).toContain('Agent目标')
+    await act(async () => { container.querySelector<HTMLButtonElement>('.dc-ui-back')!.click() })
+    expect(container.querySelector('.dc-workspace-title')).toBeNull()
+    act(() => root.render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={1} active={false} />))
+    act(() => root.render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={1} active />))
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(container.querySelector('.dc-workspace-title')).toBeNull()
+    await act(async () => { root.render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={2} active />) })
+    expect(container.querySelector('.dc-workspace-title')?.textContent).toContain('Agent目标')
+  })
   it('contributes a guide page and keyed body with one API, supports late slot declarations, and cleans up on unload', () => {
     const { definitions, slots, available, dispose } = registration()
     expect(inject).toContain('sidebarRightTabs')
@@ -108,7 +135,7 @@ describe('Harness conversation sidebar canvas', () => {
     })
     const state = vi.spyOn(api, 'state').mockResolvedValue(snapshot())
     let visible = true
-    const props = { api, useTabInfo: () => ({ tab: { visible } }) }
+    const props = { api, useTabInfo: () => ({ tab: { visible, navigation: { params: undefined } } }) }
     const { root, container } = render(<Body {...props} />)
     await act(async () => { await Promise.resolve() })
     act(() => { [...container.querySelectorAll<HTMLButtonElement>('.dc-folder-item')].find((button) => button.textContent?.includes('作品'))!.click() })

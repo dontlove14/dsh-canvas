@@ -1,20 +1,15 @@
 import {
-  NodeLabels, defaultParams, defaultTtsParams, isGeneration, isTtsParams, nodeMediaKind,
-  nodeResults, validateGraph, type CanvasGraph, type CanvasNode, type Asset, type PublicModel,
+  isGeneration, nodeMediaKind,
+  nodeResults, type CanvasGraph, type CanvasNode, type Asset, type PublicModel,
 } from '../shared/contracts'
-import { modelConfigured, isMultimodalVideo } from '../shared/modelCatalog'
-import { videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
+import { modelConfigured } from '../shared/modelCatalog'
+import { connectAssetReference } from '../shared/referenceConnection'
 import type { TaskSummary } from '../shared/v2'
 import { connectionAsset } from './generationLayout'
 import { generationHistory, hasGenerationHistory } from './generationHistory'
 
-/** All three creation entrances consume this registry; importing media is separate. */
-export const CREATABLE_NODES = [
-  { kind: 'image-generation', icon: 'image' },
-  { kind: 'video-generation', icon: 'video' },
-  { kind: 'tts-generation', icon: 'tts' },
-] as const
-export type CreatableNodeKind = typeof CREATABLE_NODES[number]['kind']
+import { CREATABLE_NODES, nodeFor, type CreatableNodeKind } from '../shared/nodeFactory'
+export { CREATABLE_NODES, type CreatableNodeKind } from '../shared/nodeFactory'
 export interface NodeCreationEnvironment {
   assets: readonly Asset[]; tasks: readonly TaskSummary[]; models: readonly PublicModel[]
   expandedGroups: Readonly<Record<string, boolean>>
@@ -44,40 +39,8 @@ export function outputAvailable(graph: CanvasGraph, reference: OutputReference, 
 
 /** Same connection policy for direct wiring and wiring to a newly created node. */
 export function connectReference(graph: CanvasGraph, reference: OutputReference, targetId: string, env: NodeCreationEnvironment): CanvasGraph {
-  const target = graph.nodes.find((node) => node.id === targetId)
-  const asset = env.assets.find((asset) => asset.id === reference.assetId)
-  if (!outputAvailable(graph, reference, env) || !target || !asset || !isGeneration(target.kind))
-    throw new Error('请从已有素材连接到生成节点')
-  if (target.kind === 'tts-generation') throw new Error('语音生成节点不支持输入连线')
-  const model = env.models.find((item) => item.id === target.modelId)
-  if (asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime))
-    throw new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')
-  const previousIds = graph.edges.filter((edge) => edge.target === target.id).map((edge) => edge.assetId)
-  const params = target.params && !isTtsParams(target.params) && model && isMultimodalVideo(model)
-    ? videoGenerationParams(target.params, previousIds, model) : target.params
-  const caps = model && videoInputCapabilities(model, !isTtsParams(params) ? params : null)
-  if (caps && (!caps.referenceKinds.includes(asset.kind) || previousIds.length >= caps.maxReferences))
-    throw new Error('当前模型不支持这份素材，或引用数量已达上限')
-  if (!model && asset.kind !== 'image') throw new Error('请先配置支持这类素材的模型')
-  const next = { ...graph, edges: [...graph.edges, {
-    id: crypto.randomUUID(), source: reference.sourceId, target: target.id, assetId: asset.id,
-  }] }
-  if (model && isMultimodalVideo(model) && params && !isTtsParams(params)) {
-    const inputs = next.edges.filter((edge) => edge.target === target.id).map((edge) => env.assets.find((asset) => asset.id === edge.assetId))
-    if (inputs.some((asset) => !asset)) throw new Error('引用素材不可用')
-    validateVideoConnections(videoGenerationParams(params, [...previousIds, asset.id], model), inputs as Asset[], model)
-  }
-  validateGraph(next, env.assets, env.tasks)
-  return next
-}
-
-function nodeFor(graph: CanvasGraph, kind: CreatableNodeKind, position: CanvasPoint, model?: PublicModel): CanvasNode {
-  return {
-    id: crypto.randomUUID(), kind, title: `${NodeLabels[kind]} ${graph.nodes.filter((node) => node.kind === kind).length + 1}`,
-    position, modelId: model?.id ?? null,
-    params: kind === 'tts-generation' ? defaultTtsParams() : model ? defaultParams(model) : null,
-    prompt: '', assetId: null, selectedResultId: null,
-  }
+  if (!outputAvailable(graph, reference, env)) throw new Error('请从已有素材连接到生成节点')
+  return connectAssetReference(graph, reference.sourceId, targetId, reference.assetId, env.assets, env.tasks, env.models)
 }
 
 /** Returns the complete mutation, or throws before any graph is changed. */

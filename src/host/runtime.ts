@@ -12,6 +12,7 @@ import { isBananaImage, isSeedreamImage, isMultimodalVideo } from '../shared/mod
 export interface RuntimeConfig { maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; maxMediaBytes: number; maxReferenceBytes: number }
 /** Long-lived host lifecycle. Neither a request signal nor a Peer owns this controller. */
 export class CanvasRuntime {
+  dispatchGate?: <T>(taskId: string, operation: () => Promise<T>) => Promise<T>
   private controller = new AbortController()
   private providers: Providers
   private active = new Map<string, Promise<void>>()
@@ -123,10 +124,15 @@ export class CanvasRuntime {
         if (data.issued) { await this.patch(task, { status: 'failed', error: '之前的提交未取得可用结果；不会自动重提' }); return }
         await this.store.verifyReferences(task.id)
         const prepared = await this.attempt(task, 'prepare-references', () => this.providers.prepare(task.snapshot, task.id))
-        data.issued = true
-        await this.store.writeTaskPrivate(task.id, data)
-        await this.patch(task, { status: 'generating' })
-        result = await this.attempt(task, 'submit', () => this.providers.submit(task.snapshot, data.key, prepared))
+        const submit = async () => {
+          data.issued = true
+          await this.store.writeTaskPrivate(task.id, data)
+          await this.patch(task, { status: 'generating' })
+          // Release the admission queue once outbound work has started; polling and result saving outlive takeover.
+          return { pending: this.attempt(task, 'submit', () => this.providers.submit(task.snapshot, data.key, prepared)) }
+        }
+        const accepted = this.dispatchGate ? await this.dispatchGate(task.id, submit) : await submit()
+        result = await accepted.pending
       }
       await this.patch(task, { ...(result.id ? { providerTaskId: result.id } : {}), status: result.outputs ? 'saving' : result.status, progress: result.progress, error: result.error ? this.store.redact(result.error, [data.key]) : undefined }, [
         sql('UPDATE task_details SET external_status=?,next_run_at=? WHERE task_id=?', [result.status, Date.now() + this.pollDelay(task), task.id]),

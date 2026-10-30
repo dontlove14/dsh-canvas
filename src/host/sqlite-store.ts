@@ -298,19 +298,19 @@ export class SqliteStore {
     await this.db.batch([sql('INSERT INTO canvas_storage_locations VALUES(?,?,?,?,?,?)', [canvas, id, root, directory, pathKey(directory), Date.now()])])
     return id
   }
-  update<T>(id: string, mutate: (state: WorkspaceState) => T | Promise<T>, extra?: (before: WorkspaceState, after: WorkspaceState) => Statement[]): Promise<T> {
+  update<T>(id: string, mutate: (state: WorkspaceState) => T | Promise<T>, extra?: (before: WorkspaceState, after: WorkspaceState) => Statement[], beforeCommit?: () => void): Promise<T> {
     return this.serial(async () => {
       await this.ensureCanvas(id)
       const before = this.state(id); const draft = structuredClone(before)
       const result = await mutate(draft); draft.updatedAt = Date.now()
       draft.graphRevision = hash(before.graph) === hash(draft.graph) ? before.graphRevision : before.graphRevision + 1
       WorkspaceStateSchema.parse(draft)
-      await this.persist(before, draft, extra?.(before, draft) ?? [])
+      await this.persist(before, draft, extra?.(before, draft) ?? [], beforeCommit)
       this.states.set(id, draft)
       return result
     })
   }
-  private async persist(before: WorkspaceState, after: WorkspaceState, extra: Statement[] = []): Promise<void> {
+  private async persist(before: WorkspaceState, after: WorkspaceState, extra: Statement[] = [], beforeCommit?: () => void): Promise<void> {
     const id = after.workspaceId; const now = after.updatedAt; const steps: Statement[] = []
     const previousNodes = new Map(before.graph.nodes.map((n, i) => [n.id, { n, i }]))
     const previousEdges = new Map(before.graph.edges.map((e, i) => [e.id, { e, i }]))
@@ -376,6 +376,7 @@ export class SqliteStore {
       steps.push(...await this.moveStatements(id, renamed.map((n) => n.id), undefined, after, 1))
     }
     steps.push(...extra.filter((s) => s !== userReceipt))
+    beforeCommit?.()
     await this.db.batch(steps)
   }
   async snapshot(id: string): Promise<CanvasSnapshot> {
@@ -549,7 +550,7 @@ export class SqliteStore {
     ], false)
     return { folders, canvases }
   }
-  async catalogCommand(input: { requestId: string; operation: string; id?: string; name?: string; folderId?: string | null; revision?: number }): Promise<{ id: string }> {
+  async catalogCommand(input: { requestId: string; operation: string; id?: string; name?: string; folderId?: string | null; revision?: number }, beforeCommit?: () => void): Promise<{ id: string }> {
     return this.serial(async () => {
       const requestHash = hash(input)
       const receipt = await this.db.get('SELECT * FROM catalog_mutations WHERE owner_id=? AND request_id=?', [this.owner, input.requestId])
@@ -592,6 +593,7 @@ export class SqliteStore {
         steps.push(sql('UPDATE canvases SET deleted_at=?,meta_revision=meta_revision+1 WHERE id=? AND meta_revision=?', [now, id, input.revision!], 'run', 1))
       } else throw new CanvasError('未知目录操作')
       steps.push(sql('INSERT INTO catalog_mutations VALUES(?,?,?,?,?,?,?,?)', [this.owner, input.requestId, input.operation, entity, id, requestHash, JSON.stringify({ id }), now]))
+      beforeCommit?.()
       try { await this.db.batch(steps) }
       catch (error) {
         if (String(error).includes('UNIQUE constraint')) throw new CanvasError('名称已存在，请换一个名称', 409, 'NAME_EXISTS')

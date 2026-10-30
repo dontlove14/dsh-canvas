@@ -52,7 +52,7 @@ async function waitFor(instance: CanvasService, id: string, status: Task['status
   const start = Date.now()
   for (;;) {
     const task = instance.store.state('w').tasks.find((task) => task.id === id)
-    if (task?.status === status) return task
+    if (task?.status === status && (!['unknown', 'save_failed'].includes(status) || !instance.runtime.isActive(id))) return task
     if (Date.now() - start > 8000) throw new Error(`Expected ${status}, got ${task?.status}: ${task?.error}`)
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
@@ -461,6 +461,11 @@ describe('media and plugin boundaries', () => {
   it('registers authenticated Harness routes with supported methods and disposes them', async () => {
     const paths: string[] = []; const disposers: Array<() => unknown> = []; const removed: string[] = []
     const context = {
+      root: { on: () => () => {} },
+      reflect: { provide: () => {} },
+      sessionController: { selectModel: async () => ({}) },
+      agents: { get: () => undefined },
+      agentPresets: { composedPreset: () => undefined, remoteExportList: async () => ({ presets: [] }) },
       effect: (setup: () => () => unknown) => { disposers.push(setup()) },
       credentials: { readRecord: async () => undefined, modifyRecord: async (_key: string, mutate: any) => mutate(undefined) },
       connection: { fetch: { register: (route: any) => { paths.push(route.path); expect(route.methods.every((method: string) => ['GET', 'HEAD', 'POST'].includes(method))).toBe(true); return async () => { removed.push(route.path) } } } },

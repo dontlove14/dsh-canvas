@@ -255,6 +255,7 @@
 .dc-snapshot-heading,.dc-snapshot-model{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .dc-snapshot-heading{margin-bottom:12px}
 .dc-snapshot-prompt{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;padding:12px 0}
+.dc-inspection-prompt{width:100%;min-height:125px;max-height:220px;resize:vertical;overflow:auto;color:var(--dc-text);background:transparent;border:0;font:inherit;line-height:1.65;padding:8px 0}
 .dc-snapshot-model{padding-top:10px}
 .dc-snapshot-model small{color:var(--dc-caption)}
 .dc-snapshot-params{display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin:14px 0 0}

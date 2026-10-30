@@ -25,12 +25,24 @@ import { ReviewRuntime } from './review/runtime'
 import { OfficialReviewTransport, type ReviewTransport } from './review/provider'
 import { UploadStartSchema } from '../shared/uploads'
 import { HashSchema } from '../shared/v2'
+import type { CanvasAgentCoordinator } from './agent/coordinator'
+import { AgentControlCommandSchema } from '../shared/agent'
+import { PresenceSchema, ViewReportSchema, PresentationAckSchema } from '../shared/presentation'
 
 export interface CanvasConfig {
   dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number
   maxMediaBytes: number; maxReferenceBytes: number
 }
 export const routeDefinitions = [
+  { suffix: 'agent-presentation', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-presentation-events', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-view', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-presence', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-presentation-ack', methods: ['POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-control', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-session', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-models', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-drafts', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'models', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'settings-secret', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'seedance-review-settings', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
@@ -66,6 +78,7 @@ const CatalogCommand = z.object({
 }).strict()
 
 export class CanvasService {
+  agentControl?: CanvasAgentCoordinator
   readonly store: Store
   readonly runtime: CanvasRuntime
   readonly previews: PreviewCache
@@ -85,7 +98,7 @@ export class CanvasService {
   }
   async init(): Promise<void> {
     await this.store.init()
-    try { await this.reviews.init(); await this.reviewRuntime.start(); await this.runtime.start() } catch (error) { await this.close(); throw error }
+    try { await this.agentControl?.init(); await this.reviews.init(); await this.reviewRuntime.start(); await this.runtime.start() } catch (error) { await this.close(); throw error }
   }
   private async validate(state: WorkspaceState, graph: CanvasGraph): Promise<void> {
     validateGraph(graph, state.assets, state.tasks)
@@ -115,7 +128,7 @@ export class CanvasService {
     })
     return this.store.state(canvas)
   }
-  async mutateGraph(canvas: string, input: GraphMutation) {
+  async mutateGraph(canvas: string, input: GraphMutation, beforeCommit?: () => void) {
     const requestHash = hash(input)
     let replay = false
     await this.store.update(canvas, async (state) => {
@@ -139,12 +152,12 @@ export class CanvasService {
       if (hash(graph) !== hash(state.graph)) { state.graph = graph; state.graphRevision++ }
     }, (before, after) => replay ? [] : [
       sql('INSERT INTO canvas_mutations VALUES(?,?,?,?,?,?,?,?,?,?,?)', [canvas, input.mutationId, 'user', requestHash, before.graphRevision, after.graphRevision, Number(after.graphRevision !== before.graphRevision), hash({ revision: before.graphRevision, graph: before.graph }), hash({ revision: after.graphRevision, graph: after.graph }), JSON.stringify(input), Date.now()]),
-    ])
+    ], beforeCommit)
     const snapshot = await this.store.snapshot(canvas)
     const receipt = await this.store.db.get('SELECT committed_revision AS revision,commit_hash AS commitHash,has_changes AS hasChanges FROM canvas_mutations WHERE canvas_id=? AND mutation_id=?', [canvas, input.mutationId])
     return { ...snapshot, mutation: { id: input.mutationId, replay, ...receipt } }
   }
-  async generate(canvas: string, nodeId: string, revision: number, requestId: string = randomUUID(), mock = false, tts = false): Promise<Task> {
+  async generate(canvas: string, nodeId: string, revision: number, requestId: string = randomUUID(), mock = false, tts = false, beforeCommit?: () => void): Promise<Task> {
     let acceptedTaskId = ''
     let ttsCredentialRef: string | undefined
     const requestHash = hash({ canvas, nodeId, revision, ...(mock ? { mock: true } : {}), ...(tts ? { tts: true } : {}) })
@@ -197,7 +210,7 @@ export class CanvasService {
       return task
     }, (_before, after) => {
       return [sql('UPDATE task_details SET request_id=?,request_hash=? WHERE task_id=?', [requestId, requestHash, acceptedTaskId]), ...(ttsCredentialRef ? [sql('UPDATE task_details SET credential_ref=? WHERE task_id=?', [ttsCredentialRef, acceptedTaskId])] : [])]
-    })
+    }, beforeCommit)
     this.runtime.wake()
     return task
   }
@@ -234,6 +247,9 @@ export class CanvasService {
     this.runtime.wake()
   }
   async handle(request: Request): Promise<Response> {
+    return this.agentControl ? this.agentControl.manual(request, () => this.handleInner(request)) : this.handleInner(request)
+  }
+  private async handleInner(request: Request): Promise<Response> {
     try {
       if (this.closing) throw new CanvasError('宿主正在停止', 503)
       const url = new URL(request.url)
@@ -245,6 +261,60 @@ export class CanvasService {
         const id = canvas()
         if (!(await this.store.db.get('SELECT id FROM canvases WHERE id=? AND deleted_at IS NULL', [id]))) throw new CanvasError('画布不存在', 404)
         return id
+      }
+      if (suffix.startsWith('agent-')) {
+        const agent = this.agentControl
+        if (!agent) throw new CanvasError('当前环境未启用画布 Agent', 503, 'AGENT_UNAVAILABLE')
+        if (suffix === 'agent-session' && request.method === 'GET') return json(agent.session(z.string().min(1).max(200).parse(url.searchParams.get('sessionId'))))
+        if (suffix === 'agent-models' && request.method === 'GET') return json(await agent.modelCatalog())
+        if (suffix === 'agent-presence' && request.method === 'POST') {
+          const input = PresenceSchema.parse(await request.json())
+          agent.presentation.reportPresence(input.viewId, input.sessionId, input.visible)
+          return json({ ok: true })
+        }
+        if (['agent-presentation', 'agent-presentation-events'].includes(suffix) && request.method === 'GET') {
+          const sessionId = z.string().min(1).max(200).parse(url.searchParams.get('sessionId'))
+          if (suffix === 'agent-presentation') return json(agent.presentation.state(sessionId))
+          let dispose = (_close = true) => {}
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const encoder = new TextEncoder()
+              let stopped = false, last = ''
+              const send = () => {
+                if (stopped) return
+                if (agent.presentation.closed) { dispose(); return }
+                const state = agent.presentation.state(sessionId), body = JSON.stringify(state)
+                if (body !== last) { last = body; controller.enqueue(encoder.encode(`data: ${body}\n\n`)) }
+              }
+              const unsubscribe = agent.presentation.subscribe(send)
+              const timer = setInterval(() => { send(); if (!stopped) controller.enqueue(encoder.encode(': heartbeat\n\n')) }, 2000)
+              const abort = () => dispose()
+              dispose = (close = true) => { if (stopped) return; stopped = true; clearInterval(timer); unsubscribe(); request.signal.removeEventListener('abort', abort); if (close) controller.close() }
+              request.signal.addEventListener('abort', abort, { once: true }); send()
+            },
+            cancel() { dispose(false) },
+          })
+          return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } })
+        }
+        const id = await requireCanvas()
+        if (suffix === 'agent-view' && request.method === 'POST') {
+          const view = ViewReportSchema.parse(await request.json())
+          if (view.canvasId !== id) throw new CanvasError('画布身份不一致')
+          agent.presentation.report(view); return json({ ok: true })
+        }
+        if (suffix === 'agent-presentation-ack' && request.method === 'POST') {
+          const ack = PresentationAckSchema.parse(await request.json())
+          if (ack.canvasId !== id) throw new CanvasError('画布身份不一致')
+          agent.presentation.ack(ack); return json({ ok: true })
+        }
+        if (suffix === 'agent-drafts' && request.method === 'GET') return json({ drafts: agent.ledger.drafts(id) })
+        if (suffix === 'agent-control') {
+          if (request.method === 'GET') return json(agent.control(id))
+          const input = AgentControlCommandSchema.parse(await request.json())
+          if (input.action === 'takeover') return json(await agent.takeover(id))
+          if (!input.sessionId || input.revision === undefined) throw new CanvasError('请提供会话与已保存画布版本')
+          return json(await agent.delegate(id, input.sessionId, input.revision))
+        }
       }
       if (!isV2 && suffix === 'workspace' && request.method === 'GET') return json(this.store.state(canvas()))
       if (suffix === 'models') {
@@ -314,7 +384,7 @@ export class CanvasService {
             const after = z.coerce.number().int().nonnegative().parse(url.searchParams.get('afterRevision'))
             return json(await this.store.graphChanges(id, after))
           }
-          return json(await this.store.snapshot(id))
+          return json({ ...await this.store.snapshot(id), ...(this.agentControl ? { agentControl: this.agentControl.control(id) } : {}) })
         }
         if (request.method === 'POST') return json(await this.mutateGraph(id, MutationSchema.parse(await request.json())))
       }

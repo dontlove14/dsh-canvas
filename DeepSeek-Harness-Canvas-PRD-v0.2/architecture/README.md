@@ -2,7 +2,9 @@
 
 文档类型：架构规划图说明；负责人：项目维护者 / 产品设计者；最近核对：2026-10-30。
 
-依据 [PRD v0.2](../DeepSeek-Harness-Canvas-PRD-v0.2.md) 的第 3 章、FR-13 和 FR-14 制作。图中描述已选定的目标架构；Agent 专属接入、控制权交接和人工摘要同步尚未实施。插件具体创作功能、工具名称及参数仍待补充。
+依据 [PRD v0.2](../DeepSeek-Harness-Canvas-PRD-v0.2.md) 的 3.1–3.7、FR-13 和 FR-14 制作。图中描述已选定的底层目标架构；Agent 专属接入、控制权交接和人工摘要同步尚未实施。插件具体创作功能、工具名称及参数仍待补充。
+
+2026-10-30 补充的通用总控、按需工作流、父子 Agent、资产版本和镜头依赖仍为待评审组织层，见[流程与技能集成评估及新增架构图](../agent-system-review/index.html)。本白板继续作为原生工具、共享服务与交接的底层说明，不代表新增组织层已经实现。
 
 主交付为 `agent-harness-architecture.html`，可在浏览器中缩放、修改并自动保存到该文档的本机浏览器存储；维护源为 `agent-harness-architecture.excalidraw`。`agent-harness-overview.svg` 提供整体关系的静态预览。
 

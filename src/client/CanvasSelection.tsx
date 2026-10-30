@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 
-export const CanvasSelectionContext = createContext<{ selecting: boolean; selectedIds: readonly string[] | null }>({
+export const CanvasSelectionContext = createContext<{ selecting: boolean; selectedIds: readonly string[] | null; readOnly?: boolean }>({
   selecting: false, selectedIds: null,
 })
 

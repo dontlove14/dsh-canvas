@@ -24,7 +24,7 @@ const pkg = JSON.parse(await readFile('package.json', 'utf8'))
 const checkDir = process.env.CANVAS_ARTIFACT_CHECK_DIR ?? join(tmpdir(), `${pkg.name}-artifact-${pkg.version}`)
 await mkdir(checkDir, { recursive: true })
 const lib = await hashes(await files('lib'))
-for (const name of ['lib/index.js', 'lib/client.js', 'lib/worker.mjs', 'lib/schema.sql', 'lib/review-worker.mjs',
+for (const name of ['lib/index.js', 'lib/client.js', 'lib/agent-preset.js', 'lib/worker.mjs', 'lib/schema.sql', 'lib/review-worker.mjs',
   'lib/review-schema.sql', 'lib/vendor/volcengine-signer.cjs', 'lib/volcengine-signer-LICENSE', 'lib/volcengine-signer-source.json']) assert(lib[name], `missing ${name}`)
 if (process.argv[2] === 'record') {
   await writeFile(join(checkDir, 'lib-first.json'), JSON.stringify(lib, null, 2))
@@ -33,13 +33,25 @@ if (process.argv[2] === 'record') {
   assert.deepEqual(lib, JSON.parse(await readFile(join(checkDir, 'lib-first.json'), 'utf8')), 'Build output changed')
   const dataDir = await mkdtemp(join(checkDir, 'runtime-'))
   const routes = new Map(); const cleanup = []; const records = new Map()
+  const agentServices = {
+    root: { on: () => () => {} },
+    reflect: { provide: () => {} },
+    sessionController: { selectModel: async () => ({}), modelCatalog: async () => ({ groups: [] }) },
+    agents: { get: () => undefined },
+    agentPresets: { composedPreset: () => undefined, remoteExportList: async () => ({ presets: [
+      { id: 'standard', isDefault: true }, { id: 'canvas-creator', name: '无限画布', isDefault: false },
+      ...['story', 'assets', 'shots', 'audio', 'review'].map((role) => ({ id: `canvas-${role}`, isDefault: false })),
+    ] }) },
+  }
   try {
     const { apply } = await import('../lib/index.js')
     await apply({
+      ...agentServices,
       effect: (setup) => { cleanup.push(setup()) },
       credentials: { readRecord: async (id) => records.get(id), modifyRecord: async (id, mutate) => { const next = await mutate(records.get(id)); records.set(id, next); return next } },
       connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },
     }, { dataDir })
+    assert.deepEqual((await agentServices.agentPresets.remoteExportList()).presets.map((preset) => preset.id), ['standard', 'canvas-creator'])
     // Harness0.2.1-rc.2's streaming bridge always adds a body; WHATWG
     // Request rejects GET/HEAD bodies before the plugin handler is reached.
     for (const entry of routes.values()) if (entry.requestBody === 'streaming')
@@ -66,6 +78,7 @@ if (process.argv[2] === 'record') {
       database.exec('COMMIT')
     } finally { database.close() }
     await apply({
+      ...agentServices,
       effect: (setup) => { cleanup.push(setup()) },
       credentials: { readRecord: async (id) => records.get(id), modifyRecord: async (id, mutate) => { const next = await mutate(records.get(id)); records.set(id, next); return next } },
       connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },
@@ -77,7 +90,21 @@ if (process.argv[2] === 'record') {
     const { id } = await configuredCreate.json()
     const graph = await routes.get('/api/canvas/v2/graph').fetch(new Request(`http://localhost/api/canvas/v2/graph?canvas=${id}`))
     assert.equal(graph.status, 200); assert.equal((await graph.json()).graphRevision, 0)
-    assert.equal(routes.size, 29)
+    assert.equal(routes.size, 38)
+    const presentationState = routes.get('/api/canvas/v2/agent-presentation')
+    assert.deepEqual(await (await presentationState.fetch(new Request('http://localhost/api/canvas/v2/agent-presentation?sessionId=offline'))).json(), { intent: null })
+    const presentationStream = await routes.get('/api/canvas/v2/agent-presentation-events').fetch(
+      new Request('http://localhost/api/canvas/v2/agent-presentation-events?sessionId=offline'))
+    assert.equal(presentationStream.headers.get('content-type'), 'text/event-stream')
+    const presentationReader = presentationStream.body.getReader()
+    assert.equal(new TextDecoder().decode((await presentationReader.read()).value), 'data: {"intent":null}\n\n')
+    await presentationReader.cancel()
+    for (const suffix of ['agent-presence', 'agent-view', 'agent-presentation-ack']) {
+      const invalid = await routes.get(`/api/canvas/v2/${suffix}`).fetch(new Request(`http://localhost/api/canvas/v2/${suffix}?canvas=${id}`, {
+        method: 'POST', body: '{}',
+      }))
+      assert.equal(invalid.status, 400)
+    }
     const reviewSettings = routes.get('/api/canvas/v2/seedance-review-settings')
     const masked = await reviewSettings.fetch(new Request('http://localhost/api/canvas/v2/seedance-review-settings'))
     assert.equal(masked.status, 200)
@@ -126,6 +153,7 @@ if (process.argv[2] === 'record') {
     const reviewDb = new DatabaseSync(join(dataDir, 'seedance-review.sqlite'))
     reviewDb.prepare('DELETE FROM review_profiles').run(); reviewDb.close()
     await apply({
+      ...agentServices,
       effect: (setup) => { cleanup.push(setup()) },
       credentials: { readRecord: async (key) => records.get(key), modifyRecord: async (key, mutate) => { const next = await mutate(records.get(key)); records.set(key, next); return next } },
       connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },
@@ -269,6 +297,7 @@ if (process.argv[2] === 'record') {
     assert.equal((await receiveChunk.json()).offset, chunkBytes)
     for (const dispose of cleanup.splice(0).reverse()) await dispose()
     await apply({
+      ...agentServices,
       effect: (setup) => { cleanup.push(setup()) },
       credentials: { readRecord: async (key) => records.get(key), modifyRecord: async (key, mutate) => { const next = await mutate(records.get(key)); records.set(key, next); return next } },
       connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },
@@ -300,6 +329,7 @@ if (process.argv[2] === 'record') {
         JSON.stringify({ providerId, objectKey: 'dsh-canvas/offline/waveform.json', mime: 'application/json', bytes: 8193, sha256: audioHash }))
     } finally { audioDb.close() }
     await apply({
+      ...agentServices,
       effect: (setup) => { cleanup.push(setup()) },
       credentials: { readRecord: async (key) => records.get(key), modifyRecord: async (key, mutate) => { const next = await mutate(records.get(key)); records.set(key, next); return next } },
       connection: { fetch: { register: (route) => { routes.set(route.path, route); return () => routes.delete(route.path) } } },

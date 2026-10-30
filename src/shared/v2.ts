@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { CanvasNodeSchema, CanvasEdgeSchema, CanvasGraphSchema, TaskSchema, type WorkspaceState, type Task, type TaskStatus } from './contracts'
+import type { CanvasControl } from './agent'
 
 export const V2_ROOT = 'api/canvas/v2'
 export const NameSchema = z.string().transform((v) => v.trim().normalize('NFC')).pipe(z.string().min(1).max(160))
@@ -24,6 +25,7 @@ export type GraphMutation = z.infer<typeof MutationSchema>
 export const TaskSummarySchema = TaskSchema.omit({ snapshot: true, error: true, providerTaskId: true }).extend({ requestId: z.string().uuid().optional() })
 export type TaskSummary = z.infer<typeof TaskSummarySchema>
 export interface CanvasSnapshot extends Omit<WorkspaceState, 'tasks'> {
+  agentControl?: CanvasControl
   tasks: TaskSummary[]
   commitHash: string
   hashes: { nodes: Record<string, string>; edges: Record<string, string>; viewport: string }
