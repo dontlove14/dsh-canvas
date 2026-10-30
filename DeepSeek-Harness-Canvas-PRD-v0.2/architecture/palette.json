@@ -1,0 +1,38 @@
+{
+  "id": "dsh-agent-architecture-v02",
+  "brand": {
+    "name": "DeepSeek Harness · Agent 架构规划",
+    "checkedAt": "2026-10-30",
+    "sources": [
+      {
+        "kind": "official-product-website",
+        "url": "https://deepseek-harness.github.io/deepseek-harness/",
+        "note": "当前 Harness 官方文档站的浅色 CSS：--vp-c-brand-1 解析为 --vp-c-indigo-1 #3451B2；这是文档站视觉取样，不是独立发布的品牌规范。"
+      },
+      {
+        "kind": "official-product-asset",
+        "url": "https://deepseek-harness.github.io/deepseek-harness/assets/style.CGm2E67g.css",
+        "note": "取样 --vp-c-bg-alt #F6F6F7、--vp-c-bg #FFFFFF、--vp-c-text-1 #3C3C43、--vp-c-text-2 #67676C。"
+      }
+    ]
+  },
+  "palette": {
+    "primary": "#3451B2",
+    "series": ["#3451B2"],
+    "other": "#929295",
+    "background": "#F6F6F7",
+    "text": "#3C3C43",
+    "mutedText": "#67676C",
+    "connector": "#67676C",
+    "neutral": {
+      "fill": "#FFFFFF",
+      "stroke": "#7373735C",
+      "text": "#3C3C43"
+    },
+    "secondary": {
+      "fill": "#FAFAFA",
+      "stroke": "#7373732E",
+      "text": "#3C3C43"
+    }
+  }
+}

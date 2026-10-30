@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 1000" width="1640" height="1000" role="img" aria-labelledby="overview-title overview-description">
+<title id="overview-title">Agent 与 DeepSeek Harness 架构规划</title>
+<desc id="overview-description">Harness 主 Agent 通过原生工具调用插件共享创作服务，人工画布入口调用同一服务。预设组合角色、技能与允许工具。服务校验控制权并维护数据与持久媒体任务。此为 PRD v0.2 目标架构，Agent 接入尚未实施。</desc>
+<rect width="1640" height="1000" fill="#F6F6F7"/>
+<defs><marker id="neutral-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M1 1 L7 4 L1 7 Z" fill="#67676C"/></marker><marker id="main-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M1 1 L7 4 L1 7 Z" fill="#3451B2"/></marker></defs>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="28">
+<tspan x="40" y="56">Agent 与 DeepSeek Harness · 架构规划</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="40" y="94">PRD v0.2 · 已选定的目标架构，Agent 专属接入尚未实施；具体创作功能与工具参数后续补充。</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="40" y="168">用户界面</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="40" y="200">现有界面基础 + 规划中的交接</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="460" y="168">Harness 宿主</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="460" y="200">复用会话、模型路由与 Agent 驱动</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="880" y="168">插件调用入口</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="880" y="200">按调用者适配，随插件交付</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="1240" y="168">插件共享运行时</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="1240" y="200">业务服务整合与控制规则待实施</tspan>
+</text>
+<rect x="40" y="240" width="280" height="118" rx="12" fill="#FFFFFF" stroke="#7373735C" stroke-width="1"/>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="60" y="280">Harness 对话界面</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="60" y="313">创作要求与 Agent 回复</tspan>
+<tspan x="60" y="333">原生提问卡片与答案</tspan>
+</text>
+<rect x="460" y="240" width="300" height="118" rx="12" fill="#FFFFFF" stroke="#7373735C" stroke-width="1"/>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="480" y="280">Harness 主 Agent</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="480" y="313">理解 / 规划 / 调度 / 取消</tspan>
+<tspan x="480" y="333">仅使用合格多模态模型</tspan>
+</text>
+<rect x="880" y="240" width="240" height="118" rx="12" fill="#FFFFFF" stroke="#7373735C" stroke-width="1"/>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="900" y="280">Agent 原生工具</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="900" y="313">通过 ctx.tools 注册</tspan>
+<tspan x="900" y="333">结构化意图与业务回执</tspan>
+</text>
+<rect x="1240" y="240" width="360" height="350" rx="12" fill="#3451B2" stroke="#3451B2" stroke-width="1"/>
+<text fill="#FFFFFF" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="1260" y="280">共享创作服务（只加载一次）</tspan>
+</text>
+<text fill="#FFFFFF" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="1260" y="313">会话与画布身份 · 单一操作者</tspan>
+<tspan x="1260" y="333">能力 / 引用 / 参数 / 权限校验</tspan>
+</text>
+<text fill="#FFFFFF" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="1260" y="400">所有入口遵守同一业务规则</tspan>
+<tspan x="1260" y="420">只发布已保存、已确认的结果</tspan>
+</text>
+<text fill="#FFFFFF" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="1260" y="488">接管立即撤销旧 Agent 写入权</tspan>
+<tspan x="1260" y="508">最终提交前再次核对调用资格</tspan>
+</text>
+<rect x="460" y="478" width="300" height="118" rx="12" fill="#FFFFFF" stroke="#7373735C" stroke-width="1"/>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="480" y="518">无限画布助手预设</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="480" y="551">角色与引导 · 技能 · 允许工具</tspan>
+<tspan x="480" y="571">随插件交付，作用域不授予写权</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="460" y="622">只开放已接入能力，限制绕过业务服务。</tspan>
+</text>
+<rect x="40" y="710" width="280" height="118" rx="12" fill="#FFFFFF" stroke="#7373735C" stroke-width="1"/>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="60" y="750">无限画布页面</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="60" y="783">人工编辑 / Agent 期间只读</tspan>
+<tspan x="60" y="803">接管、预览、下载与结果展示</tspan>
+</text>
+<rect x="880" y="710" width="240" height="118" rx="12" fill="#FFFFFF" stroke="#7373735C" stroke-width="1"/>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="900" y="750">人工操作入口</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="900" y="783">页面提交编辑与创作意图</tspan>
+<tspan x="900" y="803">调用同一业务接口</tspan>
+</text>
+<rect x="1240" y="710" width="360" height="118" rx="12" fill="#FFFFFF" stroke="#7373735C" stroke-width="1"/>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="20">
+<tspan x="1260" y="750">数据与持久媒体任务</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="1260" y="783">存量画布 / 任务队列 / 对象存储</tspan>
+<tspan x="1260" y="803">对接实际媒体生成模型与服务</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="40" y="480">对话创作时，自动定位画布侧栏。</tspan>
+<tspan x="40" y="500">画布展示实际完成的操作。</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="40" y="586">用户接管后进入人工编辑。</tspan>
+<tspan x="40" y="606">再次明确创作要求时同步并交回。</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="760" y="592">已确认状态与成果</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="1240" y="874">已接受任务独立追踪，不等同于对话轮次。</tspan>
+</text>
+<text fill="#3C3C43" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="40" y="902">同一画布、素材、模型配置与任务历史；切换操作者不复制项目。</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="40" y="940">一个插件包：页面 + 预设 + 原生工具 + 共享服务；图中列表示职责，不代表独立进程。</tspan>
+</text>
+<text fill="#67676C" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16">
+<tspan x="880" y="982">实线：调用与执行    虚线：配置或已确认结果</tspan>
+</text>
+<path d="M328 294 L452 294" fill="none" stroke="#67676C" stroke-width="1" stroke-linecap="round"  marker-end="url(#neutral-arrow)"/>
+<path d="M768 294 L872 294" fill="none" stroke="#67676C" stroke-width="1" stroke-linecap="round"  marker-end="url(#neutral-arrow)"/>
+<path d="M1128 294 L1232 294" fill="none" stroke="#3451B2" stroke-width="2" stroke-linecap="round"  marker-end="url(#main-arrow)"/>
+<path d="M610 470 L610 366" fill="none" stroke="#67676C" stroke-width="1" stroke-linecap="round" stroke-dasharray="6 6" marker-end="url(#neutral-arrow)"/>
+<path d="M328 770 L872 770" fill="none" stroke="#67676C" stroke-width="1" stroke-linecap="round"  marker-end="url(#neutral-arrow)"/>
+<path d="M1128 760 L1232 554" fill="none" stroke="#67676C" stroke-width="1" stroke-linecap="round"  marker-end="url(#neutral-arrow)"/>
+<path d="M1232 580 L180 702" fill="none" stroke="#67676C" stroke-width="1" stroke-linecap="round" stroke-dasharray="6 6" marker-end="url(#neutral-arrow)"/>
+<path d="M1420 598 L1420 702" fill="none" stroke="#67676C" stroke-width="1" stroke-linecap="round"  marker-end="url(#neutral-arrow)"/>
+</svg>

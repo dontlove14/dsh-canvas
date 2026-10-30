@@ -1,0 +1,151 @@
+{
+  "id": "dsh-agent-architecture-v02",
+  "version": 1,
+  "tags": [
+    "task",
+    "evidence-backed"
+  ],
+  "brandEvidence": {
+    "name": "DeepSeek Harness · Agent 架构规划",
+    "checkedAt": "2026-10-30",
+    "sources": [
+      {
+        "kind": "official-product-website",
+        "url": "https://deepseek-harness.github.io/deepseek-harness/",
+        "note": "当前 Harness 官方文档站的浅色 CSS：--vp-c-brand-1 解析为 --vp-c-indigo-1 #3451B2；这是文档站视觉取样，不是独立发布的品牌规范。"
+      },
+      {
+        "kind": "official-product-asset",
+        "url": "https://deepseek-harness.github.io/deepseek-harness/assets/style.CGm2E67g.css",
+        "note": "取样 --vp-c-bg-alt #F6F6F7、--vp-c-bg #FFFFFF、--vp-c-text-1 #3C3C43、--vp-c-text-2 #67676C。"
+      }
+    ],
+    "derivations": [
+      {
+        "role": "node.primary.text",
+        "method": "wcag-contrast-choice",
+        "basis": "Compared #FFFFFF and #0A0A0A on #3451B2; chose #FFFFFF."
+      },
+      {
+        "role": "node.emphasis.fill",
+        "method": "primary-overlay",
+        "basis": "Blended #3451B2 at 12% over #F6F6F7; derived #DFE2EF."
+      },
+      {
+        "role": "node.emphasis.text",
+        "method": "wcag-contrast-choice",
+        "basis": "Compared #FFFFFF and #0A0A0A on #DFE2EF; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[0].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#929295",
+        "basis": "Compared #FFFFFF and #0A0A0A on #929295; chose #0A0A0A."
+      }
+    ]
+  },
+  "document": {
+    "background": "#F6F6F7",
+    "text": "#3C3C43",
+    "mutedText": "#67676C",
+    "connector": "#67676C",
+    "primaryConnector": "#3451B2"
+  },
+  "node": {
+    "neutral": {
+      "fill": "#FFFFFF",
+      "stroke": "#7373735C",
+      "text": "#3C3C43"
+    },
+    "primary": {
+      "fill": "#3451B2",
+      "stroke": "#3451B2",
+      "text": "#FFFFFF"
+    },
+    "emphasis": {
+      "fill": "#DFE2EF",
+      "stroke": "#3451B2",
+      "text": "#0A0A0A"
+    },
+    "secondary": {
+      "fill": "#FAFAFA",
+      "stroke": "#7373732E",
+      "text": "#3C3C43"
+    }
+  },
+  "style": {
+    "shape": {
+      "roughness": 0,
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "fillStyle": "solid",
+      "opacity": 100,
+      "roundness": {
+        "type": 3
+      }
+    },
+    "text": {
+      "fontFamily": "helvetica",
+      "fontFamilyAliases": [
+        2,
+        "2"
+      ],
+      "codeFontFamily": "cascadia",
+      "codeFontFamilyAliases": [
+        3,
+        "3"
+      ],
+      "fontSize": 16,
+      "groupTitleFontSize": 20,
+      "titleFontSize": 28
+    },
+    "arrow": {
+      "roughness": 0,
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "opacity": 100,
+      "route": "straight",
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "roundness": null,
+      "elbowed": false
+    },
+    "allowed": {
+      "strokeWidths": [
+        1,
+        2
+      ],
+      "strokeStyles": [
+        "solid",
+        "dashed"
+      ],
+      "rectangleRoundnessTypes": [
+        null,
+        3
+      ],
+      "arrowRoutes": [
+        "straight",
+        "elbowed",
+        "curved"
+      ],
+      "arrowheads": [
+        null,
+        "triangle"
+      ]
+    }
+  },
+  "data": {
+    "accents": [],
+    "other": "#929295",
+    "labelRoles": [
+      {
+        "fill": "#929295",
+        "text": "#0A0A0A"
+      }
+    ]
+  },
+  "semantic": {},
+  "series": [
+    "#3451B2"
+  ]
+}
