@@ -558,6 +558,16 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-native-modal.wide{width:min(1050px,100%)}
 .dc-native-modal:is(.dc-move-dialog,.dc-name-dialog,.dc-review-dialog,.dc-confirm-dialog){width:min(440px,100%)}
 .dc-ui-modal-content{min-height:0;overflow:auto}
+/* The public content hook contains both the native header and its body.
+   Let only the settings panel scroll, keeping the title and tabs outside it. */
+.dc-settings-modal .dc-ui-modal-content{overflow:hidden}
+.dc-settings-modal .dc-ui-modal-content>div{flex-shrink:0}
+.dc-settings-modal .dc-ui-modal-content>div:has(>.dc-canvas-settings){min-height:0;flex:1;overflow:hidden}
+.dc-settings-modal .dc-canvas-settings{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.dc-settings-modal .dc-settings-tabs{flex:none;margin-top:0}
+.dc-settings-modal .dc-settings-panel{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.dc-modal.dc-settings-modal[open]{display:flex;flex-direction:column;overflow:hidden}
+.dc-modal.dc-settings-modal>.dc-sr-only{position:static;flex:none;width:auto;height:auto;margin:0 32px 20px 0;overflow:visible;clip:auto;white-space:normal;font-size:16px;line-height:24px}
 .dc-ui-modal-content .dc-media{height:60vh}
 .dc-storage .dc-ui-input{margin-bottom:12px}
 
@@ -700,9 +710,16 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 
 /* Task catalog: compact search strip, directory-only table and shared controls. */
 .dc-tasks-modal{--dc-task-accent:var(--dsw-alias-interactive-primary,#409eff)}
-.dc-modal.dc-tasks-modal{width:1360px;padding:26px}
-.dc-native-modal.wide.dc-tasks-modal{width:min(1360px,100%)}
-.dc-task-catalog{display:flex;flex-direction:column;gap:16px;min-width:0}
+.dc-modal.dc-tasks-modal{width:1360px;height:calc(100dvh - 48px);max-height:880px;padding:26px;overflow:hidden}
+.dc-modal.dc-tasks-modal[open]{display:flex;flex-direction:column}
+.dc-native-modal.wide.dc-tasks-modal{width:min(1360px,100%);height:100%;max-height:min(880px,100%);overflow:hidden}
+.dc-tasks-modal .dc-ui-modal-content{display:flex;flex-direction:column;flex:1;overflow:hidden}
+.dc-tasks-modal .dc-ui-modal-content>div{flex-shrink:0}
+.dc-tasks-modal .dc-ui-modal-content>div:has(>.dc-task-dialog-body){display:flex;flex:1;min-height:0;overflow:hidden}
+.dc-task-dialog-body,.dc-task-list-view:not([hidden]){display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;overflow:hidden}
+.dc-task-list-view[hidden]{display:none}
+.dc-task-catalog{display:flex;flex-direction:column;flex:1;gap:16px;min-width:0;min-height:0;overflow:hidden}
+.dc-task-catalog>h2,.dc-task-search,.dc-task-query-error{flex:none}
 .dc-task-catalog>h2{font-size:18px;font-weight:600;margin:0}
 .dc-native-modal .dc-task-catalog>h2{display:none}
 .dc-task-search{background:var(--dc-raised);border-radius:8px;padding:14px 16px 12px}
@@ -715,11 +732,13 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-task-search-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px;min-height:28px}
 .dc-task-search-actions>[role=alert]{margin-right:auto;color:var(--dc-danger)}
 .dc-task-query-error{display:flex;align-items:center;gap:12px;color:var(--dc-danger)}
-.dc-task-table-scroll{overflow:auto;min-height:240px;max-height:calc(100vh - 380px);border:1px solid var(--dc-border);border-radius:6px}
-.dc-task-table{width:100%;min-width:1300px;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:12px;line-height:20px}
+.dc-task-table-scroll{flex:1;overflow:auto;min-height:0;overscroll-behavior:contain;border:1px solid var(--dc-border);border-radius:6px}
+.dc-task-table{width:100%;min-width:1590px;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:12px;line-height:20px}
 .dc-task-table .task-id{width:180px}
 .dc-task-table .task-folder,.dc-task-table .task-canvas{width:180px}
 .dc-task-table .task-node{width:200px}
+.dc-task-table .task-model{width:180px}
+.dc-task-table .task-provider{width:110px}
 .dc-task-table .task-status{width:110px}
 .dc-task-table .task-time{width:175px}
 .dc-task-table .task-action{width:100px}
@@ -743,7 +762,7 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-task-status-pill.unknown{background:var(--dc-warning-bg);color:var(--dc-warning)}
 .dc-task-status-pill.abandoned{background:var(--dc-raised);color:var(--dc-muted)}
 .dc-tasks-modal .dc-link-button{color:var(--dc-task-accent);font-size:12px}
-.dc-task-footer{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;min-height:32px}
+.dc-task-footer{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:12px 20px;min-height:32px}
 .dc-task-copy-feedback{color:var(--dc-success);font-size:12px}
 .dc-task-copy-feedback.failed{color:var(--dc-danger)}
 .dc-task-footer>.dc-pagination{margin-left:auto}
@@ -757,8 +776,11 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-pagination-jump{display:flex;align-items:center;gap:8px;margin-left:12px;white-space:nowrap}
 .dc-pagination-jump .dc-ui-input{flex:none;width:56px;text-align:center}
 .dc-pagination-jump .dc-ui-input input{text-align:center}
-.dc-task-detail-view{display:flex;flex-direction:column;gap:18px;min-width:0}
-.dc-task-detail-view>header{display:flex;align-items:center;gap:14px}
+.dc-task-detail-view{display:flex;flex-direction:column;flex:1;gap:18px;min-width:0;min-height:0;overflow:hidden}
+.dc-task-detail-view>header{display:flex;flex:none;align-items:center;gap:14px}
+.dc-native-modal .dc-task-detail-view>header h2{display:none}
+.dc-task-detail-scroll{display:flex;flex-direction:column;gap:18px;min-height:0;overflow:auto;overscroll-behavior:contain}
+.dc-task-detail-scroll>*{flex:none}
 .dc-task-detail-view h2{margin:0;font-size:18px;font-weight:600}
 .dc-task-detail-meta{display:grid;grid-template-columns:1fr 1fr;gap:18px 28px;margin:0;background:var(--dc-raised);border-radius:8px;padding:18px}
 .dc-task-detail-meta>div{display:flex;align-items:flex-start;gap:14px;min-width:0}
@@ -808,5 +830,5 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-datetime-popup .dc-ui-button{display:inline-flex;align-items:center;justify-content:center;height:28px;border:0;padding:0 9px;border-radius:5px;color:inherit;background:transparent;font:inherit;cursor:pointer}
 .dc-datetime-popup .dc-ui-button.outline{border:1px solid var(--dc-border)}
 .dc-datetime-popup input.dc-ui-input{border:1px solid var(--dc-border);background:var(--dc-input);border-radius:4px;padding:4px 8px}
-@media(max-width:850px){.dc-task-detail-meta{grid-template-columns:1fr}.dc-task-table-scroll{max-height:45vh}.dc-pagination{justify-content:flex-start}.dc-task-catalog{gap:12px}}
+@media(max-width:850px){.dc-task-detail-meta{grid-template-columns:1fr}.dc-pagination{justify-content:flex-start}.dc-task-catalog{gap:12px}}
 @media(max-width:540px){.dc-modal.dc-tasks-modal{padding:26px 12px 16px}.dc-task-search{padding:12px}.dc-datetime-trigger{gap:6px!important;font-size:10px!important}.dc-datetime-fields{grid-template-columns:1fr 1fr}.dc-datetime-fields>span{display:none}.dc-datetime-calendars{grid-template-columns:1fr}.dc-datetime-calendar+section{border-left:0;border-top:1px solid var(--dc-border)}.dc-datetime-hint{display:none}.dc-datetime-popup footer{justify-content:flex-end}.dc-task-detail-meta{padding:12px}}

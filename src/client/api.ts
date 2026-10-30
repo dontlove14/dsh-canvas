@@ -7,7 +7,8 @@ import type { ReviewSettings, ReviewSettingsInput, ReviewProvider, ReviewPage, R
 import { ApiError, ResumableUploads, uploadCacheFor } from './resumableUploads'
 import { UploadSessionSchema, UploadStatusSchema, UploadResultSchema, type UploadStatus } from '../shared/uploads'
 import type { CachedUpload } from './uploadCache'
-import { seedanceGenerationParams, seedanceInputCapabilities, validateSeedanceConnections } from '../shared/seedance'
+import { isMultimodalVideo } from '../shared/modelCatalog'
+import { videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
 export { ApiError } from './resumableUploads'
 
 export class CanvasApi {
@@ -120,14 +121,14 @@ export class CanvasApi {
           throw new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')
         if (!model && asset.kind !== 'image') throw new Error('请先选择支持这类素材的模型')
         const references = snapshot.graph.edges.filter((edge) => edge.target === target.id)
-        const params = model?.protocol === 'seedance-video' && target.params && !isTtsParams(target.params)
-          ? seedanceGenerationParams(target.params, references.map((edge) => edge.assetId)) : target.params
-        const caps = model && seedanceInputCapabilities(model, !isTtsParams(params) ? params : null)
+        const params = model && isMultimodalVideo(model) && target.params && !isTtsParams(target.params)
+          ? videoGenerationParams(target.params, references.map((edge) => edge.assetId), model) : target.params
+        const caps = model && videoInputCapabilities(model, !isTtsParams(params) ? params : null)
         if (caps && (!caps.referenceKinds.includes(asset.kind) || references.length >= caps.maxReferences))
           throw new Error('当前模型不支持这份素材，或引用数量已达上限')
-        if (model?.protocol === 'seedance-video' && params && !isTtsParams(params))
-          validateSeedanceConnections(seedanceGenerationParams(params, [...references.map((edge) => edge.assetId), asset.id]),
-            [...references.map((edge) => snapshot.assets.find((item) => item.id === edge.assetId)!), asset], model.model_id)
+        if (model && isMultimodalVideo(model) && params && !isTtsParams(params))
+          validateVideoConnections(videoGenerationParams(params, [...references.map((edge) => edge.assetId), asset.id], model),
+            [...references.map((edge) => snapshot.assets.find((item) => item.id === edge.assetId)!), asset], model)
       } catch (error) { throw new ApiError(error instanceof Error ? error.message : '素材连接失败', 'REFERENCE_INVALID', 400) }
       const edge = { id: job.requestId, source: nodeId, target: target.id, assetId: resource.assetId }
       try {

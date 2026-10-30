@@ -7,7 +7,7 @@ import { sql, type Statement } from './persistence/database'
 import { Uploads } from './media/uploads'
 import { isMockModel } from '../shared/mockModels'
 import { renderMock } from './mockGeneration'
-import { isBananaImage, isSeedreamImage } from '../shared/modelCatalog'
+import { isBananaImage, isSeedreamImage, isMultimodalVideo } from '../shared/modelCatalog'
 
 export interface RuntimeConfig { maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; maxMediaBytes: number; maxReferenceBytes: number }
 /** Long-lived host lifecycle. Neither a request signal nor a Peer owns this controller. */
@@ -49,7 +49,7 @@ export class CanvasRuntime {
   }
   isActive(id: string): boolean { return this.active.has(id) }
   private pollDelay(task: Task): number {
-    return task.snapshot.model.protocol === 'seedance-video' ? Math.max(3000, this.config.pollIntervalMs) : this.config.pollIntervalMs
+    return isMultimodalVideo(task.snapshot.model) ? Math.max(3000, this.config.pollIntervalMs) : this.config.pollIntervalMs
   }
   wake(): void {
     if (this.controller.signal.aborted) return

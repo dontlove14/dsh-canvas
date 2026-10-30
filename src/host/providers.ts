@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { CanvasError, detectMedia, type Output } from './store'
 import { FISH_TTS_MODEL, isTtsSnapshot, validateGeneration, type Asset, type AnyTaskSnapshot, type TtsTaskSnapshot, type TaskSnapshot } from '../shared/contracts'
-import { isGptImage25, builtinDefinition, bananaSizePresets, providerFor, seedreamSizePresets, seedreamRequiresEndpoint, seedanceRequiresEndpoint } from '../shared/modelCatalog'
+import { isGptImage25, builtinDefinition, bananaSizePresets, providerFor, seedreamSizePresets, seedreamRequiresEndpoint, seedanceRequiresEndpoint, isMultimodalVideo } from '../shared/modelCatalog'
 import { receive } from './media/files'
 import { ReviewAssetIdSchema } from '../shared/seedanceReview'
 
@@ -14,7 +14,7 @@ export interface ProviderResult { id?: string; status: 'queued' | 'generating' |
 export interface ProviderOptions { requestTimeoutMs: number; maxMediaBytes: number; maxReferenceBytes: number }
 export interface MediaReader {
   readMedia(id: string, limit: number, taskId?: string): Promise<Buffer>; stagePath(name: string): string
-  inspectReference?(taskId: string, assetId: string, signal: AbortSignal): Promise<Asset>
+  inspectReference?(taskId: string, assetId: string, signal: AbortSignal, protocol?: string): Promise<Asset>
   modelReferenceUrl?(taskId: string, assetId: string): Promise<string>
 }
 interface VideoReference { asset: Asset; url: string; approvedAsset?: boolean }
@@ -51,24 +51,26 @@ export class Providers {
     })
     if (!response.ok) {
       const body: Record<string, any> = await jsonResponse(response, 64 * 1024).catch(() => ({}))
-      const message = typeof body.error?.message === 'string' ? body.error.message : `模型服务返回 HTTP ${response.status}`
+      const message = typeof body.error?.message === 'string' ? body.error.message
+        : typeof body.message === 'string' ? body.message : `模型服务返回 HTTP ${response.status}`
       // A gateway/server failure may happen after the provider accepted the request.
       throw new ProviderFailure(message, response.status >= 400 && response.status < 500 && ![408, 409, 429].includes(response.status))
     }
     return jsonResponse(response, Math.ceil(this.options.maxMediaBytes * 1.4) + 1024 * 1024)
   }
   async prepare(snapshot: AnyTaskSnapshot, taskId?: string): Promise<PreparedReferences> {
-    if (snapshot.model.protocol === 'seedance-video') {
+    if (isMultimodalVideo(snapshot.model)) {
       const references = new Map<string, VideoReference>()
       if (snapshot.referenceIds.length && (!taskId || !this.store.inspectReference || !this.store.modelReferenceUrl))
         throw new ProviderFailure('视频参考素材需要已接受的任务及对象存储', true)
       // One temporary file at a time; no aggregate video buffers or Base64 payload.
       for (const id of snapshot.referenceIds) {
-        const asset = await this.store.inspectReference!(taskId!, id, this.signal)
+        const asset = await this.store.inspectReference!(taskId!, id, this.signal, snapshot.model.protocol)
         references.set(id, { asset, url: '' })
       }
       validateGeneration(snapshot as TaskSnapshot, [...references.values()].map((item) => item.asset))
-      const approved = taskId && this.reviewReferences ? await this.reviewReferences(taskId, snapshot as TaskSnapshot) : new Map<string, string>()
+      const approved = snapshot.model.protocol === 'seedance-video' && taskId && this.reviewReferences
+        ? await this.reviewReferences(taskId, snapshot as TaskSnapshot) : new Map<string, string>()
       // Sign only after potentially slow inspection, immediately before submission.
       for (const [id, reference] of references) {
         reference.approvedAsset = approved.has(id)
@@ -91,6 +93,8 @@ export class Providers {
     if (isTtsSnapshot(snapshot)) return this.submitTts(snapshot, key)
     const input = prepared ?? await this.prepare(snapshot)
     if (snapshot.model.protocol === 'seedance-video') return this.submitSeedance(snapshot, key, input as Map<string, VideoReference>)
+    if (snapshot.model.protocol === 'wan-video') return this.submitWan(snapshot, key, input as Map<string, VideoReference>)
+    if (snapshot.model.protocol === 'minimax-video') return this.submitMiniMax(snapshot, key, input as Map<string, VideoReference>)
     const references = input as Map<string, Buffer>
     const { model, params, prompt, referenceIds } = snapshot
     if (model.protocol === 'seedream-image') return this.submitSeedream(snapshot, key, references)
@@ -152,6 +156,92 @@ export class Providers {
     }
     if (!outputs.length) throw new ProviderFailure('模型返回了无法识别的图片结果，提交结果需要确认', false)
     return { status: 'completed', outputs, ...(outputs.length !== params.n ? { error: `部分失败：请求 ${params.n} 张，收到 ${outputs.length} 张有效图片` } : {}) }
+  }
+  private nativeVideoMedia(snapshot: TaskSnapshot, key: string, references: Map<string, VideoReference>) {
+    const { model, params, referenceIds } = snapshot
+    if (!builtinDefinition(model) || !key || model.endpoint_id) throw new ProviderFailure('请前往设置页面配置模型', true)
+    const assets = referenceIds.map((id) => references.get(id)?.asset)
+    if (assets.some((asset) => !asset)) throw new ProviderFailure('视频参考素材未准备完成', true)
+    try { validateGeneration(snapshot, assets as Asset[]) }
+    catch (error) { throw new ProviderFailure(error instanceof Error ? error.message : '视频参数或参考素材无效', true) }
+    return referenceIds.map((id) => {
+      const reference = references.get(id)!
+      let url: URL
+      try { url = new URL(reference.url) } catch { throw new ProviderFailure('视频参考地址无效', true) }
+      if (reference.approvedAsset || url.protocol !== 'https:' || url.username || url.password)
+        throw new ProviderFailure('视频参考地址无效', true)
+      return { role: params.videoMode === 'frames' ? id === params.firstFrameId ? 'first_frame' : 'last_frame'
+        : `reference_${reference.asset.kind}`, kind: reference.asset.kind, url: url.href }
+    })
+  }
+  private async submitWan(snapshot: TaskSnapshot, key: string, references: Map<string, VideoReference>): Promise<ProviderResult> {
+    const { model, params, prompt } = snapshot
+    const media = this.nativeVideoMedia(snapshot, key, references).map(({ role, url }) => ({ type: role, url }))
+    const [resolution, ratio] = params.size.split('/')
+    const body = await this.request(endpoint(model.api_base, 'services/aigc/video-generation/video-synthesis'), key, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-DashScope-Async': 'enable' },
+      body: JSON.stringify({ model: model.model_id, input: { prompt, ...(media.length ? { media } : {}) },
+        parameters: { resolution, ratio, duration: params.seconds, audio: params.generateAudio ?? true, prompt_extend: true, watermark: false } }),
+    })
+    if (typeof body.code === 'string' && body.code) return { status: 'failed',
+      error: typeof body.message === 'string' ? body.message : 'Wan 提交失败', errorCode: body.code.slice(0, 160) }
+    return this.wanResult(body)
+  }
+  private async submitMiniMax(snapshot: TaskSnapshot, key: string, references: Map<string, VideoReference>): Promise<ProviderResult> {
+    const { model, params, prompt } = snapshot
+    const media = this.nativeVideoMedia(snapshot, key, references).map(({ role, kind, url }) => {
+      const type = `${kind}_url`
+      return { type, [type]: { url }, role }
+    })
+    const [resolution, ratio] = params.size.split('/')
+    const body = await this.request(endpoint(model.api_base, 'v2/video_generation'), key, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model.model_id, content: [{ type: 'text', text: prompt }, ...media],
+        resolution, ratio, duration: params.seconds, ...(providerFor(model)?.id === 'minimax' ? { aigc_watermark: false } : {}) }),
+    })
+    if (body.error) return { status: 'failed', error: typeof body.error.message === 'string' ? body.error.message : 'MiniMax H3 提交失败',
+      errorCode: typeof body.error.code === 'string' ? body.error.code.slice(0, 160) : 'EXTERNAL_FAILED' }
+    if (typeof body.task_id !== 'string' || !body.task_id || body.task_id.length > 512)
+      throw new ProviderFailure('MiniMax H3 没有返回有效任务 ID', false)
+    return { id: body.task_id, status: 'queued' }
+  }
+  private minimaxResult(body: Record<string, any>, expectedId: string): ProviderResult {
+    const task = body.task
+    if (typeof task?.id !== 'string' || !task.id || task.id.length > 512 || task.id !== expectedId)
+      throw new ProviderFailure('MiniMax H3 没有返回匹配的任务 ID', false)
+    const states = { queued: 'queued', running: 'generating', succeeded: 'completed', failed: 'failed', cancelled: 'failed' } as const
+    const status = states[task.status as keyof typeof states]
+    if (!status) throw new ProviderFailure('MiniMax H3 返回未知任务状态', false)
+    if (status === 'failed') return { id: task.id, status,
+      error: typeof task.error?.message === 'string' ? task.error.message : task.status === 'cancelled' ? 'MiniMax H3 任务已取消' : 'MiniMax H3 视频生成失败',
+      errorCode: typeof task.error?.code === 'string' ? task.error.code.slice(0, 160) : `MINIMAX_${String(task.status).toUpperCase()}` }
+    if (status !== 'completed') return { id: task.id, status }
+    let url: URL
+    try { url = new URL(task.content?.url) } catch { throw new ProviderFailure('MiniMax H3 成功任务没有返回有效视频地址', false) }
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password)
+      throw new ProviderFailure('MiniMax H3 返回的视频地址无效', false)
+    return { id: task.id, status, outputs: [{ id: randomUUID(), mime: 'video/mp4',
+      filename: 'generated-video.mp4', url: url.href, authenticated: false }] }
+  }
+  private wanResult(body: Record<string, any>, expectedId?: string): ProviderResult {
+    const output = body.output
+    if (typeof output?.task_id !== 'string' || !output.task_id || output.task_id.length > 512
+      || expectedId && output.task_id !== expectedId) throw new ProviderFailure('Wan 没有返回匹配的任务 ID', false)
+    const states = { PENDING: 'queued', RUNNING: 'generating', SUCCEEDED: 'completed',
+      FAILED: 'failed', CANCELED: 'failed', UNKNOWN: 'failed' } as const
+    const status = states[output.task_status as keyof typeof states]
+    if (!status) throw new ProviderFailure('Wan 返回未知任务状态', false)
+    if (status === 'failed') return { id: output.task_id, status,
+      error: typeof output.message === 'string' ? output.message : output.task_status === 'UNKNOWN' ? 'Wan 任务已过期'
+        : output.task_status === 'CANCELED' ? 'Wan 任务已取消' : 'Wan 视频生成失败',
+      errorCode: typeof output.code === 'string' ? output.code.slice(0, 160) : `WAN_${output.task_status}` }
+    if (status !== 'completed') return { id: output.task_id, status }
+    let url: URL
+    try { url = new URL(output.video_url) } catch { throw new ProviderFailure('Wan 成功任务没有返回有效视频地址', false) }
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password)
+      throw new ProviderFailure('Wan 返回的视频地址无效', false)
+    return { id: output.task_id, status, outputs: [{ id: randomUUID(), mime: 'video/mp4',
+      filename: 'generated-video.mp4', url: url.href, authenticated: false }] }
   }
   private async submitSeedance(snapshot: TaskSnapshot, key: string, references: Map<string, VideoReference>): Promise<ProviderResult> {
     const { model, prompt, params, referenceIds } = snapshot
@@ -364,6 +454,14 @@ export class Providers {
   }
   async poll(snapshot: AnyTaskSnapshot, key: string, id: string): Promise<ProviderResult> {
     if (isTtsSnapshot(snapshot)) throw new ProviderFailure('FishTTS 没有可恢复查询的外部任务 ID', true)
+    if (snapshot.model.protocol === 'minimax-video') {
+      const body = await this.request(endpoint(snapshot.model.api_base, `v2/query/video_generation/${encodeURIComponent(id)}`), key)
+      return this.minimaxResult(body, id)
+    }
+    if (snapshot.model.protocol === 'wan-video') {
+      const body = await this.request(endpoint(snapshot.model.api_base, `tasks/${encodeURIComponent(id)}`), key)
+      return this.wanResult(body, id)
+    }
     if (snapshot.model.protocol === 'seedance-video') {
       const body = await this.request(endpoint(snapshot.model.api_base, `contents/generations/tasks/${encodeURIComponent(id)}`), key)
       return this.seedanceResult(body, id)

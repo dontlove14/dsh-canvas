@@ -1,6 +1,6 @@
 import { useViewport } from '@xyflow/react'
 import { isTtsSnapshot, type AnyTaskSnapshot, type Asset } from '../shared/contracts'
-import { providerFor, SEEDANCE_VIDEO_MODES } from '../shared/modelCatalog'
+import { providerFor, SEEDANCE_VIDEO_MODES, isMultimodalVideo } from '../shared/modelCatalog'
 import type { CanvasApi } from './api'
 import { SignedImage } from './SignedMedia'
 import { nodeEditorPosition } from './nodeOverlayLayout'
@@ -25,8 +25,8 @@ export function GenerationSnapshotEditor({ api, workspace, snapshot, assets = []
           {assets.find((asset) => asset.id === id)?.kind && assets.find((asset) => asset.id === id)!.kind !== 'image'
             ? <span className="dc-reference-placeholder"><MediaIcon kind={assets.find((asset) => asset.id === id)!.kind} size={28} /></span>
             : <SignedImage api={api} canvas={workspace} assetId={id} alt={`参考素材 ${index + 1}`} />}
-          <small className={snapshot.model.protocol === 'seedance-video' && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames' ? 'dc-frame-label' : ''}>{
-            snapshot.model.protocol === 'seedance-video' && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames'
+          <small className={isMultimodalVideo(snapshot.model) && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames' ? 'dc-frame-label' : ''}>{
+            isMultimodalVideo(snapshot.model) && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames'
               ? snapshot.params.firstFrameId === id ? '首帧' : '尾帧' : index + 1}</small>
         </div>)}
       </div>}

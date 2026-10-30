@@ -161,8 +161,8 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
     {active && moveTarget && <MoveDialog canvas={moveTarget} folders={catalog?.folders ?? []} busy={busy} error={commandError} onClose={() => setMoveTarget(null)} onMove={async (folderId) => {
       if (await command({ operation: 'canvas-move', id: moveTarget.id, revision: moveTarget.revision, folderId })) setMoveTarget(null)
     }} />}
-    {active && showSettings && <UiModal label="无限画布" onClose={() => { setShowSettings(false); setRefresh((v) => v + 1) }}>
-      <CanvasSettings api={api} onChanged={() => { setCommandError(''); setRefresh((v) => v + 1) }} />
+    {active && showSettings && <UiModal label="无限画布" className="dc-settings-modal" onClose={() => { setShowSettings(false); setRefresh((v) => v + 1) }}>
+      <CanvasSettings api={api} showTitle={false} onChanged={() => { setCommandError(''); setRefresh((v) => v + 1) }} />
     </UiModal>}
   </div>
 }

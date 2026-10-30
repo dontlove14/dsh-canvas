@@ -143,7 +143,7 @@ it('shows the logical model name in canvas editing, immutable history and task c
     modelId: model.id, prompt: '树木', params: defaultParams(model), assetId: null, selectedResultId: null }
   const task: Task = { id: crypto.randomUUID(), workspaceId: 'w', nodeId: node.id, status: 'completed', createdAt: 1, updatedAt: 2,
     resultIds: [], snapshot: { model, prompt: node.prompt, params: node.params, referenceIds: [] } }
-  const detail: TaskDetail = { task, kind: 'generation', phase: 'completed', externalTaskId: null, externalCompletedAt: 2,
+  const detail: TaskDetail = { modelName: model.name, providerName: 'ByteDance', task, kind: 'generation', phase: 'completed', externalTaskId: null, externalCompletedAt: 2,
     successAt: 2, failureStage: null, failureCode: null, failureMessage: null, attempts: [] }
   const state: CanvasSnapshot = { version: 1, workspaceId: 'w', graphRevision: 1, graph: { ...emptyGraph(), nodes: [node] },
     assets: [], tasks: [], updatedAt: 1, commitHash: 'a'.repeat(64), hashes: { nodes: {}, edges: {}, viewport: '' } }
@@ -159,8 +159,8 @@ it('shows the logical model name in canvas editing, immutable history and task c
   mount(<ReactFlowProvider><GenerationSnapshotEditor api={api} workspace="w" snapshot={task.snapshot} anchor={{ position: node.position, size: { width: 320, height: 200 } }} /></ReactFlowProvider>)
   expect(document.body.textContent).toContain('生成记录')
   const row: TaskRow = { id: task.id, canvasId: 'w', nodeId: node.id, folderName: '', canvasName: '测试', nodeName: node.title,
-    type: 'image', status: task.status, createdAt: 1, updatedAt: 2 }
-  vi.spyOn(api, 'searchTasks').mockResolvedValue({ items: [row], total: 1, page: 1, pageSize: 20, upperBound: 1 })
+    modelName: model.name, providerName: 'ByteDance', type: 'image', status: task.status, createdAt: 1, updatedAt: 2 }
+  vi.spyOn(api, 'searchTasks').mockResolvedValue({ items: [row], total: 1, page: 1, pageSize: 10, upperBound: 1 })
   mount(<TaskDialog api={api} onClose={vi.fn()} />)
   await act(async () => {})
   await act(async () => button(document, '查看详情').click())

@@ -43,6 +43,11 @@ describe('unified object storage settings', () => {
     act(() => button(host, '前往设置').click())
     await act(async () => { await Promise.resolve() })
     expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('对象存储')
+    const modal = document.querySelector('.dc-settings-modal')!
+    expect(modal.querySelectorAll('h2')).toHaveLength(1)
+    expect(modal.querySelector('.dc-canvas-settings>h2')).toBeNull()
+    const panel = modal.querySelector('.dc-settings-panel')!
+    expect(panel.contains(modal.querySelector('[role="tablist"]'))).toBe(false)
   })
   it('keeps failed settings reads distinct from an empty configuration', async () => {
     const api = new CanvasApi()
@@ -75,6 +80,7 @@ describe('unified object storage settings', () => {
     expect([...host.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['对象存储', '模型设置', 'TTS 设置', 'Seedance 预审'])
     expect([...host.querySelectorAll('select option')].map((o) => o.textContent)).toEqual(['阿里云 OSS'])
     expect(host.textContent).not.toContain('宿主媒体根目录')
+    expect(host.querySelector('.dc-canvas-settings>h2')?.textContent).toBe('无限画布')
   })
   it('captures playback before changing a signed source and restores time/playing on metadata', async () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()

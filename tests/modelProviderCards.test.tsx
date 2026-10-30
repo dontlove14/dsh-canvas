@@ -38,16 +38,16 @@ function choose(host: ParentNode, value: string) {
   act(() => { element.value = value; element.dispatchEvent(new Event('change', { bubbles: true })) })
 }
 
-it('groups all image/video endpoints into five provider cards and shows each saved combination once without addresses', async () => {
+it('groups all image/video endpoints into seven provider cards and shows each saved combination once without addresses', async () => {
   const list = catalog().map((model) => ({ ...model, has_api_key: true, api_key_mask: KEY_MASK,
     ...(modelRequiresEndpoint(model) ? { endpoint_id: 'ep-private-card' } : {}) }))
   const f = await mount(list)
   expect([...f.host.querySelectorAll('.dc-provider-heading h4')].map((heading) => heading.textContent))
-    .toEqual(['Model Link', 'OpenAI', 'Gemini', 'ByteDance', 'BytePlus'])
-  expect(f.host.querySelectorAll('.dc-provider-model')).toHaveLength(30)
+    .toEqual(['Model Link', 'OpenAI', 'Gemini', 'ByteDance', 'BytePlus', 'Aliyun', 'MiniMax'])
+  expect(f.host.querySelectorAll('.dc-provider-model')).toHaveLength(39)
   const link = f.host.querySelector('[data-provider="model-link"]')!
-  expect(link.querySelectorAll('.dc-provider-model')).toHaveLength(12)
-  expect(link.textContent).toContain('12 / 12 已配置')
+  expect(link.querySelectorAll('.dc-provider-model')).toHaveLength(15)
+  expect(link.textContent).toContain('15 / 15 已配置')
   expect(link.textContent).toContain('Nano Banana Pro')
   expect(link.textContent).toContain('Doubao Seedance 2.5')
   expect(f.host.textContent).not.toMatch(/https?:|Base URL|ep-private-card/)
@@ -125,7 +125,7 @@ it('adds from a provider card with only supported models and resolves the video 
   const list = catalog(), f = await mount(list)
   act(() => f.button('配置 Model Link 模型').click())
   const choices = [...f.host.querySelector<HTMLSelectElement>('[aria-label="配置模型"]')!.options].map((option) => option.value).filter(Boolean)
-  expect(choices).toHaveLength(12); expect(choices).not.toContain('image:dola-seedream-5-0-260128')
+  expect(choices).toHaveLength(15); expect(choices).not.toContain('image:dola-seedream-5-0-260128')
   choose(f.host, 'video:doubao-seedance-2-0-260128')
   expect(f.host.querySelector<HTMLSelectElement>('[aria-label="配置供应商"]')!.value).toBe(list[18].api_base)
   input(f.host, '模型供应商 API Key', 'new-video-key')

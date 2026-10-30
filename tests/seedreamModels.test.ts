@@ -58,7 +58,7 @@ describe('Seedream identities and independent configuration', () => {
       (index < 2 ? ['model-link', 'bytedance'] : ['byteplus']).map((provider) => [model.id, model.name, provider])))
     expect(BUILTIN_MODELS.slice(0, 12).map((model) => model.id)).toEqual(Array.from({ length: 12 }, (_, i) =>
       `00000000-0000-4000-b000-${(i + 1).toString(16).padStart(12, '0')}`))
-    expect(new Set(BUILTIN_MODELS.map((model) => model.id)).size).toBe(30)
+    expect(new Set(BUILTIN_MODELS.map((model) => model.id)).size).toBe(39)
     expect(SEEDREAM_MODELS.map((model) => model.id)).toEqual([
       'doubao-seedream-5-0-260128', 'doubao-seedream-5-0-pro-260628',
       'dola-seedream-5-0-260128', 'dola-seedream-5-0-pro-260628',

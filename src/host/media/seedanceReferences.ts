@@ -6,7 +6,7 @@ import type { Readable } from 'node:stream'
 import ffmpeg from '@ffmpeg-installer/ffmpeg'
 import sharp from 'sharp'
 import type { Asset } from '../../shared/contracts'
-import { seedanceReferenceLimit } from '../../shared/seedance'
+import { videoReferenceLimit } from '../../shared/video'
 import { CanvasError } from '../store'
 import { receive } from './files'
 
@@ -35,11 +35,11 @@ export async function probe(path: string, signal: AbortSignal): Promise<string> 
     })
   })
 }
-export async function inspectSeedanceReference(source: Readable, asset: Asset, sha256: string, signal: AbortSignal): Promise<SeedanceReference> {
+export async function inspectSeedanceReference(source: Readable, asset: Asset, sha256: string, signal: AbortSignal, protocol = 'seedance-video'): Promise<SeedanceReference> {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-canvas-reference-'))
   const path = join(directory, 'reference.raw')
   try {
-    const actual = await receive(source, path, seedanceReferenceLimit(asset.kind), asset.kind, signal)
+    const actual = await receive(source, path, videoReferenceLimit(asset.kind, protocol), asset.kind, signal)
     if (actual.fileHash !== sha256 || actual.bytes !== asset.bytes || actual.mime !== asset.mime)
       throw new CanvasError('任务参考素材身份已改变', 409, 'MEDIA_CHANGED')
     if (asset.kind === 'image') {
@@ -59,9 +59,11 @@ export async function inspectSeedanceReference(source: Readable, asset: Asset, s
     const video = text.split('\n').find((line) => /Stream .*Video:/.test(line)) ?? ''
     const codec = /Video:\s*(\w+)/.exec(video)?.[1], dimensions = /(?:,\s*|\s)(\d{3,5})x(\d{3,5})(?=[\s,\[])/.exec(video)
     const frameRate = Number(/([\d.]+)\s*fps/.exec(video)?.[1])
-    if (!codec || !dimensions || !Number.isFinite(frameRate) || frameRate < 24 || frameRate > 60
-      || !['h264', 'hevc'].includes(codec) || audio && !['aac', 'mp3'].includes(audio[1]))
-      throw new CanvasError('参考视频需使用 H.264/H.265 编码、24至60 FPS，音轨需为 AAC/MP3', 422)
+    if (!codec || !dimensions || !Number.isFinite(frameRate)
+      || (protocol === 'wan-video' ? frameRate < 16 : frameRate < (protocol === 'minimax-video' ? 23.976 : 24) || frameRate > 60
+        || !['h264', 'hevc'].includes(codec) || audio && !['aac', 'mp3'].includes(audio[1])))
+      throw new CanvasError(protocol === 'wan-video' ? 'Wan 参考视频帧率需至少16 FPS'
+        : `参考视频需使用 H.264/H.265 编码、${protocol === 'minimax-video' ? '23.976' : '24'}至60 FPS，音轨需为 AAC/MP3`, 422)
     return { ...asset, duration, width: Number(dimensions[1]), height: Number(dimensions[2]), frameRate, videoCodec: codec,
       ...(audio ? { audioCodec: audio[1] } : {}) }
   } finally { source.destroy(); await rm(directory, { recursive: true, force: true }) }

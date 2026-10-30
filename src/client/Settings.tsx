@@ -10,15 +10,15 @@ import { SecretInput, SecretValue } from './SecretField'
 import { SeedanceReviewSettings } from './SeedanceReviewSettings'
 
 export type SettingsTab = 'storage' | 'models' | 'tts' | 'review'
-export function CanvasSettings({ api, onChanged, initialTab = 'storage' }: { api: CanvasApi; onChanged?: () => void; initialTab?: SettingsTab }) {
+export function CanvasSettings({ api, onChanged, initialTab = 'storage', showTitle = true }: { api: CanvasApi; onChanged?: () => void; initialTab?: SettingsTab; showTitle?: boolean }) {
   const [tab, setTab] = useState(initialTab)
-  return <section className="dc-settings" aria-label="无限画布">
-    <h2>无限画布</h2>
+  return <section className="dc-settings dc-canvas-settings" aria-label="无限画布">
+    {showTitle && <h2>无限画布</h2>}
     <div className="dc-settings-tabs" role="tablist" aria-label="无限画布设置分类">
       {([['storage', '对象存储'], ['models', '模型设置'], ['tts', 'TTS 设置'], ['review', 'Seedance 预审']] as const).map(([id, label]) =>
         <button type="button" role="tab" aria-selected={tab === id} key={id} onClick={() => setTab(id)}>{label}</button>)}
     </div>
-    <div role="tabpanel">{tab === 'storage' ? <ObjectStorageSettings api={api} onChanged={onChanged} />
+    <div key={tab} className="dc-settings-panel" role="tabpanel">{tab === 'storage' ? <ObjectStorageSettings api={api} onChanged={onChanged} />
       : tab === 'models' ? <ModelSettings api={api} onChanged={onChanged} /> : tab === 'review' ? <SeedanceReviewSettings api={api} onChanged={onChanged} /> : <TtsSettings api={api} onChanged={onChanged} />}</div>
   </section>
 }

@@ -4,6 +4,8 @@
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
 
+0.2.73增加Wan / H3四渠道原生协议：Client与Host共用shared/video模式 / 连接 / 比例校验，Host Providers各自提交 / 查询，固定任务OSS参考流式检查再签URL；原Runtime / Worker / Vault / DDL保持。新组合使用独立UUID，Seedance预审仍只处理Seedance。具体依赖与恢复见[ADR-0067](adr/0067-wan-and-minimax-native-video-protocols.md)。
+
 0.2.71由Client的CREATABLE_NODES / createCanvasNode统一底部添加、空白右键和输出拉线到空白三个入口。useNodeCreationMenu适配React Flow公开事件，确认实际空白命中并冻结坐标 / 输出asset；UiPointMenu复用Harness公共Menu / portal与画布禁选作用域。直接连线和快捷创建共用connectReference，useCanvas.getGraph及同步edit updater在最新图上返回完整节点 / 边，沿用Seedance归一和GraphMutation；临时线只在ViewportPortal显示，不持久化或调用生成。新增类型必须同时维护三个入口与默认 / 校验 / 渲染 / 测试，见[ADR-0066](adr/0066-shared-node-creation-entrances.md)。
 
 0.2.67的canvasFileDrop在window捕获文件拖放，按可见画布矩形、最终坐标和顶层命中决定唯一接收方；画布内停止传播并直接调用当前上传回调，画布外保留Harness原document附件监听。首次接管调用无载荷dragend清理原Agent蒙版，隔离画布来源的dragleave以保持跨区深度。回调引用随提交更新，隐藏 / 卸载移除监听，原上传协议、五槽 / 胶囊和两库保持，见[ADR-0065](adr/0065-exclusive-canvas-file-drop.md)。

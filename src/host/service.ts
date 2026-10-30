@@ -16,7 +16,8 @@ import { TtsSettingsInputSchema, TtsParamsSchema, TtsTaskSnapshotSchema, isTtsPa
 import { StorageInputSchema, MediaUrlsSchema, MediaVariantSchema } from '../shared/objectStorage'
 import type { StorageFactory } from './object-storage/types'
 import { DerivedAssets } from './object-storage/derived'
-import { seedanceGenerationParams, seedanceReferenceLimit, validateSeedanceConnections } from '../shared/seedance'
+import { videoGenerationParams, videoReferenceLimit, validateVideoConnections } from '../shared/video'
+import { isMultimodalVideo } from '../shared/modelCatalog'
 import { SettingSecretRequestSchema } from '../shared/settingSecrets'
 import { ReviewSettingsInputSchema, ReviewProviderSchema, ReviewSubmitSchema, ReviewActionSchema } from '../shared/seedanceReview'
 import { ReviewStore, publicReview } from './review/store'
@@ -98,10 +99,10 @@ export class CanvasService {
       }
       if (node.selectedResultId && !state.tasks.some((t) => t.nodeId === node.id && t.resultIds.includes(node.selectedResultId!))) throw new CanvasError('选中的生成结果不属于这个节点')
       const model = node.modelId ? models.get(node.modelId) : undefined
-      if (model?.protocol === 'seedance-video' && node.params && !isTtsParams(node.params)) {
+      if (model && isMultimodalVideo(model) && node.params && !isTtsParams(node.params)) {
         const references = graph.edges.filter((edge) => edge.target === node.id)
-        validateSeedanceConnections(seedanceGenerationParams(node.params, references.map((edge) => edge.assetId)),
-          references.map((edge) => state.assets.find((asset) => asset.id === edge.assetId)!), model.model_id)
+        validateVideoConnections(videoGenerationParams(node.params, references.map((edge) => edge.assetId), model),
+          references.map((edge) => state.assets.find((asset) => asset.id === edge.assetId)!), model)
       }
     }
   }
@@ -174,7 +175,7 @@ export class CanvasService {
         const model = mock ? mockRecord(node.modelId) : this.store.model(node.modelId).model
         if (model.kind !== nodeMediaKind(node.kind)) throw new CanvasError('模型类型与节点不一致')
         snapshot = { model, prompt: node.prompt.trim(), params: node.params, referenceIds: state.graph.edges.filter((e) => e.target === nodeId).map((e) => e.assetId) }
-        if (model.protocol === 'seedance-video') snapshot.params = seedanceGenerationParams(snapshot.params, snapshot.referenceIds)
+        if (isMultimodalVideo(model)) snapshot.params = videoGenerationParams(snapshot.params, snapshot.referenceIds, model)
         if (mock) validateMockGeneration(snapshot, state.assets)
         else validateGeneration(snapshot, state.assets)
         snapshot.prompt = resolvePrompt(snapshot.prompt, snapshot.referenceIds, state.assets)
@@ -183,9 +184,9 @@ export class CanvasService {
       for (const id of snapshot.referenceIds) {
         const locator = await this.store.locator(canvas, id)
         bytes += locator.bytes
-        if (snapshot.model.protocol === 'seedance-video') {
+        if (isMultimodalVideo(snapshot.model)) {
           const asset = state.assets.find((asset) => asset.id === id)!
-          if (locator.bytes > seedanceReferenceLimit(asset.kind)) throw new CanvasError('Seedance 参考素材超过单文件大小限制', 413)
+          if (locator.bytes > videoReferenceLimit(asset.kind, snapshot.model.protocol)) throw new CanvasError('视频参考素材超过单文件大小限制', 413)
         } else if (bytes > this.config.maxReferenceBytes) throw new CanvasError('参考素材总大小超过限制', 413)
       }
       if ((await this.store.db.get("SELECT COUNT(*) AS count FROM task_catalog WHERE status IN ('queued','running','external_wait','saving')")).count >= 1000) throw new CanvasError('任务队列已满，请稍后再提交', 429, 'QUEUE_FULL')

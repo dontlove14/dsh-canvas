@@ -7,10 +7,12 @@ import { CanvasService } from '../src/host/service'
 import { fakeFactory, initialize } from './support/objectStorage'
 import { sql } from '../src/host/persistence/database'
 import { parseTaskSearchParams } from '../src/shared/v2'
+import { BUILTIN_MODELS } from '../src/shared/modelCatalog'
+import { FISH_TTS_ENDPOINT, defaultParams, defaultTtsParams } from '../src/shared/contracts'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
-async function fixture() {
+async function fixture(validSnapshots = false) {
   const root = await mkdtemp(join(tmpdir(), 'canvas-task-search-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const service = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 50, requestTimeoutMs: 1000, maxMediaBytes: 1024, maxReferenceBytes: 1024 }, undefined, fakeFactory(root))
@@ -25,7 +27,11 @@ async function fixture() {
   const ids: string[] = []
   const insert = async (seq: number, canvas = main.id, type: 'image' | 'video' | 'tts' | 'import' = 'image') => {
     const id = randomUUID(); ids.push(id)
-    const snapshot = type === 'import' ? null : JSON.stringify({ model: { kind: type === 'tts' ? 'audio' : type, protocol: type === 'tts' ? 'fish-tts' : 'openai', api_base: 'https://private.example' }, prompt: 'private prompt' })
+    const model = type === 'tts' ? { id: randomUUID(), kind: 'audio' as const, name: 'FishTTS', model_id: 'fish-tts', protocol: 'fish-tts', api_base: FISH_TTS_ENDPOINT }
+      : BUILTIN_MODELS.find((item) => item.kind === type) ?? BUILTIN_MODELS[0]
+    const snapshot = type === 'import' ? null : JSON.stringify(validSnapshots
+      ? { model, prompt: 'private prompt', params: type === 'tts' ? defaultTtsParams() : defaultParams(model as typeof BUILTIN_MODELS[number]), referenceIds: [] }
+      : { model: { kind: type === 'tts' ? 'audio' : type, protocol: type === 'tts' ? 'fish-tts' : 'openai', api_base: 'https://private.example' }, prompt: 'private prompt' })
     await store.db.batch([
       sql('INSERT INTO task_catalog(id,canvas_id,node_id,kind,title,queue_seq,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?, ?,?)',
         [id, canvas, randomUUID(), type === 'import' ? 'import' : 'generation', `提交时节点${seq}`, seq, seq % 2 ? 'succeeded' : 'failed', seq * 1000, seq * 1000 + 30000]),
@@ -40,7 +46,7 @@ async function fixture() {
   const imported = await insert(28, other.id, 'import')
   await insert(29, deleted.id); await insert(30, foreign.id)
   const get = (query = '') => service.handle(new Request(`http://localhost/api/canvas/v2/task-search${query ? `?${query}` : ''}`))
-  return { store, service, main, other, folder, ids, insert, get, video, tts, imported }
+  return { root, store, service, main, other, folder, ids, insert, get, video, tts, imported }
 }
 describe('task search contract and SQL pagination', () => {
   it('returns directory-only owner-scoped rows, preserves database and graph, and maps public status', async () => {
@@ -50,13 +56,47 @@ describe('task search contract and SQL pagination', () => {
     const response = await get()
     expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('no-store')
     const result = await response.json()
-    expect(result).toMatchObject({ total: 28, page: 1, pageSize: 20, upperBound: 28 })
-    expect(result.items[0]).toMatchObject({ nodeName: '提交时节点28', status: 'failed', type: 'import', folderName: '未归档' })
-    expect(result.items[1]).toMatchObject({ nodeName: '提交时节点27', status: 'completed', type: 'tts', folderName: '文件夹%_素材', canvasName: '画布%_测试' })
-    expect(Object.keys(result.items[0]).sort()).toEqual(['id', 'canvasId', 'nodeId', 'folderName', 'canvasName', 'nodeName', 'type', 'status', 'createdAt', 'updatedAt'].sort())
+    expect(result).toMatchObject({ total: 28, page: 1, pageSize: 10, upperBound: 28 })
+    expect(result.items).toHaveLength(10)
+    expect(result.items[0]).toMatchObject({ nodeName: '提交时节点28', status: 'failed', type: 'import', folderName: '未归档', modelName: '-', providerName: '-' })
+    expect(result.items[1]).toMatchObject({ nodeName: '提交时节点27', status: 'completed', type: 'tts', folderName: '文件夹%_素材', canvasName: '画布%_测试', modelName: '-', providerName: '-' })
+    expect(Object.keys(result.items[0]).sort()).toEqual(['id', 'canvasId', 'nodeId', 'folderName', 'canvasName', 'nodeName', 'modelName', 'providerName', 'type', 'status', 'createdAt', 'updatedAt'].sort())
     expect(JSON.stringify(result)).not.toMatch(/private|snapshot|credential|api_base|prompt|queue_seq/)
     expect(await store.db.all('SELECT sql FROM sqlite_master ORDER BY name')).toEqual(schema)
     expect(store.state(main.id).graph).toEqual(graph)
+  })
+  it('reads submitted model/provider from details for every channel and keeps identity after configuration changes and restart', async () => {
+    const { root, store, service, main, insert, tts, imported, other, get } = await fixture(true)
+    const models = [BUILTIN_MODELS[0], BUILTIN_MODELS[1],
+      ...BUILTIN_MODELS.filter((model) => ['wan-video', 'minimax-video', 'seedance-video', 'seedream-image'].includes(model.protocol))]
+    const expected = []
+    for (const [index, model] of models.entries()) {
+      const id = await insert(32 + index)
+      const snapshot = { model: { ...model, ...(model.api_base.includes('ark.') ? { endpoint_id: 'ep-hidden-value' } : {}) },
+        prompt: 'private prompt', params: defaultParams(model), referenceIds: [] }
+      await store.db.batch([sql('UPDATE task_details SET snapshot_json=? WHERE task_id=?', [JSON.stringify(snapshot), id])])
+      const identity = { modelName: model.name, providerName: model.api_base.includes('modellink') ? 'Model Link'
+        : model.api_base.includes('qianwen') ? 'Aliyun' : model.api_base.includes('minimax') ? 'MiniMax'
+          : model.api_base.includes('bytepluses') ? 'BytePlus' : model.api_base.includes('volces') ? 'ByteDance' : 'OpenAI' }
+      const listed = await (await get(`taskId=${id}`)).json()
+      expect(listed.items[0]).toMatchObject(identity)
+      expect(await store.taskDetail(main.id, id)).toMatchObject(identity)
+      expect(JSON.stringify(listed)).not.toMatch(/api_base|endpoint_id|ep-hidden|private prompt/)
+      expected.push(listed.items[0])
+    }
+    expect((await (await get(`taskId=${tts}`)).json()).items[0]).toMatchObject({ modelName: 'FishTTS', providerName: 'Model Link' })
+    expect(await store.taskDetail(main.id, tts)).toMatchObject({ modelName: 'FishTTS', providerName: 'Model Link' })
+    expect(await store.taskDetail(other.id, imported)).toMatchObject({ modelName: '-', providerName: '-' })
+    await store.saveModel({ ...models[0], api_key: 'offline-key-rotated' })
+    await store.deleteModel(models[0].id)
+    expect((await (await get(`taskId=${expected[0].id}`)).json()).items[0]).toEqual(expected[0])
+    await service.close()
+    const reopened = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 50, requestTimeoutMs: 1000, maxMediaBytes: 1024, maxReferenceBytes: 1024 }, undefined, fakeFactory(root))
+    await reopened.init(); cleanup.push(() => reopened.close())
+    for (const identity of expected) {
+      expect((await reopened.store.searchTasks({ taskId: identity.id })).items[0]).toEqual(identity)
+      expect(await reopened.store.taskDetail(main.id, identity.id)).toMatchObject({ modelName: identity.modelName, providerName: identity.providerName })
+    }
   })
   it('AND combines exact ID, literal fuzzy names, type and inclusive submitted-time bounds', async () => {
     const { video, tts, imported, get } = await fixture()
@@ -95,6 +135,6 @@ describe('task search contract and SQL pagination', () => {
     }
     const old = await service.handle(new Request(`http://localhost/api/canvas/v2/tasks?canvas=${main.id}&cursor=0`))
     expect(old.status).toBe(200); expect((await old.json()).items[0]).toMatchObject({ sequence: 1, title: '提交时节点1', status: 'succeeded' })
-    expect(parseTaskSearchParams(new URLSearchParams('canvasName=%20测试%20'))).toEqual({ canvasName: '测试', page: 1, pageSize: 20 })
+    expect(parseTaskSearchParams(new URLSearchParams('canvasName=%20测试%20'))).toEqual({ canvasName: '测试', page: 1, pageSize: 10 })
   })
 })

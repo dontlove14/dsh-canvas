@@ -4,6 +4,8 @@
 
 本目录描述 SQLite / 多画布版本的当前实现。ADR-0001–0012 保留首版补录，0013–0017 记录存储 / Runtime 实施，0018 记录项目列表与编辑器导航；历史实现已标注替代关系。
 
+Wan 3.0与MiniMax H3的四渠道协议、参数与恢复边界见[模型协议](providers.md)和[ADR-0067](adr/0067-wan-and-minimax-native-video-protocols.md)。
+
 设计基线：[目标架构](proposals/canvas-plugin-architecture-v0.1.md)、[SQLite 设计](proposals/sqlite-canvas-storage-v0.2.md) 已标注实施与差异；实际职责、DDL / API 以当前架构与数据参考为准。官方用法与反例见 [ADR-0017](adr/0017-harness-official-cases-and-badcases.md)。[存储 v0.1](proposals/sqlite-canvas-storage-v0.1.md) 保留历史。
 
 代码与检查脚本链接面向项目源码目录；安装包只携带运行产物和说明文档，查看源码证据或执行开发检查需使用完整项目。

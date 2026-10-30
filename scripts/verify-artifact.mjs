@@ -133,7 +133,7 @@ if (process.argv[2] === 'record') {
     const imageModels = await routes.get('/api/canvas/v2/models').fetch(new Request('http://localhost/api/canvas/v2/models'))
     assert.equal(imageModels.status, 200)
     const catalog = (await imageModels.json()).models
-    assert.equal(catalog.length, 30)
+    assert.equal(catalog.length, 39)
     assert(catalog.every((model) => model.configurable && !model.has_api_key))
     const gptCatalog = catalog.filter((model) => model.protocol === 'openai-image')
     assert.equal(gptCatalog.length, 4)
@@ -203,7 +203,40 @@ if (process.argv[2] === 'record') {
       assert.equal(actual.name, model.name); assert.equal(actual.model_id, model.model_id)
       assert.equal(actual.endpoint_id, official ? 'ep-offline-video' : undefined)
     }
-    const taskSearch = await routes.get('/api/canvas/v2/task-search').fetch(new Request('http://localhost/api/canvas/v2/task-search?page=1&pageSize=10'))
+    const wanCatalog = catalog.filter((model) => model.protocol === 'wan-video')
+    assert.equal(wanCatalog.length, 4)
+    for (const model of wanCatalog) {
+      assert(['https://api.modellink.online/wan/api/v1', 'https://maas.qianwenaiapi.com/api/v1'].includes(model.api_base))
+      assert.deepEqual(model.capabilities.secondsRange, { min: 2, max: 30, step: 1 })
+      assert.equal(model.capabilities.sizePresets.length, 21)
+      assert.deepEqual(model.capabilities.referenceKinds, ['image', 'video', 'audio'])
+      const { capabilities, has_api_key, api_key_mask, configurable, ...record } = model
+      const saved = await routes.get('/api/canvas/v2/models').fetch(new Request('http://localhost/api/canvas/v2/models', {
+        method: 'POST', body: JSON.stringify({ ...record, api_key: 'offline-wan-key' }),
+      }))
+      assert.equal(saved.status, 200)
+      const configured = (await saved.json()).models.find((item) => item.id === model.id)
+      assert.equal(configured.model_id, model.model_id); assert.equal(configured.has_api_key, true)
+      assert.equal(configured.endpoint_id, undefined)
+    }
+    const h3Catalog = catalog.filter((model) => model.protocol === 'minimax-video')
+    assert.equal(h3Catalog.length, 5)
+    assert.deepEqual(h3Catalog.filter((model) => model.api_base.includes('modellink')).map((model) => model.model_id), ['MiniMax-H3'])
+    for (const model of h3Catalog) {
+      assert(['https://api.modellink.online/hailuo', 'https://api.minimax.cn'].includes(model.api_base))
+      assert.equal(model.capabilities.secondsRange.min, model.model_id === 'MiniMax-H3-Max' ? 5 : 4)
+      assert.equal(model.capabilities.secondsRange.max, 15)
+      assert.equal(model.capabilities.supportsAudioToggle, false)
+      const { capabilities, has_api_key, api_key_mask, configurable, ...record } = model
+      const saved = await routes.get('/api/canvas/v2/models').fetch(new Request('http://localhost/api/canvas/v2/models', {
+        method: 'POST', body: JSON.stringify({ ...record, api_key: 'offline-h3-key' }),
+      }))
+      assert.equal(saved.status, 200)
+      const configured = (await saved.json()).models.find((item) => item.id === model.id)
+      assert.equal(configured.has_api_key, true); assert.equal(configured.api_base, model.api_base)
+      assert.equal(configured.endpoint_id, undefined)
+    }
+    const taskSearch = await routes.get('/api/canvas/v2/task-search').fetch(new Request('http://localhost/api/canvas/v2/task-search'))
     assert.equal(taskSearch.status, 200)
     assert.deepEqual(await taskSearch.json(), { items: [], total: 0, page: 1, pageSize: 10, upperBound: 0 })
     const ttsSettings = await routes.get('/api/canvas/v2/tts-settings').fetch(new Request('http://localhost/api/canvas/v2/tts-settings'))

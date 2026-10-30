@@ -39,8 +39,8 @@ function Picker({ initial = {}, onValue }: { initial?: DateTimeRange; onValue: (
   return <UiDateTimeRangePicker value={value} onChange={(next) => { setValue(next); onValue(next) }} />
 }
 const row: TaskRow = { id: 'd0bcd0a4-7fbc-4306-95f0-1d5951767167', canvasId: 'canvas-other', nodeId: 'node', folderName: '素材库', canvasName: '分镜', nodeName: '生图节点',
-  type: 'image', status: 'completed', createdAt: 1000, updatedAt: 2000 }
-const result = (query: Partial<TaskSearchQuery> = {}): TaskPage => ({ items: [row], total: 23, page: query.page ?? 1, pageSize: query.pageSize ?? 20, upperBound: 23 })
+  modelName: 'MiniMax H3', providerName: 'Model Link', type: 'image', status: 'completed', createdAt: 1000, updatedAt: 2000 }
+const result = (query: Partial<TaskSearchQuery> = {}): TaskPage => ({ items: [row], total: 23, page: query.page ?? 1, pageSize: query.pageSize ?? 10, upperBound: 23 })
 
 describe('shared date/time range and pagination', () => {
   it('uses local timestamps, rejects invalid dates and inverted intervals, and permits either bound', () => {
@@ -140,20 +140,29 @@ describe('task table search, request lifecycle and detail navigation', () => {
   })
   it('searches explicitly, uses all directory columns and retains filters/page when returning from cross-canvas detail', async () => {
     const api = new CanvasApi(); api.searchTasks = vi.fn(async (query) => result(query))
-    api.taskDetail = vi.fn(async () => ({ task: null, kind: 'import', phase: 'completed', externalTaskId: null, externalCompletedAt: null, successAt: 2000, failureStage: null, failureCode: null, failureMessage: null, attempts: [] }))
+    api.taskDetail = vi.fn(async () => ({ modelName: row.modelName, providerName: row.providerName, task: null, kind: 'import', phase: 'completed', externalTaskId: null, externalCompletedAt: null, successAt: 2000, failureStage: null, failureCode: null, failureMessage: null, attempts: [] }))
     const box = mount(<TaskDialog api={api} onClose={vi.fn()} />)
     await act(async () => {})
-    expect([...box.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['任务 ID', '文件夹名称', '画布名称', '生成节点名称', '任务状态', '更新时间', '提交时间', '操作'])
+    expect(api.searchTasks).toHaveBeenLastCalledWith({ page: 1, pageSize: 10 }, expect.any(AbortSignal))
+    expect([...box.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['任务 ID', '文件夹名称', '画布名称', '生成节点名称', '模型名称', '提供商', '任务状态', '更新时间', '提交时间', '操作'])
+    expect(box.querySelector('tbody')?.textContent).toContain(row.modelName)
+    expect(box.querySelector('tbody')?.textContent).toContain(row.providerName)
+    expect(box.querySelector('.dc-task-footer')?.closest('.dc-task-table-scroll')).toBeNull()
     const folder = box.querySelector<HTMLInputElement>('input[placeholder="输入文件夹名称"]')!
     change(folder, ' 素材 '); expect(api.searchTasks).toHaveBeenCalledTimes(1)
-    await click(button(box, '查询')); expect(api.searchTasks).toHaveBeenLastCalledWith({ folderName: '素材', page: 1, pageSize: 20, startTime: undefined, endTime: undefined }, expect.any(AbortSignal))
-    await click(button(box, '下一页')); expect(api.searchTasks).toHaveBeenLastCalledWith({ folderName: '素材', page: 2, pageSize: 20, startTime: undefined, endTime: undefined, upperBound: 23 }, expect.any(AbortSignal))
+    await click(button(box, '查询')); expect(api.searchTasks).toHaveBeenLastCalledWith({ folderName: '素材', page: 1, pageSize: 10, startTime: undefined, endTime: undefined }, expect.any(AbortSignal))
+    await click(button(box, '下一页')); expect(api.searchTasks).toHaveBeenLastCalledWith({ folderName: '素材', page: 2, pageSize: 10, startTime: undefined, endTime: undefined, upperBound: 23 }, expect.any(AbortSignal))
     await click(button(box, '查看详情')); expect(api.taskDetail).toHaveBeenCalledWith('canvas-other', row.id, expect.any(AbortSignal))
     expect(box.querySelector('.dc-task-detail-view')).not.toBeNull()
+    const meta = box.querySelector('.dc-task-detail-meta')!
+    expect(meta.textContent).toContain(`模型名称${row.modelName}`)
+    expect(meta.textContent).toContain(`提供商${row.providerName}`)
+    expect(meta.closest('.dc-task-detail-scroll')).not.toBeNull()
+    expect(button(box, '‹ 返回列表').closest('.dc-task-detail-scroll')).toBeNull()
     await click(button(box, '‹ 返回列表'))
     expect(box.querySelector('.dc-task-detail-view')).toBeNull(); expect(folder.value).toBe(' 素材 ')
     expect(box.querySelector('[aria-current="page"]')?.textContent).toBe('2'); expect(api.searchTasks).toHaveBeenCalledTimes(3)
-    await click(button(box, '重置')); expect(folder.value).toBe(''); expect(api.searchTasks).toHaveBeenLastCalledWith({ page: 1, pageSize: 20 }, expect.any(AbortSignal))
+    await click(button(box, '重置')); expect(folder.value).toBe(''); expect(api.searchTasks).toHaveBeenLastCalledWith({ page: 1, pageSize: 10 }, expect.any(AbortSignal))
   })
   it('aborts old searches, ignores late results, and shows errors and empty states without stale rows', async () => {
     const api = new CanvasApi()
@@ -182,6 +191,6 @@ describe('task table search, request lifecycle and detail navigation', () => {
     const popup = document.querySelector('.dc-datetime-popup')!
     change(popup.querySelector('[aria-label="开始日期"]')!, '2024-02-29'); await click(button(popup, '确定'))
     await click(button(box, '查询'))
-    expect(api.searchTasks).toHaveBeenLastCalledWith({ taskId: row.id, type: 'tts', startTime: parseLocalDateTime('2024-02-29', '00:00:00'), endTime: undefined, page: 1, pageSize: 20 }, expect.any(AbortSignal))
+    expect(api.searchTasks).toHaveBeenLastCalledWith({ taskId: row.id, type: 'tts', startTime: parseLocalDateTime('2024-02-29', '00:00:00'), endTime: undefined, page: 1, pageSize: 10 }, expect.any(AbortSignal))
   })
 })

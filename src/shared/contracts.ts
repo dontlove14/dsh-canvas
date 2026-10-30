@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { resolvePrompt } from './promptMentions'
-import { GPT_IMAGE_SIZES, IMAGE_BACKGROUNDS, IMAGE_QUALITIES, isGptImage25, bananaSizePresets, seedreamSizePresets, seedanceSizePresets, seedanceLimits, SEEDANCE_VIDEO_MODES, type ImageSizePreset } from './modelCatalog'
-import { validateSeedanceInputs } from './seedance'
+import { GPT_IMAGE_SIZES, IMAGE_BACKGROUNDS, IMAGE_QUALITIES, isGptImage25, bananaSizePresets, seedreamSizePresets, seedanceSizePresets, seedanceLimits, SEEDANCE_VIDEO_MODES, isMultimodalVideo, wanSizePresets, WAN_VIDEO_LIMITS, minimaxSizePresets, MINIMAX_VIDEO_LIMITS, type ImageSizePreset } from './modelCatalog'
+import { validateVideoInputs } from './video'
 
 export const PLUGIN_ID = 'dsh-canvas'
 export const API_ROOT = 'api/canvas'
@@ -13,7 +13,7 @@ export const MediaKindSchema = z.enum(['image', 'video', 'audio'])
 export type MediaKind = z.infer<typeof MediaKindSchema>
 export const ModelKindSchema = z.enum(['image', 'video'])
 export type ModelKind = z.infer<typeof ModelKindSchema>
-export const ProtocolSchema = z.enum(['openai-image', 'openai-dalle-3', 'openai-dalle-2', 'openai-video', 'gemini-image', 'seedream-image', 'seedance-video'])
+export const ProtocolSchema = z.enum(['openai-image', 'openai-dalle-3', 'openai-dalle-2', 'openai-video', 'gemini-image', 'seedream-image', 'seedance-video', 'wan-video', 'minimax-video'])
 export type Protocol = z.infer<typeof ProtocolSchema>
 
 const ApiBaseSchema = z.string().trim().url().max(2048).refine((value) => {
@@ -37,7 +37,7 @@ export const ModelInputSchema = ModelRecordSchema.omit({ id: true }).extend({
   id: IdSchema.optional(),
   api_key: z.string().max(4096).optional(),
 }).strict().refine(
-  (value) => ['openai-video', 'seedance-video'].includes(value.protocol) === (value.kind === 'video'),
+  (value) => (value.protocol === 'openai-video' || isMultimodalVideo(value)) === (value.kind === 'video'),
   '协议与模型类型不一致',
 )
 export type ModelInput = z.infer<typeof ModelInputSchema>
@@ -73,6 +73,8 @@ export const ProtocolLabels: Record<Protocol, string> = {
   'gemini-image': 'Gemini 图片 · Nano Banana',
   'seedream-image': 'Seedream 图片',
   'seedance-video': 'Seedance 视频',
+  'wan-video': 'Wan 视频',
+  'minimax-video': 'MiniMax H3 视频',
 }
 
 export function capabilitiesFor(model: Pick<ModelRecord, 'protocol' | 'model_id'>): ModelCapabilities {
@@ -83,6 +85,20 @@ export function capabilitiesFor(model: Pick<ModelRecord, 'protocol' | 'model_id'
     backgrounds: IMAGE_BACKGROUNDS, qualities: IMAGE_QUALITIES,
   }
   switch (model.protocol) {
+    case 'minimax-video': {
+      const limits = MINIMAX_VIDEO_LIMITS, sizePresets = minimaxSizePresets(model.model_id)
+      return { sizes: sizePresets.map((preset) => preset.size), sizePresets, defaultSize: '768P/16:9',
+        counts: [1], seconds: [], secondsRange: { min: model.model_id === 'MiniMax-H3-Max' ? 5 : 4, max: 15, step: 1 },
+        referenceKinds: ['image', 'video', 'audio'], maxReferences: limits.images + limits.videos + limits.audios,
+        supportsAudioToggle: false, videoModes: SEEDANCE_VIDEO_MODES }
+    }
+    case 'wan-video': {
+      const limits = WAN_VIDEO_LIMITS, sizePresets = wanSizePresets(model.model_id)
+      return { sizes: sizePresets.map((preset) => preset.size), sizePresets, defaultSize: '720P/16:9',
+        counts: [1], seconds: [], secondsRange: { min: 2, max: 30, step: 1 },
+        referenceKinds: ['image', 'video', 'audio'], maxReferences: limits.images + limits.videos + limits.audios,
+        supportsAudioToggle: true, videoModes: SEEDANCE_VIDEO_MODES }
+    }
     case 'seedance-video': {
       const sizePresets = seedanceSizePresets(model.model_id), limits = seedanceLimits(model.model_id)
       return { sizes: sizePresets.map((preset) => preset.size), sizePresets, defaultSize: '720p/16:9',
@@ -152,6 +168,8 @@ export function defaultParams(model: Pick<ModelRecord, 'protocol' | 'model_id'> 
   const seconds = range ? range.min > 0 ? range.min : range.min + (Math.floor(-range.min / range.step) + 1) * range.step : caps.seconds[0]
   return { size: caps.defaultSize ?? caps.sizes[0], n: caps.counts[0], ...(seconds !== undefined ? { seconds } : {}),
     ...(model.protocol === 'seedance-video' ? { seconds: 5, videoMode: 'text' as const, generateAudio: true } : {}),
+    ...(model.protocol === 'wan-video' ? { seconds: 5, videoMode: 'text' as const, generateAudio: true } : {}),
+    ...(model.protocol === 'minimax-video' ? { seconds: 5, videoMode: 'text' as const } : {}),
     ...(caps.backgrounds ? { background: 'auto' as const } : {}), ...(caps.qualities ? { quality: 'auto' as const } : {}) }
 }
 
@@ -317,8 +335,10 @@ export function validateWithCapabilities(snapshot: TaskSnapshot, assets: readonl
     if (!supportsVideoDuration(caps, snapshot.params.seconds)) throw new Error('请选择当前模型支持的视频时长')
     if (snapshot.params.seconds! <= 0) throw new Error('视频时长需大于 0 秒')
   }
-  if (snapshot.model.protocol !== 'seedance-video' && (snapshot.params.videoMode !== undefined || snapshot.params.firstFrameId
-    || snapshot.params.lastFrameId || snapshot.params.generateAudio !== undefined)) throw new Error('当前模型不支持 Seedance 视频参数')
+  if (!isMultimodalVideo(snapshot.model) && (snapshot.params.videoMode !== undefined || snapshot.params.firstFrameId
+    || snapshot.params.lastFrameId || snapshot.params.generateAudio !== undefined)) throw new Error('当前模型不支持这些视频参数')
+  if (snapshot.model.protocol === 'wan-video' && snapshot.prompt.length > 20000) throw new Error('Wan 提示词不能超过20000字符')
+  if (snapshot.params.generateAudio !== undefined && !caps.supportsAudioToggle) throw new Error('当前模型不支持音频开关')
   if (snapshot.referenceIds.length > caps.maxReferences) throw new Error(`当前模型最多接受 ${caps.maxReferences} 份参考素材`)
   if (new Set(snapshot.referenceIds).size !== snapshot.referenceIds.length) throw new Error('不能重复引用同一素材')
   const byId = new Map(assets.map((asset) => [asset.id, asset]))
@@ -329,8 +349,8 @@ export function validateWithCapabilities(snapshot: TaskSnapshot, assets: readonl
     if (asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime))
       throw new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')
   }
-  if (snapshot.model.protocol === 'seedance-video')
-    validateSeedanceInputs(snapshot.params, snapshot.referenceIds.map((id) => byId.get(id)!), snapshot.model.model_id)
+  if (isMultimodalVideo(snapshot.model))
+    validateVideoInputs(snapshot.params, snapshot.referenceIds.map((id) => byId.get(id)!), snapshot.model)
 }
 
 export function validateGraph(graph: CanvasGraph, assets: readonly Asset[], tasks: readonly Pick<Task, 'nodeId' | 'resultIds'>[]): void {

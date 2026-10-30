@@ -72,7 +72,7 @@ describe('Seedance identity, compatibility and configuration', () => {
       (index < 4 ? ['model-link', 'bytedance'] : ['byteplus']).map((provider) => [model.id, model.name, provider])))
     expect(BUILTIN_MODELS.slice(0, 18).map((model) => model.id)).toEqual(Array.from({ length: 18 }, (_, i) =>
       `00000000-0000-4000-b000-${(i + 1).toString(16).padStart(12, '0')}`))
-    expect(new Set(BUILTIN_MODELS.map((model) => model.id)).size).toBe(30)
+    expect(new Set(BUILTIN_MODELS.map((model) => model.id)).size).toBe(39)
   })
   it.each(SEEDANCE_MODELS)('exposes supported duration, resolution, modes and defaults for $name', (model) => {
     const definition = models.find((item) => item.model_id === model.id)!, caps = capabilitiesFor(definition)

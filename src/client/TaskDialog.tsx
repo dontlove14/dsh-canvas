@@ -11,7 +11,7 @@ import { copyText } from './clipboard'
 const types = [{ value: '', label: '全部类型' }, { value: 'image', label: '图片生成' }, { value: 'video', label: '视频生成' }, { value: 'tts', label: '语音生成' }, { value: 'import', label: '素材导入' }]
 const formatTime = (stamp: number) => `${dateText(new Date(stamp))} ${timeText(new Date(stamp))}`
 const initialDraft = { taskId: '', folderName: '', canvasName: '', type: '' }
-const initialQuery: TaskSearchQuery = { page: 1, pageSize: 20 }
+const initialQuery: TaskSearchQuery = { page: 1, pageSize: 10 }
 
 export function TaskDialog({ api, onClose }: { api: CanvasApi; onClose: () => void }) {
   const [selected, setSelected] = useState<TaskRow | null>(null)
@@ -23,8 +23,10 @@ export function TaskDialog({ api, onClose }: { api: CanvasApi; onClose: () => vo
     requestAnimationFrame(() => list.current?.querySelector<HTMLButtonElement>(`button[data-task-id="${id}"]`)?.focus())
   }
   return <UiModal label={selected ? '任务详情' : '任务'} onClose={onClose} wide className="dc-tasks-modal">
-    <div ref={list} hidden={!!selected}><TaskCatalog api={api} onDetail={setSelected} revision={revision} /></div>
-    {selected && <TaskDetails key={selected.id} api={api} row={selected} onBack={back} onChanged={() => setRevision((old) => old + 1)} />}
+    <div className="dc-task-dialog-body">
+      <div ref={list} className="dc-task-list-view" hidden={!!selected}><TaskCatalog api={api} onDetail={setSelected} revision={revision} /></div>
+      {selected && <TaskDetails key={selected.id} api={api} row={selected} onBack={back} onChanged={() => setRevision((old) => old + 1)} />}
+    </div>
   </UiModal>
 }
 export function TaskCatalog({ api, onDetail, revision = 0 }: { api: CanvasApi; onDetail: (row: TaskRow) => void; revision?: number }) {
@@ -87,10 +89,10 @@ export function TaskCatalog({ api, onDetail, revision = 0 }: { api: CanvasApi; o
     {error && <div className="dc-task-query-error" role="alert">{error}<UiButton onClick={() => setQuery({ ...query })}>重新查询</UiButton></div>}
     <div className="dc-task-table-scroll" aria-busy={loading}>
       <table className="dc-task-table"><caption className="dc-sr-only">任务目录</caption>
-        <colgroup><col className="task-id" /><col className="task-folder" /><col className="task-canvas" /><col className="task-node" /><col className="task-status" /><col className="task-time" /><col className="task-time" /><col className="task-action" /></colgroup>
-        <thead><tr>{['任务 ID', '文件夹名称', '画布名称', '生成节点名称', '任务状态', '更新时间', '提交时间', '操作'].map((title) => <th key={title} scope="col">{title}</th>)}</tr></thead>
-        <tbody>{loading || error ? <tr><td colSpan={8} className="dc-task-table-empty" role="status">{loading ? '正在查询任务…' : '任务查询失败，请重试'}</td></tr>
-          : !result?.items.length ? <tr><td colSpan={8} className="dc-task-table-empty">暂无符合条件的任务</td></tr>
+        <colgroup><col className="task-id" /><col className="task-folder" /><col className="task-canvas" /><col className="task-node" /><col className="task-model" /><col className="task-provider" /><col className="task-status" /><col className="task-time" /><col className="task-time" /><col className="task-action" /></colgroup>
+        <thead><tr>{['任务 ID', '文件夹名称', '画布名称', '生成节点名称', '模型名称', '提供商', '任务状态', '更新时间', '提交时间', '操作'].map((title) => <th key={title} scope="col">{title}</th>)}</tr></thead>
+        <tbody>{loading || error ? <tr><td colSpan={10} className="dc-task-table-empty" role="status">{loading ? '正在查询任务…' : '任务查询失败，请重试'}</td></tr>
+          : !result?.items.length ? <tr><td colSpan={10} className="dc-task-table-empty">暂无符合条件的任务</td></tr>
           : result.items.map((row) => <tr key={row.id}>
             <td><div className="dc-task-id-cell">
               <UiButton className="dc-task-copy-button" aria-label={`复制任务 ID ${row.id}`}
@@ -101,6 +103,7 @@ export function TaskCatalog({ api, onDetail, revision = 0 }: { api: CanvasApi; o
               </UiButton><span className="dc-task-id" title={row.id} aria-label={row.id}>{row.id.slice(0, 16)}...</span>
             </div></td>
             <td title={row.folderName}>{row.folderName}</td><td title={row.canvasName}>{row.canvasName}</td><td title={row.nodeName}>{row.nodeName}</td>
+            <td title={row.modelName}>{row.modelName}</td><td title={row.providerName}>{row.providerName}</td>
             <td><span className={`dc-task-status-pill ${row.status}`}>{TaskStatusLabels[row.status]}</span></td>
             <td><time dateTime={new Date(row.updatedAt).toISOString()}>{formatTime(row.updatedAt)}</time></td>
             <td><time dateTime={new Date(row.createdAt).toISOString()}>{formatTime(row.createdAt)}</time></td>
@@ -141,12 +144,14 @@ function TaskDetails({ api, row, onBack, onChanged }: { api: CanvasApi; row: Tas
   const task = detail?.task; const status = task?.status ?? row.status
   return <section className="dc-task-detail-view">
     <header><UiButton ref={back} variant="outline" onClick={onBack}>‹ 返回列表</UiButton><h2>任务详情</h2></header>
+    <div className="dc-task-detail-scroll">
     {error && <p role="alert">{error}<UiButton onClick={() => setRetry((old) => old + 1)}>重试</UiButton></p>}
     <dl className="dc-task-detail-meta">
       <div><dt>任务 ID</dt><dd className="dc-task-id">{row.id}</dd></div>
       <div><dt>任务状态</dt><dd><span className={`dc-task-status-pill ${status}`}>{TaskStatusLabels[status]}</span></dd></div>
       <div><dt>文件夹名称</dt><dd>{row.folderName}</dd></div><div><dt>画布名称</dt><dd>{row.canvasName}</dd></div>
       <div><dt>生成节点名称</dt><dd>{row.nodeName}</dd></div><div><dt>任务类型</dt><dd>{types.find((type) => type.value === row.type)?.label}</dd></div>
+      <div><dt>模型名称</dt><dd>{detail?.modelName ?? row.modelName}</dd></div><div><dt>提供商</dt><dd>{detail?.providerName ?? row.providerName}</dd></div>
       <div><dt>更新时间</dt><dd>{formatTime(task?.updatedAt ?? row.updatedAt)}</dd></div><div><dt>提交时间</dt><dd>{formatTime(row.createdAt)}</dd></div>
     </dl>
     {loading ? <p role="status">载入详情…</p> : detail && <>
@@ -165,5 +170,6 @@ function TaskDetails({ api, row, onBack, onChanged }: { api: CanvasApi; row: Tas
         <UiButton disabled={acting} variant="outline" onClick={() => void act('abandon')}>结束本地等待</UiButton>
       </div>}
     </>}
+    </div>
   </section>
 }

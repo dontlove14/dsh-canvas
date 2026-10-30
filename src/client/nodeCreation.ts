@@ -2,8 +2,8 @@ import {
   NodeLabels, defaultParams, defaultTtsParams, isGeneration, isTtsParams, nodeMediaKind,
   nodeResults, validateGraph, type CanvasGraph, type CanvasNode, type Asset, type PublicModel,
 } from '../shared/contracts'
-import { modelConfigured } from '../shared/modelCatalog'
-import { seedanceGenerationParams, seedanceInputCapabilities, validateSeedanceConnections } from '../shared/seedance'
+import { modelConfigured, isMultimodalVideo } from '../shared/modelCatalog'
+import { videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
 import type { TaskSummary } from '../shared/v2'
 import { connectionAsset } from './generationLayout'
 import { generationHistory, hasGenerationHistory } from './generationHistory'
@@ -53,19 +53,19 @@ export function connectReference(graph: CanvasGraph, reference: OutputReference,
   if (asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime))
     throw new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')
   const previousIds = graph.edges.filter((edge) => edge.target === target.id).map((edge) => edge.assetId)
-  const params = target.params && !isTtsParams(target.params) && model?.protocol === 'seedance-video'
-    ? seedanceGenerationParams(target.params, previousIds) : target.params
-  const caps = model && seedanceInputCapabilities(model, !isTtsParams(params) ? params : null)
+  const params = target.params && !isTtsParams(target.params) && model && isMultimodalVideo(model)
+    ? videoGenerationParams(target.params, previousIds, model) : target.params
+  const caps = model && videoInputCapabilities(model, !isTtsParams(params) ? params : null)
   if (caps && (!caps.referenceKinds.includes(asset.kind) || previousIds.length >= caps.maxReferences))
     throw new Error('当前模型不支持这份素材，或引用数量已达上限')
   if (!model && asset.kind !== 'image') throw new Error('请先配置支持这类素材的模型')
   const next = { ...graph, edges: [...graph.edges, {
     id: crypto.randomUUID(), source: reference.sourceId, target: target.id, assetId: asset.id,
   }] }
-  if (model?.protocol === 'seedance-video' && params && !isTtsParams(params)) {
+  if (model && isMultimodalVideo(model) && params && !isTtsParams(params)) {
     const inputs = next.edges.filter((edge) => edge.target === target.id).map((edge) => env.assets.find((asset) => asset.id === edge.assetId))
     if (inputs.some((asset) => !asset)) throw new Error('引用素材不可用')
-    validateSeedanceConnections(seedanceGenerationParams(params, [...previousIds, asset.id]), inputs as Asset[], model.model_id)
+    validateVideoConnections(videoGenerationParams(params, [...previousIds, asset.id], model), inputs as Asset[], model)
   }
   validateGraph(next, env.assets, env.tasks)
   return next

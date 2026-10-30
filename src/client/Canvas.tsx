@@ -53,7 +53,9 @@ import { useHistoryInspection, type HistoryInspection } from './useHistoryInspec
 import { GenerationSnapshotEditor } from './GenerationSnapshotEditor'
 import { sameFields, sameNodeContent, shareEditorGraph, shareItems } from './canvasSharing'
 import { createCanvasProjection, EMPTY_PROJECTION } from './canvasProjection'
-import { normalizeSeedanceGraphReferences, seedanceGenerationParams, seedanceFrameParams, seedanceInputCapabilities, validateSeedanceConnections } from '../shared/seedance'
+import { seedanceFrameParams } from '../shared/seedance'
+import { isMultimodalVideo } from '../shared/modelCatalog'
+import { normalizeVideoGraphReferences, videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
 import { SeedanceFrameRole } from './SeedanceFrameRoles'
 import { CanvasReviewState, ReviewContext } from './reviewState'
 import { SeedanceReviewDialog } from './SeedanceReviewDialog'
@@ -157,7 +159,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
   const configurationLoad = useRef(0)
   const models = useMemo(() => selectableModels(configuredModels.filter((model) => builtinDefinition(model))), [configuredModels])
   const edit = useCallback((change: CanvasGraph | ((graph: CanvasGraph) => CanvasGraph)) => {
-    editGraph((previous) => normalizeSeedanceGraphReferences(previous, typeof change === 'function' ? change(previous) : change, configuredModels))
+    editGraph((previous) => normalizeVideoGraphReferences(previous, typeof change === 'function' ? change(previous) : change, configuredModels))
   }, [editGraph, configuredModels])
   const [selected, setSelected] = useState<string[]>([])
   const [selectedEdges, setSelectedEdges] = useState<string[]>([])
@@ -507,7 +509,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true }
     </div></CanvasTextSelectionProvider>
     <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = [...event.target.files ?? []]; for (const file of files) void uploadFile(file); importIntent.current = null }} />
     {nodeDeletion.modal}
-    {active && showSettings && <Modal label="无限画布" onClose={() => { setShowSettings(false); loadModels(); void reviewState.refresh() }}><CanvasSettings api={api} initialTab={settingsTab} onChanged={() => { loadModels(); void reviewState.refresh() }} /></Modal>}
+    {active && showSettings && <Modal label="无限画布" className="dc-settings-modal" onClose={() => { setShowSettings(false); loadModels(); void reviewState.refresh() }}><CanvasSettings api={api} showTitle={false} initialTab={settingsTab} onChanged={() => { loadModels(); void reviewState.refresh() }} /></Modal>}
     {active && reviewAsset && <SeedanceReviewDialog key={reviewAsset.id} asset={reviewAsset} onClose={() => setReviewAsset(undefined)}
       onSettings={() => { setReviewAsset(undefined); setSettingsTab('review'); setShowSettings(true) }} />}
     {active && showTasks && <TaskDialog api={api} onClose={() => setShowTasks(false)} />}
@@ -556,8 +558,8 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
   const references = graph.edges.filter((edge) => edge.target === node.id)
   const referenceAssets = references.map((edge) => assets.find((asset) => asset.id === edge.assetId)).filter((asset): asset is Asset => !!asset)
   const referenceIds = references.map((edge) => edge.assetId)
-  const params = node.params && !isTtsParams(node.params) && model?.protocol === 'seedance-video' ? seedanceGenerationParams(node.params, referenceIds) : node.params
-  const inputCaps = model && seedanceInputCapabilities(model, !isTtsParams(params) ? params : null)
+  const params = node.params && !isTtsParams(node.params) && model && isMultimodalVideo(model) ? videoGenerationParams(node.params, referenceIds, model) : node.params
+  const inputCaps = model && videoInputCapabilities(model, !isTtsParams(params) ? params : null)
   const promptReferences = useMemo(() => connectedPromptReferences(graph, node.id, assets), [graph, node.id, assets])
   const candidates = useMemo(() => inputCaps ? promptCandidates(graph, node.id, assets, tasks, inputCaps) : [], [graph, node.id, assets, tasks, model, node.params])
   const task = latestTask(node.id, tasks)
@@ -588,7 +590,7 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
           const reference = assets.find((item) => item.id === edge.assetId)
           return <div className="dc-reference" key={edge.id} title={reference?.filename ?? '素材不可用'}>
             {reference?.kind === 'image' ? <SignedImage api={api} canvas={workspace} assetId={reference.id} alt={`参考图 ${index + 1}`} onClick={() => onOpen(reference)} /> : <span className="dc-reference-placeholder">{reference ? <MediaIcon kind={reference.kind} size={28} /> : '？'}</span>}
-            {model?.protocol === 'seedance-video' && params && !isTtsParams(params) && params.videoMode === 'frames'
+            {model && isMultimodalVideo(model) && params && !isTtsParams(params) && params.videoMode === 'frames'
               ? <SeedanceFrameRole assetId={edge.assetId} index={index} referenceIds={referenceIds} params={params} disabled={submitting}
                 onChange={(params) => patchNode(node.id, { params })} /> : <small>{index + 1}</small>}
             <UiButton disabled={submitting} className="dc-ui-remove-reference" aria-label={`移除引用 ${index + 1}`} onClick={() => edit((current) => ({ ...current, edges: current.edges.filter((item) => item.id !== edge.id) }))}>×</UiButton>
@@ -602,9 +604,9 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
         onChoose={(item, prompt) => {
           if (!model || submitting) throw new Error('请先选择可用模型')
           const inserted = insertPromptReference(props.getCurrentGraph(), node.id, item, prompt, assets, tasks, inputCaps!)
-          if (model.protocol === 'seedance-video' && params && !isTtsParams(params))
-            validateSeedanceConnections(seedanceGenerationParams(params, inserted.graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.assetId)),
-              inserted.graph.edges.filter((edge) => edge.target === node.id).map((edge) => assets.find((asset) => asset.id === edge.assetId)!), model.model_id)
+          if (isMultimodalVideo(model) && params && !isTtsParams(params))
+            validateVideoConnections(videoGenerationParams(params, inserted.graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.assetId), model),
+              inserted.graph.edges.filter((edge) => edge.target === node.id).map((edge) => assets.find((asset) => asset.id === edge.assetId)!), model)
           edit(inserted.graph)
           return inserted.reference
         }} />
@@ -612,21 +614,21 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
       <div className="dc-editor-bottom">
         <ModelPicker disabled={submitting} value={node.modelId} models={models.filter((item) => item.kind === nodeMediaKind(node.kind))}
           onChange={(next) => patchNode(node.id, { modelId: next.id, params: next.model_id === model?.model_id ? node.params
-            : { ...defaultParams(next), ...(next.protocol === 'seedance-video' && references.length ? { videoMode: 'reference' as const } : {}) } })} />
+            : { ...defaultParams(next), ...(isMultimodalVideo(next) && references.length ? { videoMode: 'reference' as const } : {}) } })} />
         {model?.capabilities.videoModes && params && !isTtsParams(params) && (references.length ? <UiSelect className="dc-video-mode" label="视频生成模式"
           value={params.videoMode ?? 'reference'} options={model.capabilities.videoModes.filter((mode) => mode.value !== 'text')} disabled={submitting} side="top"
           onChange={(mode) => {
             if (mode !== 'reference' && mode !== 'frames') return
             if ((params.videoMode ?? 'text') === mode) return
             const { firstFrameId: _first, lastFrameId: _last, ...rest } = params
-            const next = seedanceFrameParams({ ...rest, videoMode: mode as GenerationParams['videoMode'],
-              ...(mode === 'frames' && model.model_id.includes('-2-5-') ? { size: `${params.size.split('/')[0]}/adaptive` } : {}) }, referenceIds)
-            try { validateSeedanceConnections(next, referenceAssets, model.model_id); patchNode(node.id, { params: next }) }
+            const next = videoGenerationParams({ ...rest, videoMode: mode as GenerationParams['videoMode'],
+              ...(mode === 'frames' && model.protocol === 'seedance-video' && model.model_id.includes('-2-5-') ? { size: `${params.size.split('/')[0]}/adaptive` } : {}) }, referenceIds, model)
+            try { validateVideoConnections(next, referenceAssets, model); patchNode(node.id, { params: next }) }
             catch (error) { report(error) }
           }} /> : <span className="dc-video-mode-auto" aria-label="视频生成模式：文生视频">文生视频</span>)}
         {model && params && !isTtsParams(params) && <GenerationParameters key={node.id} model={model} params={params} disabled={submitting} onChange={(params) => {
           try {
-            if (model.protocol === 'seedance-video') validateSeedanceConnections(params, referenceAssets, model.model_id)
+            if (isMultimodalVideo(model)) validateVideoConnections(params, referenceAssets, model)
             patchNode(node.id, { params })
           } catch (error) { report(error) }
         }} />}

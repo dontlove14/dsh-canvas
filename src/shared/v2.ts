@@ -39,7 +39,7 @@ export const TaskSearchQuerySchema = z.object({
   startTime: z.number().int().min(0).max(8640000000000000).optional(),
   endTime: z.number().int().min(0).max(8640000000000000).optional(),
   page: z.number().int().min(1).max(100000000).default(1),
-  pageSize: z.union([z.literal(10), z.literal(20), z.literal(50), z.literal(100)]).default(20),
+  pageSize: z.union([z.literal(10), z.literal(20), z.literal(50), z.literal(100)]).default(10),
   upperBound: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
 }).strict().refine((value) => value.startTime === undefined || value.endTime === undefined || value.startTime <= value.endTime, {
   message: '开始时间不能晚于结束时间', path: ['endTime'],
@@ -57,12 +57,13 @@ export function parseTaskSearchParams(params: URLSearchParams): TaskSearchQuery 
   }
   return TaskSearchQuerySchema.parse(values)
 }
-export interface TaskRow {
+export interface TaskModelIdentity { modelName: string; providerName: string }
+export interface TaskRow extends TaskModelIdentity {
   id: string; canvasId: string; nodeId: string; folderName: string; canvasName: string; nodeName: string
   type: NonNullable<TaskSearchQuery['type']>; status: TaskStatus; createdAt: number; updatedAt: number
 }
 export interface TaskPage { items: TaskRow[]; total: number; page: number; pageSize: number; upperBound: number }
-export interface TaskDetail {
+export interface TaskDetail extends TaskModelIdentity {
   task: Task | null
   kind: 'generation' | 'import'
   phase: string

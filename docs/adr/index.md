@@ -8,6 +8,8 @@
 
 ## 索引
 
+Wan / H3 四渠道、原生协议与共用视频行为见 [ADR-0067](0067-wan-and-minimax-native-video-protocols.md)。
+
 | 编号 | 决策 | 覆盖范围 | 状态 |
 | --- | --- | --- | --- |
 | [ADR-0001](0001-harness-plugin-boundaries.md) | 使用 Harness 公开扩展边界与 owner 认证 | 插槽、工作区、宿主 / 浏览器、开发载体 | 已采纳（补录） |
@@ -76,6 +78,7 @@
 | [ADR-0064](0064-bounded-upload-capsules-and-five-transfers.md) | 五路上传与有界胶囊动效 | 五槽 / 五枚及+N、轻悬浮 / 真实Beam、主题 / 暂停、进入与连续完成补位 | 已采纳；部分替代0063 |
 | [ADR-0065](0065-exclusive-canvas-file-drop.md) | 画布文件拖放与宿主附件互斥 | 可见区域 / 最终落点、window捕获、跨区蒙版清理、原文件唯一接收、隐藏与卸载 | 已采纳 |
 | [ADR-0066](0066-shared-node-creation-entrances.md) | 统一节点创建与拉线快捷入口 | 共用注册 / 工厂、空白右键、固定输出引用、节点与边原子保存、扩展三入口维护 | 已采纳 |
+| [ADR-0067](0067-wan-and-minimax-native-video-protocols.md) | Wan 3.0与MiniMax H3双渠道原生协议 | 四渠道 / 十二组合、共用模式与独立能力、固定OSS参考、原任务恢复、原结构保持 | 已采纳 |
 
 ## 如何使用
 

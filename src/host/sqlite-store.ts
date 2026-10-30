@@ -13,7 +13,7 @@ import { ModelRecordSchema, WorkspaceStateSchema, emptyGraph, capabilitiesFor, B
   type ModelRecord, type ModelInput, type PublicModel, type WorkspaceState, type Asset, type MediaKind, type Task } from '../shared/contracts'
 import { maskSecret, SettingSecretRequestSchema, type SettingSecretRequest } from '../shared/settingSecrets'
 import { isMockModel } from '../shared/mockModels'
-import { BUILTIN_MODELS, builtinDefinition, correctSeedreamModelId, modelConfigured, modelRequiresEndpoint } from '../shared/modelCatalog'
+import { BUILTIN_MODELS, builtinDefinition, correctSeedreamModelId, modelConfigured, modelRequiresEndpoint, isUnsupportedModelLinkH3, providerFor } from '../shared/modelCatalog'
 import { inspectSeedanceReference } from './media/seedanceReferences'
 import { FISH_TTS_ENDPOINT, TtsParamsSchema, TtsSettingsInputSchema, type TtsSettingsInput, type PublicTtsSettings, type TtsTaskSnapshot } from '../shared/contracts'
 import { STORAGE_REQUIRED, type ObjectLocator, type ObjectStorageSettings, type StorageInput, type MediaVariant } from '../shared/objectStorage'
@@ -27,6 +27,17 @@ const TtsConfigSchema = z.object({
 
 const statusToDb: Record<Task['status'], string> = { submitted: 'queued', queued: 'external_wait', generating: 'running', saving: 'saving', completed: 'succeeded', failed: 'failed', unknown: 'needs_attention', save_failed: 'save_failed', abandoned: 'abandoned' }
 const statusFromDb: Record<string, Task['status']> = { queued: 'submitted', external_wait: 'queued', running: 'generating', saving: 'saving', succeeded: 'completed', failed: 'failed', needs_attention: 'unknown', save_failed: 'save_failed', abandoned: 'abandoned' }
+
+// Use the submitted identity, never today's model configuration or a private URL as a label.
+function taskModelIdentity(model: { name?: unknown; api_base?: unknown; protocol?: unknown } | undefined) {
+  return {
+    modelName: typeof model?.name === 'string' && model.name.trim() ? model.name : '-',
+    providerName: typeof model?.api_base === 'string'
+      ? providerFor({ api_base: model.api_base })?.label
+        ?? (model.protocol === 'fish-tts' && model.api_base === FISH_TTS_ENDPOINT ? 'Model Link' : '-')
+      : '-',
+  }
+}
 
 /** SQLite is authoritative; the host projection is published only after a successful COMMIT. */
 export class SqliteStore {
@@ -158,6 +169,8 @@ export class SqliteStore {
   }
   model(id: string) {
     const model = this.models.find((m) => m.id === id)
+    if (model && isUnsupportedModelLinkH3(model))
+      throw new CanvasError('Model Link 的 MiniMax H3 仅支持 MiniMax-H3，请重新选择模型', 400, 'MODEL_NOT_SUPPORTED')
     if ((!model && BUILTIN_MODELS.some((m) => m.id === id)) || (model && builtinDefinition(model) && !modelConfigured({ ...model, has_api_key: !!this.keys[id] })))
       throw new CanvasError('请前往设置页面配置模型', 400, 'MODEL_NOT_CONFIGURED')
     if (!model) throw new CanvasError('模型已删除，请重新选择', 404, 'MODEL_NOT_FOUND')
@@ -208,6 +221,8 @@ export class SqliteStore {
   }
   async saveModel(input: ModelInput): Promise<PublicModel[]> {
     return this.serial(async () => {
+      if (isUnsupportedModelLinkH3(input))
+        throw new CanvasError('Model Link 的 MiniMax H3 仅支持 MiniMax-H3', 400, 'MODEL_NOT_SUPPORTED')
       const definition = builtinDefinition(input)
       const existing = input.id ? this.models.find((m) => m.id === input.id) : undefined
       const legacyKeyEdit = existing && !builtinDefinition(existing) && ['kind', 'name', 'model_id', 'api_base', 'protocol'].every((key) => input[key as keyof ModelInput] === existing[key as keyof ModelRecord])
@@ -454,14 +469,14 @@ export class SqliteStore {
     await this.objects.verify(locator)
     return (await this.objects.sign(locator, { method: 'GET', ttl: 86400 }, true)).url
   }
-  async inspectReference(taskId: string, assetId: string, signal: AbortSignal): Promise<Asset> {
+  async inspectReference(taskId: string, assetId: string, signal: AbortSignal, protocol = 'seedance-video'): Promise<Asset> {
     const row = await this.db.get('SELECT canvas_id,locator_json FROM task_references WHERE task_id=? AND asset_id=?', [taskId, assetId])
     if (!row) throw new CanvasError('任务参考素材不存在', 404)
     const locator: ObjectLocator = JSON.parse(row.locator_json)
     const asset = this.state(row.canvas_id).assets.find((asset) => asset.id === assetId)
     if (!asset) throw new CanvasError('任务参考素材不存在', 404)
     const source = await (await this.objects.adapter(locator.providerId, locator.credentialRef)).openRead(locator)
-    return inspectSeedanceReference(source, { ...asset, bytes: locator.bytes, mime: locator.mime }, locator.sha256, signal)
+    return inspectSeedanceReference(source, { ...asset, bytes: locator.bytes, mime: locator.mime }, locator.sha256, signal, protocol)
   }
   async mediaHash(canvas: string, id: string): Promise<string> {
     const row = await this.db.get("SELECT file_hash FROM canvas_assets WHERE canvas_id=? AND id=? AND file_state='ready'", [canvas, id])
@@ -677,6 +692,9 @@ export class SqliteStore {
     const filtered = `WITH filtered AS (
       SELECT t.id,t.canvas_id AS canvasId,t.node_id AS nodeId,COALESCE(f.name,'未归档') AS folderName,
         c.name AS canvasName,t.title AS nodeName,${type} AS type,t.status,t.queue_seq,
+        json_extract(d.snapshot_json,'$.model.name') AS submittedModelName,
+        json_extract(d.snapshot_json,'$.model.api_base') AS submittedModelBase,
+        json_extract(d.snapshot_json,'$.model.protocol') AS submittedModelProtocol,
         t.created_at AS createdAt,t.updated_at AS updatedAt
       FROM task_catalog t JOIN canvases c ON c.id=t.canvas_id
       LEFT JOIN folders f ON f.id=c.folder_id AND f.owner_id=c.owner_id
@@ -691,7 +709,10 @@ export class SqliteStore {
       [...params, query.pageSize, (query.page - 1) * query.pageSize, query.pageSize, query.pageSize], 'all'),
     ], false)
     return {
-      items: rows.map(({ queue_seq: _sequence, status, ...row }: any) => ({ ...row, status: statusFromDb[status] })),
+      items: rows.map(({ queue_seq: _sequence, status, submittedModelName, submittedModelBase, submittedModelProtocol, ...row }: any) => ({
+        ...row, ...taskModelIdentity({ name: submittedModelName, api_base: submittedModelBase, protocol: submittedModelProtocol }),
+        status: statusFromDb[status],
+      })),
       total: count.total, page: Math.min(query.page, Math.max(1, Math.ceil(count.total / query.pageSize))),
       pageSize: query.pageSize, upperBound: bound.value,
     }
@@ -700,7 +721,8 @@ export class SqliteStore {
     const row = await this.db.get('SELECT d.*,c.kind FROM task_details d JOIN task_catalog c ON c.id=d.task_id WHERE c.canvas_id=? AND c.id=?', [canvas, id])
     if (!row) throw new CanvasError('任务不存在', 404)
     const task = this.state(canvas).tasks.find((t) => t.id === id)
-    return { task: task ?? null, kind: row.kind, phase: row.phase, externalTaskId: row.external_task_id, externalCompletedAt: row.external_completed_at, successAt: row.success_at, failureStage: row.failure_stage, failureCode: row.failure_code, failureMessage: row.failure_message, attempts: await this.db.all('SELECT step,issued_at,finished_at,outcome,error FROM task_attempts WHERE task_id=? ORDER BY issued_at', [id]) }
+    return { ...taskModelIdentity(row.snapshot_json ? JSON.parse(row.snapshot_json).model : undefined),
+      task: task ?? null, kind: row.kind, phase: row.phase, externalTaskId: row.external_task_id, externalCompletedAt: row.external_completed_at, successAt: row.success_at, failureStage: row.failure_stage, failureCode: row.failure_code, failureMessage: row.failure_message, attempts: await this.db.all('SELECT step,issued_at,finished_at,outcome,error FROM task_attempts WHERE task_id=? ORDER BY issued_at', [id]) }
   }
   private async moveStatements(canvas: string, nodeIds?: string[], targetStorage?: string, state = this.state(canvas), revisionIncrement = 0): Promise<Statement[]> {
     const target = await this.db.get('SELECT target_storage_id,layout_revision FROM canvases WHERE id=?', [canvas])

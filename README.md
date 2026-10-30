@@ -2,11 +2,13 @@
 
 基于 React Flow 12 的本地多模态创作画布，运行于 DeepSeek Harness。提供图片生成、视频生成、FishTTS语音生成，以及图片、视频、音频资源六种节点；连线把具体素材作为下游输入，生成由用户逐节点发起。
 
-**运行基准：Node.js 22.13+、Harness 0.2.1-rc.2。** SQLite 保存目录、画布、任务和对象定位；图片 / 视频 / 音频及派生文件保存在私有阿里云 OSS。支持 OpenAI / Gemini / Seedream 图片、Seedance视频，以及保留的Sora协议。
+**运行基准：Node.js 22.13+、Harness 0.2.1-rc.2。** SQLite 保存目录、画布、任务和对象定位；图片 / 视频 / 音频及派生文件保存在私有阿里云 OSS。支持 OpenAI / Gemini / Seedream 图片、Seedance / Wan 3.0 / MiniMax H3视频，以及保留的Sora协议。
 
 文档类型：入门教程 / 项目入口；负责人：项目维护者；最近核对：2026-10-29。版本或启动方式变化时更新；详细维护规则见[文档导航](docs/index.md)。
 
 Seedance预审可在设置单独配置Bytedance / BytePlus，图片、视频、音频操作栏盾牌发起异步审核；通过用Asset ID，其他情况继续URL生成。单次批量关注主图，多次历史逐输出送审，真人选择已认证人物组。使用与恢复见[运行指南](docs/operations.md)和[ADR-0059](docs/adr/0059-seedance-asset-review-and-frozen-generation-references.md)。
+
+Wan 3.0 / Prime支持Model Link与Aliyun；MiniMax官方支持H3 / Highspeed / Lite / Max，Model Link仅支持MiniMax-H3。在模型设置选择系列、渠道并填API Key即可。支持文生、参考与首尾帧模式，参数随型号变化，见[协议参考](docs/providers.md)。
 
 ## 本地快速体验
 

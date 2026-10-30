@@ -4,6 +4,7 @@ import type { GenerationParams, PublicModel } from '../shared/contracts'
 import { chooseResolution, paramsSummary, ratioChoices, sizeChoices } from './generationParams'
 import { UiButton, UiSlider, UiCheckbox } from './ui'
 import { useCanvasTextSelectionScope } from './canvasTextSelection'
+import { videoSizeAllowed } from '../shared/video'
 
 export function GenerationParameters({ model, params, disabled, onChange }: { model: PublicModel; params: GenerationParams; disabled: boolean; onChange: (params: GenerationParams) => void }) {
   const textScope = useCanvasTextSelectionScope()
@@ -12,8 +13,7 @@ export function GenerationParameters({ model, params, disabled, onChange }: { mo
   const popup = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: 0, top: 0 })
   const id = useId()
-  const choices = sizeChoices(model).filter((choice) => model.protocol !== 'seedance-video' || !model.model_id.includes('-2-5-')
-    || params.videoMode !== 'frames' || choice.ratio === 'adaptive')
+  const choices = sizeChoices(model).filter((choice) => videoSizeAllowed(model, params, choice.ratio))
   const current = choices.find((choice) => choice.size === params.size)
   useEffect(() => { setOpen(false) }, [model.id, disabled])
   useEffect(() => {

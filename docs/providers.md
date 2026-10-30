@@ -4,6 +4,28 @@
 
 本页描述[已实现的适配器](../src/host/providers.ts)与[能力定义](../src/shared/contracts.ts)，不是对任何厂商当前线上 API 的兼容认证。真实账户联调仍见[验证记录](verification.md)。
 
+## Wan 3.0 / MiniMax H3（0.2.75）
+
+| 系列 | 原厂 base | Model Link base | 提交 / 查询（相对base） |
+| --- | --- | --- | --- |
+| Wan 3.0 / Prime | `https://maas.qianwenaiapi.com/api/v1`（Aliyun） | `https://api.modellink.online/wan/api/v1` | POST `services/aigc/video-generation/video-synthesis` / GET `tasks/{task_id}` |
+| MiniMax H3（官方另支持Highspeed / Lite / Max） | `https://api.minimax.cn`（MiniMax） | `https://api.modellink.online/hailuo`（仅MiniMax-H3） | POST `v2/video_generation` / GET `v2/query/video_generation/{task_id}` |
+
+四条渠道独立配置Bearer API Key，不需EP。Wan提交另加 `X-DashScope-Async: enable`，JSON为model、input.prompt / media（type / url）、parameters.resolution / ratio / duration / audio / prompt_extend / watermark；查询读取output，PENDING / RUNNING / SUCCEEDED / FAILED / CANCELED / UNKNOWN分别排队 / 生成 / 保存 / 失败 / 取消 / 过期。H3提交用content.text与image_url / video_url / audio_url的role，resolution / ratio / duration；MiniMax官方另传 `aigc_watermark: false`，Model Link不传该字段，因网关明确拒绝。创建task_id，查询task.id / status / content.url，queued / running / succeeded / failed / cancelled。URI中任务ID编码，严格匹配原ID，成功结果CDN不携带Bearer。
+
+Model Link的Highspeed / Lite / Max不属于可配置或生成候选。之前保存的记录 / 密钥 / 历史快照保留，直接调用配置或生成接口会在外部请求前拒绝；节点需用户重新选择标准H3或官方渠道。既有失败任务不自动重提。
+
+| 限制 | Wan | H3 |
+| --- | --- | --- |
+| 分辨率 / 输出时长 | 480P / 720P / 1080P；2–30秒 | H3 768P / 2K，Highspeed 768P，Lite / Max 480P / 768P；前三款4–15秒，Max 5–15秒 |
+| 参考数量 / 单文件MiB | 图10 / 20，视频5 / 100，音频5 / 15 | 图9 / 30，视频3 / 50，音频3 / 15 |
+| 参考音视频时长 | 各自总和≤15秒；输入视频总和+输出≤30秒 | 单段2–15秒，同类总和≤15秒 |
+| 实际参考视频 | 至少16FPS | 23.976–60FPS，H.264/H.265，音轨AAC/MP3 |
+| 参考画面宽高 / 比例 | 未加入无文档依据的尺寸限制 | 256–5760px，宽/高0.4–2.5 |
+| 模式比例 / 音频 | 七种比例含adaptive；可开关同步音频 | 文生具体比例，首尾帧adaptive，Lite参考具体比例；无音频开关 |
+
+共同支持PNG / JPEG / WebP、MP4 / MOV、MP3 / WAV，与当前上传类型取交集；每次输出一个视频。Wan提示词≤20000字符。素材从任务固定OSS版本流式校验再签URL；不使用Seedance预审Asset ID。模式与恢复 / 官方来源见[ADR-0067](adr/0067-wan-and-minimax-native-video-protocols.md)。
+
 Seedance官方预审独立使用AK/SK，Bytedance `ark.cn-beijing.volcengineapi.com` / cn-beijing，BytePlus `ark.ap-southeast-1.byteplusapi.com` / ap-southeast-1，Service ark / Version 2024-01-01。固定官方签名模块1.36.2及离线向量，保留来源与许可证；CreateAssetGroup / CreateAsset / GetAssetGroup / GetAsset / ListAssetGroups / ListAssets，列表Filter.GroupType为单值，Result.Items / NextToken分页。BytePlus送Default，Bytedance不传Moderation。预审Active的可信ID替代对应image_url / video_url / audio_url中的url为`asset://ID`，顺序和role保持；其他来源继续URL。Model Link不使用官方Asset URI。
 
 预审独立格式限制：图片小于30MiB，宽高严格大于300 / 小于6000、比例严格在0.4–2.5；视频最多200MiB，MP4/MOV、2–30秒、480p–4K、24–60FPS；音频最多15MiB，MP3/WAV、2–30秒。实际原字节 / hash / 格式重新读取验证，支持类型仍受现有上传格式限制，模型引用的更窄限制另行验证。真人必须选择该供应商项目已认证LivenessFace组。生成EP与预审ProjectName需用户在官方账户配置为同项目；插件不从API Key推断账户，真实权限需手动联调。详见[ADR-0059](adr/0059-seedance-asset-review-and-frozen-generation-references.md)。
