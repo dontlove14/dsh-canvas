@@ -102,6 +102,9 @@
 :is(.dc-canvas-area,.dc-canvas-text-scope) .dc-prompt-editor[data-dc-text-selectable="true"] .dc-prompt-token,
 :is(.dc-canvas-area,.dc-canvas-text-scope) .dc-prompt-editor[data-dc-text-selectable="true"] .dc-prompt-token *{-webkit-user-select:all!important;user-select:all!important}
 .dc-canvas-area .react-flow{--xy-edge-stroke:var(--dc-edge);--xy-edge-stroke-selected:var(--dc-accent);--xy-connectionline-stroke:var(--dc-accent);--xy-selection-background-color:transparent;--xy-selection-border:1px dashed var(--dc-accent);background:var(--dc-bg)}
+.dc-canvas-area[data-agent-following="true"] .react-flow{--xy-background-color:color-mix(in srgb,var(--dc-text) 8%,var(--dc-bg));background:var(--xy-background-color)}
+.dc-agent-watermark{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;overflow:hidden}
+.dc-agent-watermark text{fill:color-mix(in srgb,var(--dc-text) 9%,transparent);font:600 12px var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif);letter-spacing:1px}
 .dc-canvas-area :is(.react-flow__selection,.react-flow__nodesselection-rect){background:transparent;border:1px dashed var(--dc-accent)}
 .dc-canvas-area[data-selection-group="true"] .react-flow__nodesselection-rect{border-color:transparent}
 .dc-selection-frame{width:100%;height:100%;border:1px dashed var(--dc-accent);border-radius:8px;box-sizing:border-box;background:transparent;pointer-events:none}
@@ -170,6 +173,7 @@
 .dc-result-tabs button.active{background:var(--dc-selection);border-color:var(--dc-accent);color:var(--dc-accent)}
 .dc-node-loading{position:absolute;inset:0;border-radius:inherit;z-index:3;pointer-events:none;color:var(--dc-text)}
 .dc-node-loading-beam{width:100%;height:100%}
+.dc-agent-highlight-content{width:100%;height:100%;background:transparent}
 .dc-node-loading-content{width:100%;height:100%;border-radius:inherit;background:color-mix(in srgb,var(--dc-surface) 96%,transparent);display:flex;align-items:center;justify-content:center;padding:0}
 .dc-node-media-loading .dc-media-loading-effect,.dc-node-media-loading .image-gen-child,.dc-media-loading-size{width:100%;height:100%}
 .dc-media-loading-fallback{width:100%;height:100%;border-radius:inherit;background:var(--dc-surface);display:grid;place-items:center;color:var(--dc-text)}

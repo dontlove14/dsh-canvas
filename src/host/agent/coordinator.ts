@@ -4,13 +4,17 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { INTERNAL_CANVAS_PRESETS, type CanvasControl, type SpecialistRole } from '../../shared/agent'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import { GENERATION_HANDOFF_REASON, isGenerationHandoff, INTERNAL_CANVAS_PRESETS, type CanvasControl, type SpecialistRole } from '../../shared/agent'
+import type { CanvasGraph } from '../../shared/contracts'
 import type { CanvasService } from '../service'
 import { CanvasError } from '../store'
 import { hash } from '../persistence/database'
 import { AgentLedger } from './ledger'
 import { handoffSummary } from './handoff'
 import { AgentPresentation } from './presentation'
+import { CanvasChatReferences } from './chatReferences'
+import { AgentModelSelection } from './modelSelection'
 
 declare module '@deepseek-ai/cordis' { interface Context { canvasAgent: CanvasAgentCoordinator } }
 const internalPresets = new Set(INTERNAL_CANVAS_PRESETS)
@@ -19,6 +23,8 @@ export interface AgentMember { agent: Agent; role: 'main' | SpecialistRole; root
 export class CanvasAgentCoordinator extends Service {
   readonly ledger: AgentLedger
   readonly presentation: AgentPresentation
+  readonly chatReferences: CanvasChatReferences
+  readonly generationModels: AgentModelSelection
   private members = new Map<string, AgentMember>()
   private queue: Promise<unknown> = Promise.resolve()
   private children = new Map<string, Set<() => Promise<void>>>()
@@ -26,10 +32,17 @@ export class CanvasAgentCoordinator extends Service {
   private routes = new Map<string, { provider: string; model: string }>()
   private specialistRuns = new Map<string, Promise<unknown>>()
   private restrictions = new Map<Agent, { preset: string; dispose: () => void }>()
+  private manualInputs = new Map<string, Set<string>>()
   constructor(ctx: Context, readonly canvas: CanvasService) {
     super(ctx, 'canvasAgent')
     this.ledger = new AgentLedger(canvas.config.dataDir)
-    this.presentation = new AgentPresentation(canvas.config.dataDir, (id) => this.control(id))
+    this.generationModels = new AgentModelSelection(() => canvas.store.listModels())
+    this.chatReferences = new CanvasChatReferences(ctx, this)
+    this.presentation = new AgentPresentation(canvas.config.dataDir, (id) => this.control(id),
+      (id) => ctx.agents.get(id as SessionId)?.status === 'running')
+    ctx.effect(() => ctx.root.on('agent/status', ({ agent }) => {
+      if (this.members.get(agent.id)?.role === 'main') this.presentation.changed()
+    }))
     // Preset listeners stop matching immediately after rebind; the host owns cleanup.
     ctx.effect(() => ctx.root.on('agent-preset/selected', (id, preset) => {
       for (const [agent, entry] of this.restrictions) if (agent.id === id && entry.preset !== preset) {
@@ -45,7 +58,25 @@ export class CanvasAgentCoordinator extends Service {
     return work
   }
   register(agent: Agent, role: AgentMember['role'], rootId = agent.id) {
+    if (role === 'main' && this.members.get(agent.id)?.agent !== agent &&
+      this.ledger.controls().some((control) => control.sessionId === agent.id && control.mode === 'manual')) this.rememberManualInputs(agent)
     this.members.set(agent.id, { agent, role, rootId })
+  }
+  private rememberManualInputs(agent: Agent) {
+    const ids = new Set<string>()
+    for (const event of agent.session.snapshotEvents()) {
+      if (event.type === 'user/message') ids.add(event.data.id)
+    }
+    for (const message of [...(agent.inbox?.nextTurn ?? []), ...(agent.inbox?.nextStep ?? [])]) ids.add(message.id)
+    this.manualInputs.set(agent.id, ids)
+  }
+  async resumeForUserInput(agent: Agent, messages: UserMessage[], signal: AbortSignal) {
+    const member = this.member(agent), control = this.session(agent.id).canvas
+    if (member.role !== 'main' || control?.mode !== 'manual' ||
+      !messages.some((message) => message.source.kind === 'user' && !!message.id && !this.manualInputs.get(agent.id)?.has(message.id))) return
+    signal.throwIfAborted()
+    await this.delegate(control.canvasId, agent.id, undefined, control.epoch, 'user-message')
+    signal.throwIfAborted()
   }
   trackRestriction(agent: Agent, preset: string, dispose: () => void) {
     this.restrictions.set(agent, { preset, dispose })
@@ -53,7 +84,9 @@ export class CanvasAgentCoordinator extends Service {
   unregister(agent: Agent) {
     if (this.members.get(agent.id)?.agent !== agent) return
     this.members.delete(agent.id)
+    this.generationModels.clear(agent)
     this.routes.delete(agent.id)
+    this.manualInputs.delete(agent.id)
     this.restrictions.get(agent)?.dispose(); this.restrictions.delete(agent)
     for (const c of this.ledger.controls()) if (c.sessionId === agent.id && c.mode === 'agent') {
       this.ledger.setControl({ ...c, mode: 'manual', epoch: c.epoch + 1, updatedAt: Date.now(), reason: '会话已关闭' })
@@ -61,7 +94,11 @@ export class CanvasAgentCoordinator extends Service {
     void this.ledger.persist().catch(() => {})
     this.presentation.changed()
   }
-  setRoute(agent: Agent, route: { provider: string; model: string }) { this.routes.set(agent.id, { ...route }) }
+  setRoute(agent: Agent, route: { provider: string; model: string }) {
+    const previous = this.routes.get(agent.id)
+    if (previous && (previous.provider !== route.provider || previous.model !== route.model)) this.generationModels.clear(agent)
+    this.routes.set(agent.id, { ...route })
+  }
   route(agent: Agent) {
     const route = this.routes.get(agent.id)
     if (!route) throw new CanvasError('尚未核验主 Agent 模型', 409, 'AGENT_MULTIMODAL_REQUIRED')
@@ -89,6 +126,10 @@ export class CanvasAgentCoordinator extends Service {
   assert(agent: Agent, control: CanvasControl, writing = true) {
     const member = this.member(agent), current = this.control(control.canvasId)
     if (writing && member.role !== 'main') throw new CanvasError('专业 Agent 只能返回草稿', 403, 'AGENT_DRAFT_ONLY')
+    // The root may finish its reminder and inspect saved inputs after yielding;
+    // all writes remain revoked, and cancelled children get no such exception.
+    if (!writing && member.role === 'main' && isGenerationHandoff(current) &&
+      current.sessionId === agent.id && current.epoch === control.epoch) return
     if (current.mode !== 'agent' || current.sessionId !== member.rootId || current.epoch !== control.epoch || this.revoked.has(member.rootId))
       throw new CanvasError('画布已由人工接管，请重新委托', 409, 'AGENT_CONTROL_REVOKED')
   }
@@ -111,25 +152,29 @@ export class CanvasAgentCoordinator extends Service {
     }))
     return { models }
   }
-  async delegate(canvasId: string, sessionId: string, revision?: number) {
+  async delegate(canvasId: string, sessionId: string, revision?: number, expectedEpoch?: number, source?: 'user-message') {
     this.session(sessionId)
     const member = this.members.get(sessionId)
     if (!member || member.role !== 'main') throw new CanvasError('请先在对话中选择「无限画布」Agent 预设', 409, 'AGENT_SESSION_REQUIRED')
     const admittedEpoch = this.control(canvasId).epoch
+    if (expectedEpoch !== undefined && expectedEpoch !== admittedEpoch) throw new CanvasError('控制状态已变化，请核对当前画布', 409, 'AGENT_CONTROL_REVOKED')
     return this.serial(async () => {
       const snapshot = await this.canvas.store.snapshot(canvasId)
       if (this.control(canvasId).epoch !== admittedEpoch) throw new CanvasError('控制状态已更新，请重新委托', 409, 'AGENT_CONTROL_REVOKED')
       if (revision !== undefined && revision !== snapshot.graphRevision) throw new CanvasError('请先保存当前画布后再委托', 409, 'GRAPH_CONFLICT')
       const c = this.control(canvasId)
+      if (isGenerationHandoff(c) && source !== 'user-message')
+        throw new CanvasError('正在等待用户检查参数并点击生成；只有新消息可恢复 Agent 操作', 409, 'AGENT_MANUAL_GENERATION_REQUIRED')
       if (c.mode === 'agent' && c.sessionId !== sessionId) throw new CanvasError('画布正由另一会话操作，请先人工接管', 409, 'AGENT_CANVAS_BUSY')
       if (c.mode === 'agent' && c.sessionId === sessionId) return c
       for (const other of this.ledger.controls()) if (other.sessionId === sessionId && other.canvasId !== canvasId && other.mode === 'agent') throw new CanvasError('请先接管上一张画布', 409, 'AGENT_SESSION_BUSY')
       for (const other of this.ledger.controls()) if (other.sessionId === sessionId && other.canvasId !== canvasId)
-        this.ledger.setControl({ ...other, sessionId: null })
+        { this.ledger.setControl({ ...other, sessionId: null }); this.generationModels.clear(member.agent) }
       const previous = this.ledger.handoff(canvasId)
       const summary = handoffSummary(previous?.graph, snapshot.graph, snapshot.graphRevision)
       const next: CanvasControl = { canvasId, sessionId, mode: 'agent', epoch: c.epoch + 1, updatedAt: Date.now() }
       this.revoked.delete(sessionId)
+      this.manualInputs.delete(sessionId)
       this.ledger.setControl(next)
       this.ledger.setHandoff(canvasId, hash(snapshot.graph), summary, snapshot.graph)
       await this.ledger.persist()
@@ -137,12 +182,27 @@ export class CanvasAgentCoordinator extends Service {
       return next
     })
   }
+  /** Called in the shared commit queue after the presentation receipt. */
+  handoffGeneration(agent: Agent, control: CanvasControl, summary: string, graph: CanvasGraph) {
+    this.assert(agent, control)
+    const next: CanvasControl = { ...control, mode: 'manual', epoch: control.epoch + 1,
+      updatedAt: Date.now(), reason: GENERATION_HANDOFF_REASON }
+    this.ledger.setControl(next)
+    this.rememberManualInputs(agent); this.generationModels.clear(agent); this.revoked.add(agent.id)
+    this.ledger.setHandoff(control.canvasId, hash(graph), summary, graph)
+    for (const member of this.members.values()) if (member.rootId === agent.id && member.agent !== agent) member.agent.cancel({ kind: 'user' })
+    for (const dispose of this.children.get(agent.id) ?? []) void dispose().catch(() => {})
+    this.presentation.changed()
+    return next
+  }
   async takeover(canvasId: string, reason = '人工接管') {
     const c = this.control(canvasId)
     // Revoke synchronously before cancellation hooks or other awaited work.
     this.ledger.setControl({ ...c, mode: 'manual', epoch: c.epoch + 1, updatedAt: Date.now(), reason })
     this.presentation.changed()
     if (c.sessionId) {
+      const main = this.members.get(c.sessionId)?.agent
+      if (main) { this.rememberManualInputs(main); this.generationModels.clear(main) }
       this.revoked.add(c.sessionId)
       for (const member of this.members.values()) if (member.rootId === c.sessionId) member.agent.cancel({ kind: 'user' })
       for (const dispose of this.children.get(c.sessionId) ?? []) void dispose().catch(() => {})
@@ -188,7 +248,7 @@ export class CanvasAgentCoordinator extends Service {
   async manual(request: Request, operation: () => Promise<Response>) {
     if (request.method !== 'POST') return operation()
     const url = new URL(request.url), suffix = url.pathname.split('/').at(-1)!
-    if (['media-urls', 'settings-secret', 'agent-control', 'agent-view', 'agent-presence', 'agent-presentation-ack'].includes(suffix)) return operation()
+    if (['media-urls', 'settings-secret', 'agent-control', 'agent-view', 'agent-presence', 'agent-presentation-ack', 'agent-reference-resolve'].includes(suffix)) return operation()
     return this.serial(async () => {
       const canvasId = url.searchParams.get('canvas') ?? url.searchParams.get('workspace')
       const locked = canvasId ? this.control(canvasId).mode === 'agent' : this.ledger.controls().some((c) => c.mode === 'agent')

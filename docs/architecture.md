@@ -1,8 +1,20 @@
 # 当前架构与执行流程
 
-文档类型：解释；负责人：项目维护者；最近核对：2026-10-30。每次模块 / SDK / 存储边界变化时复核。
+文档类型：解释；负责人：项目维护者；最近核对：2026-11-02。每次模块 / SDK / 存储边界变化时复核。
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
+
+0.2.100 `canvas_handoff_generation` → 实际节点update呈现 / 回执 → 提交队列二次校验 → manual / 新epoch / 现有reason → 提醒并保留主级只读回复。Client与Host共同禁止此状态的idle恢复，新用户消息先保存再恢复。`canvas_generate`新的图片 / 视频提交硬拒绝，已接受任务优先只读查回；FishTTS与存量图 / 两库 / Ledger v1保持。见[ADR-0080](adr/0080-manual-generation-parameter-review-handoff.md)。
+
+0.2.99 当前配置目录 → 原生UserQuestions → 主Agent临时模型选择Registry → 图 / 任务前置与提交校验。模型和供应商以配置modelId绑定，图片 / 视频分别确认，接管与项目 / 路线切换清除；inspect和动态上下文同源。已接受任务优先查回原身份，无图 / 两库 / Ledger格式变更。见[ADR-0079](adr/0079-configured-generation-model-user-selection.md)。
+
+0.2.98 公开SessionFace.prompt可撤销适配 → 当前可见画布flush → 带revision / epoch委托 → 原生消息受理；主级pre-step新用户输入补充冷恢复，接管前历史 / 队列身份不能复活旧执行。人工控制座位独立保留手势与空闲计时，保存期间新活动使旧恢复失效；不改两库 / Ledger v1 / 任务身份。见[ADR-0078](adr/0078-manual-control-message-and-idle-delegation.md)。
+
+0.2.96 当前右侧原生SessionFace公开快照 → 新pendingSubmission身份 / running → 客户端跟随状态。每次发送恢复、真实手势暂停、最后活动结束超过10秒恢复最新意图，回复结束取消恢复；首次快照 / 重连不重放消息。计时器、按键与指针持有、portal监听随作用域释放；程序setViewport不触发暂停。灰色主题背景和水印位于节点后，不修改Host / CanvasGraph / 两库 / 写权。详见[ADR-0077](adr/0077-automatic-agent-follow-and-manual-idle.md)。
+
+0.2.93 公开原生输入控制器 → 当前会话 `#` 检测适配 → 原生分组菜单 / 输入标签 → owner只读引用核验 → 根用户原文引用目录 → 受控图片 / 文件读取。Client SDK类从原生ModuleLoader复用，工作区候选来自原生RPC；菜单状态与请求随原retained binding释放。标记身份不写CanvasGraph，两库保持；原@和/控制器独立。详见[ADR-0076](adr/0076-native-hash-canvas-and-workspace-references.md)。
+
+0.2.92 原生主级 Agent.status / agent/status → 原呈现事件 / 即时 running → 当前节点临时 agentFocused → 共享 MediaNode 的真实 Beam 边框。运行状态不写 sidecar或两库，暂停跟随与高亮分开；业务调用前可呈现已存在目标，完成后仍沿原回执。客户端只通过 setViewport 对实际节点中心定位，卡片内部滚动，尺寸变化由局部 observer 重测；原图坐标、生成幂等、媒体和渲染缓存保持。见[ADR-0075](adr/0075-agent-node-highlight-and-centered-viewport.md)。
 
 0.2.91 主级受限工具增加附件 / 工作区模块：根会话真实 `user/message` durable ref → Harness `readImage` / `readFileStream` → 既有 Uploads / 持久导入 → 真实 referenceConnection。导入接收与提交均沿 signal / epoch guard，已接受任务仍由 Host 保存。新建目录先复用 owner 唯一「Agent 创作」，固定原目录输入用于重试。根会话 `workingDirectory.ensure/get` → 受限项目目录 → 流式摘要 / 无覆盖硬链接发布 → 现有 AgentLedger 文件回执；两库 DDL / CanvasGraph / 媒体生成身份不变。
 

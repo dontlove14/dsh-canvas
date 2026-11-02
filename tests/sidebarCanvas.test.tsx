@@ -3,6 +3,8 @@ import { webcrypto } from 'node:crypto'
 import { act, type ComponentType } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Context, Service } from '@deepseek-ai/cordis'
+import { nativeInputTrigger } from './support/nativeInputTrigger'
 import { apply, inject } from '../src/client/index'
 import { CanvasApi } from '../src/client/api'
 import { useCanvas } from '../src/client/useCanvas'
@@ -13,6 +15,7 @@ import type { SidebarRightTabDefinition } from '@deepseek-ai/dsh-client-ui-sideb
 
 // Harness loads primitives through its browser module loader. Test the plugin's
 // public registration and real app/hooks; semantic controls stand in for that loader.
+vi.mock('@deepseek-ai/dsh-client-ui-input-trigger/client', async () => (await import('./support/nativeInputTrigger')).nativeInputTrigger())
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Button: () => null, Input: () => null, Checkbox: () => null,
   SegmentedControl: () => null, Menu: () => null, Modal: () => null, Tooltip: () => null,
@@ -75,6 +78,65 @@ const snapshot = (): CanvasSnapshot => ({
   updatedAt: 1, commitHash: 'a'.repeat(64), hashes: { nodes: {}, edges: {}, viewport: '' },
 })
 describe('Harness conversation sidebar canvas', () => {
+  it('subscribes to the public session snapshot only inside the declared native service scope and disposes it with the plugin', async () => {
+    const ctx = new Context(), stop = vi.fn(), subscribe = vi.fn(() => stop)
+    const session = { getSnapshot: () => ({ sessionId: 'test', pendingSubmissions: [], running: false, removed: false, openState: 'open', promptError: null }), subscribe }
+    ctx.reflect.provide('slots', { entries: () => [], inject: () => () => {}, register: () => () => {} })
+    ctx.reflect.provide('layout', {})
+    ctx.reflect.provide('sidebarRightTabs', { register: () => () => {} })
+    ctx.reflect.provide('sidebarRight', { mounted: { getSnapshot: () => 'test', subscribe: () => () => {} } })
+    ctx.reflect.provide('connection', {})
+    vi.spyOn(CanvasApi.prototype, 'presence').mockResolvedValue({ ok: true } as any)
+    vi.spyOn(CanvasApi.prototype, 'presentation').mockResolvedValue({ intent: null })
+    const plugin = ctx.plugin({ inject, apply })
+    try {
+      await plugin.await()
+      expect(subscribe).not.toHaveBeenCalled()
+      ctx.reflect.provide('sessions', { binding: () => ({ session }) })
+      await vi.waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1))
+    } finally { await plugin.dispose() }
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+  it('waits for the file RPC namespace and loads # workspace candidates inside a real injected client scope', async () => {
+    const ctx = new Context()
+    // Cordis traces this.ctx into the caller's plugin scope, including nested services.
+    class RemoteNamespaces extends Service {
+      constructor(ctx: Context) { super(ctx, 'remote') }
+      get fileReferences() { return this.ctx.get('remote.fileReferences') }
+    }
+    new RemoteNamespaces(ctx)
+    ctx.reflect.provide('slots', { entries: () => [], inject: () => () => {}, register: () => () => {} })
+    ctx.reflect.provide('layout', {})
+    ctx.reflect.provide('sidebarRightTabs', { register: () => () => {} })
+    const sdk = nativeInputTrigger()
+    const original = new sdk.InputTriggerController({ actx: ctx, sessionId: 'test',
+      roster: { all: () => [], sources: () => [] } })
+    const triggers = { sessionOf: () => original }
+    const session = { sessionId: 'test' }, binding = { ctx, sessionId: 'test', session }
+    const using = vi.fn(async (_id, _options, operation) => operation())
+    ctx.reflect.provide('inputTriggers', triggers)
+    ctx.reflect.provide('sessions', { sessionOf: () => session, binding: () => binding, using })
+    const choices = vi.spyOn(CanvasApi.prototype, 'referenceChoices').mockResolvedValue({ preset: true, cwd: '/workspace', media: [] })
+    const list = vi.fn(async () => ({ ok: true, value: [{ path: '反馈.md', kind: 'file' }] }))
+    const plugin = ctx.plugin({ inject, apply })
+    try {
+      await plugin.await()
+      expect(triggers.sessionOf()).toBe(original)
+      expect(choices).not.toHaveBeenCalled()
+      ctx.reflect.provide('remote.fileReferences', { list })
+      await vi.waitFor(() => expect(triggers.sessionOf()).not.toBe(original))
+      const controller = triggers.sessionOf()
+      controller.track('#', 1, { tier: 'plain' }, 1)
+      await vi.waitFor(() => expect(controller.menu.getSnapshot().groups[0]?.items[0]?.name).toBe('反馈.md'))
+      expect(list).toHaveBeenCalledWith('test', '', expect.any(AbortSignal))
+      expect(using).toHaveBeenCalledWith('test', { source: 'referenceCandidates', signal: expect.any(AbortSignal) }, expect.any(Function))
+      expect(controller.menu.getSnapshot().groups[0].items[0].section).toBe('工作区')
+    } finally {
+      await plugin.dispose()
+      original.dispose()
+    }
+    expect(triggers.sessionOf()).toBe(original)
+  })
   it('retries a late catalog, re-enters on native revision, and respects a manual return across visibility changes', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('ResizeObserver', class { observe() {}; disconnect() {} })

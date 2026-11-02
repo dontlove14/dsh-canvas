@@ -31,6 +31,8 @@ export const PresenceSchema = z.object({
 }).strict()
 export interface PresentationState {
   intent: PresentationIntent | null
+  /** Live native Agent driver state; never stored in the presentation sidecar. */
+  running?: boolean
 }
 export interface PresentationResult { id: string; status: PresentationAck['status']; reason?: string }
 export const AutoPlacementSchema = z.object({

@@ -12,6 +12,7 @@ import {
 import { type CanvasChoice, type TaskSummary, type TaskDetail } from '../shared/v2'
 import { CanvasApi } from './api'
 import { modelConfigured } from '../shared/modelCatalog'
+import { GENERATION_HANDOFF_REMINDER, isGenerationHandoff } from '../shared/agent'
 import { useCanvas } from './useCanvas'
 import { useGpuCapability } from './useGpu'
 import { useViewportCompositing } from './useViewportCompositing'
@@ -42,7 +43,7 @@ import { TtsNode } from './TtsNode'
 import { TtsEditor } from './TtsEditor'
 import { TtsIcon } from './TtsIcon'
 import { TaskDialog } from './TaskDialog'
-import { nodeEditorPosition } from './nodeOverlayLayout'
+import { nodeEditorPosition, readonlyEditorBounds } from './nodeOverlayLayout'
 import { RelationshipEdge, relationshipEdges, type RelationshipFlowEdge } from './RelationshipEdge'
 import { NodeLoading, NodeLoadingContext, useNodeLoadingEnvironment } from './NodeLoading'
 import { createLoadingResolutionStore, LoadingResolutionContext } from './loadingResolution'
@@ -77,6 +78,7 @@ import { AgentControlBar } from './AgentControl'
 import type { CanvasPresentationClient } from './presentation'
 import { useCanvasPresentation } from './useCanvasPresentation'
 import { NodeInspection, PresentedTaskEditor } from './NodeInspection'
+import { AgentNodeHighlight } from './AgentNodeHighlight'
 
 const EMPTY_TASKS: TaskSummary[] = []
 const EMPTY_ASSETS: Asset[] = []
@@ -147,6 +149,7 @@ const Media = memo(function Media({ asset, api, workspace, onOpen, compact }: Me
 interface NodeData extends Record<string, unknown> {
   node: CanvasNode; asset?: Asset; task?: TaskSummary; results: Asset[]; modelName?: string
   cards: GenerationCard[]; connectedAssets: string[]
+  agentFocused: boolean
   api: CanvasApi; workspace: string; onOpen: (asset: Asset) => void; onResult: (id: string, assetId: string) => void
   rotation: number; playing: boolean; onRename: (id: string, title: string) => void
   onFocus: (id: string) => void
@@ -157,6 +160,9 @@ interface NodeData extends Record<string, unknown> {
 type FlowNode = Node<NodeData, 'media'>
 type CanvasFlowNode = FlowNode | SelectionFlowNode
 const MediaNode = memo(function MediaNode({ data, selected }: NodeProps<FlowNode>) {
+  return <><MediaNodeContent data={data} selected={selected} />{data.agentFocused && <AgentNodeHighlight nodeId={data.node.id} />}</>
+}, (a, b) => a.selected === b.selected && sameNodeContent(a.data.node, b.data.node) && sameFields(a.data, b.data, 'node'))
+function MediaNodeContent({ data, selected }: Pick<NodeProps<FlowNode>, 'data' | 'selected'>) {
   const { node, asset, task, results, api, workspace, onOpen, onResult } = data
   const generation = isGeneration(node.kind)
   if (generation && data.cards.length > 1) return <HistoryNode node={node} cards={data.cards} connectedAssets={data.connectedAssets}
@@ -180,7 +186,7 @@ const MediaNode = memo(function MediaNode({ data, selected }: NodeProps<FlowNode
     </div>
     <CanvasHandle type="source" disabled />
   </article>
-}, (a, b) => a.selected === b.selected && sameNodeContent(a.data.node, b.data.node) && sameFields(a.data, b.data, 'node'))
+}
 const nodeTypes = { media: MediaNode, selection: SelectionNode }
 const edgeTypes = { relationship: RelationshipEdge }
 const edgeOptions = { type: 'relationship', style: { stroke: 'var(--dc-edge)', strokeWidth: 1.7 } }
@@ -216,6 +222,14 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
   }, [])
   const marquee = useMarqueeSelection(selected, selectedEdges, selectMarquee)
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden')
+  const handoffNoticeId = isGenerationHandoff(state?.agentControl)
+    ? `${workspace}:${state!.agentControl!.sessionId}:${state!.agentControl!.epoch}` : null
+  const [dismissedHandoffNotice, setDismissedHandoffNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!active || !pageVisible || !handoffNoticeId || handoffNoticeId === dismissedHandoffNotice) return
+    const timer = setTimeout(() => setDismissedHandoffNotice(handoffNoticeId), 3000)
+    return () => clearTimeout(timer)
+  }, [active, pageVisible, handoffNoticeId, dismissedHandoffNotice])
   const reviewState = useMemo(() => new CanvasReviewState(api, workspace), [api, workspace])
   const [reviewAsset, setReviewAsset] = useState<Asset>()
   const reviewEnvironment = useMemo(() => ({ state: reviewState, open: setReviewAsset }), [reviewState])
@@ -349,6 +363,15 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     const results = projection.byNode.get(node.id)?.results ?? EMPTY_ASSETS
     return results.find((item) => item.id === node.selectedResultId) ?? results[0]
   }
+  const agentPresentation = useCanvasPresentation({ api, presentation, viewId, sessionId, workspace,
+    active: active && pageVisible, control: state?.agentControl, revision: state?.graphRevision ?? 0, graph, flow, container,
+    flush: canvas.flush, refresh: canvas.refresh, report,
+    focus: (ids) => {
+      setSelected(ids); setSelectedEdges([])
+      setExpandedGroups((current) => Object.fromEntries(Object.entries(current).map(([id, expanded]) => [id, ids.includes(id) ? false : expanded])))
+      if (ids[0]) history.beginEditing(ids[0])
+    },
+  })
   const nodeCache = useRef(new Map<string, FlowNode>())
   const nodes: FlowNode[] = useMemo(() => {
     const next = graph.nodes.map((node): FlowNode => {
@@ -364,7 +387,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
       : asset?.kind === 'audio' ? { width: 360, height: 180 }
       : isGeneration(node.kind) ? generationFrame(asset, results.length, !!expandedGroups[node.id])
         : asset ? mediaFrame(asset.width ?? 16, asset.height ?? 9, rotation) : { width: 320, height: 265 })
-    const data: NodeData = { node, results, cards, connectedAssets, task, asset, modelName: models.find((model) => model.id === node.modelId)?.name, api, workspace, onOpen, onResult,
+    const data: NodeData = { node, results, cards, connectedAssets, task, asset, agentFocused: agentPresentation.highlighted.has(node.id), modelName: models.find((model) => model.id === node.modelId)?.name, api, workspace, onOpen, onResult,
       rotation, playing: active && playingNode === node.id, expanded: !!expandedGroups[node.id], onExpand, onInspect,
       inspection: history.inspection?.nodeId === node.id ? history.inspection : undefined, onRename, onRotate, onPlay, onStop, onFocus, onSize }
     const old = nodeCache.current.get(node.id)
@@ -377,15 +400,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     })
     nodeCache.current = new Map(next.map((node) => [node.id, node]))
     return next
-  }, [graph.nodes, projection, models, selected, api, workspace, onOpen, onResult, rotations, playingNode, active, expandedGroups, mediaSizes, onExpand, onInspect, history.inspection, onRename, onRotate, onPlay, onStop, onFocus, onSize])
-  const agentPresentation = useCanvasPresentation({ api, presentation, viewId, sessionId, workspace,
-    active: active && pageVisible, control: state?.agentControl, revision: state?.graphRevision ?? 0, graph, flow, container,
-    focus: (ids) => {
-      setSelected(ids); setSelectedEdges([])
-      setExpandedGroups((current) => Object.fromEntries(Object.entries(current).map(([id, expanded]) => [id, ids.includes(id) ? false : expanded])))
-      if (ids[0]) history.beginEditing(ids[0])
-    },
-  })
+  }, [graph.nodes, projection, models, selected, api, workspace, onOpen, onResult, rotations, playingNode, active, expandedGroups, mediaSizes, onExpand, onInspect, history.inspection, onRename, onRotate, onPlay, onStop, onFocus, onSize, agentPresentation.highlighted])
   const edgeCache = useRef<RelationshipFlowEdge[]>([])
   const baseEdges = useMemo<RelationshipFlowEdge[]>(() => {
     const previous = new Map(edgeCache.current.map((edge) => [edge.id, edge]))
@@ -526,15 +541,16 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     <header className="dc-header"><UiButton className="dc-ui-back" autoFocus={active} disabled={uploading || submitting || leaving} title={uploading ? '请等待文件接收完成' : submitting ? '请等待任务提交完成' : '保存并返回项目列表'} onClick={() => void returnToProjects()}>← <span>{leaving ? '保存中…' : '项目列表'}</span></UiButton>
       <div className="dc-title dc-workspace-title"><div><strong title={title}>{title}</strong><small>无限画布</small></div></div>
       <AgentControlBar api={api} canvasId={workspace} sessionId={sessionId} control={state?.agentControl} flush={canvas.flush} refresh={canvas.refresh} report={report} disabled={uploading || submitting || leaving || !state} />
-      {readOnly && presentation && <UiButton variant="outline" aria-pressed={agentPresentation.following}
-        onClick={agentPresentation.following ? agentPresentation.pause : agentPresentation.resume}>{agentPresentation.following ? '跟随 Agent' : '恢复跟随'}</UiButton>}
       <div className="dc-header-actions"><span className={`dc-save-status ${canvas.conflict ? 'warning' : ''}`}>{canvas.saveStatus}</span><UiButton variant="outline" onClick={() => setShowTasks(true)}>任务</UiButton><UiButton variant="outline" onClick={() => { setSettingsTab('storage'); setShowSettings(true) }}>⚙ 设置</UiButton></div>
     </header>
     <CanvasTextSelectionProvider><div className="dc-canvas-area" ref={container} tabIndex={-1} data-gpu-compositing={gpu.enabled ? 'enabled' : 'disabled'} data-gpu-reason={gpu.reason}
       data-marquee-selecting={marquee.selecting}
       data-selection-group={!!group}
+      data-agent-following={agentPresentation.following && active && pageVisible}
+      onWheelCapture={agentPresentation.portalInput} onKeyDownCapture={agentPresentation.portalInput}
+      onInputCapture={agentPresentation.portalInput} onClickCapture={agentPresentation.portalInput}
       onPointerDownCapture={(event) => {
-        if (event.isTrusted && readOnly && !(event.target instanceof Element && event.target.closest('.dc-editor,.dc-generation-params'))) agentPresentation.pause()
+        agentPresentation.portalInput(event)
         // Portal events still traverse this React ancestor before the menu row.
         if (event.target instanceof Element && event.target.closest('.dc-node-creation-menu')) return
         creation.close(); clipboard.close()
@@ -557,17 +573,16 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
           if (removed.size) edit((current) => ({ ...current, edges: current.edges.filter((edge) => !removed.has(edge.id)) }))
         }}
         onConnect={connections.onConnect} onConnectStart={connections.onConnectStart} onConnectEnd={connections.onConnectEnd}
-        onPaneContextMenu={paneContextMenu} onMoveStart={(event) => { creation.close(); clipboard.close(); if (event && readOnly) agentPresentation.pause() }}
+        onPaneContextMenu={paneContextMenu} onMoveStart={() => { creation.close(); clipboard.close() }}
         onNodeContextMenu={(event, node) => {
           if (node.type === 'media') copyAt(event, selected.includes(node.id) ? selected : [node.id])
         }}
         onSelectionContextMenu={(event) => copyAt(event, selected)}
         defaultViewport={graph.viewport} minZoom={0.1} maxZoom={2.5}
         onMoveEnd={(_event, viewport) => edit((current) => ({ ...current, viewport }))}
-        onPaneClick={() => { if (readOnly) agentPresentation.pause(); setSelected([]); setSelectedEdges([]); setPlayingNode(null) }}
-        onEdgeClick={() => { if (readOnly) agentPresentation.pause(); container.current?.focus({ preventScroll: true }); setSelected([]); setPlayingNode(null) }}
+        onPaneClick={() => { setSelected([]); setSelectedEdges([]); setPlayingNode(null) }}
+        onEdgeClick={() => { container.current?.focus({ preventScroll: true }); setSelected([]); setPlayingNode(null) }}
         onNodeClick={(_event, node) => {
-          if (readOnly) agentPresentation.pause()
           if (node.type !== 'media') return
           if (node.data.asset?.kind === 'video') setPlayingNode(node.id); else if (node.data.asset?.kind !== 'audio') setPlayingNode(null)
           if (!expandedGroups[node.id] && node.data.cards.length > 1) history.beginEditing(node.id)
@@ -579,6 +594,12 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
         ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': '放大', 'controls.zoomOut.ariaLabel': '缩小', 'controls.fitView.ariaLabel': '适应画布' }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="var(--dc-grid)" />
+        {agentPresentation.following && active && pageVisible && <svg className="dc-agent-watermark" aria-hidden="true" focusable="false">
+          <defs><pattern id={`dc-agent-watermark-${viewId}`} width="330" height="180" patternUnits="userSpaceOnUse">
+            <text x="165" y="90" textAnchor="middle" dominantBaseline="middle" transform="rotate(-24 165 90)">Agent 操作中</text>
+          </pattern></defs>
+          <rect width="100%" height="100%" fill={`url(#dc-agent-watermark-${viewId})`} />
+        </svg>}
         <Controls showInteractive={false} fitViewOptions={{ nodes: nodes.map((node) => ({ id: node.id })) }} />
         <MiniMap pannable zoomable nodeColor={(node) => node.type === 'selection' ? 'transparent' : 'var(--dc-accent)'} maskColor="var(--dc-minimap-mask)" />
         {creation.menu?.reference && creation.menu.from && <ViewportPortal><svg className="dc-pending-connection" width="1" height="1" aria-hidden="true">
@@ -600,6 +621,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
           askImport={askImport} taskAction={taskAction} onOpen={onOpen} />}
       </ReactFlow>}
       <div className="dc-canvas-capsules">
+        {active && pageVisible && handoffNoticeId && handoffNoticeId !== dismissedHandoffNotice && <div className="dc-generation-handoff" role="status">{GENERATION_HANDOFF_REMINDER}</div>}
         <NotificationCapsules notifications={canvas.notifications} active={active && pageVisible} onDismiss={canvas.dismissNotification} />
         <UploadCapsules uploads={uploadActivity} />
       </div>
@@ -667,13 +689,10 @@ export function FloatingEditor(props: EditorProps) {
   contentGraph.current = shareEditorGraph(contentGraph.current, graph)
   const contentNode = useRef(node)
   if (!sameNodeContent(contentNode.current, node)) contentNode.current = node
-  const position = nodeEditorPosition(node.position, viewport, nodeSize)
-  if (props.readOnly) {
-    const width = Math.min(530, Math.max(240, (canvasWidth || 562) - 32))
-    position.left += (530 - width) / 2; position.width = width
-  }
+  const basePosition = nodeEditorPosition(node.position, viewport, nodeSize)
+  const position = props.readOnly ? readonlyEditorBounds(basePosition, canvasWidth || 562, canvasHeight || 700) : basePosition
   return <div className={`dc-editor nodrag nopan nowheel ${isGeneration(node.kind) ? 'dc-generation-editor' : ''} ${node.kind === 'tts-generation' ? 'dc-tts-editor' : ''}`}
-    style={{ ...position, ...(props.readOnly ? { maxHeight: Math.max(140, (canvasHeight || 700) - 290), overflow: 'auto' } : {}) }} onKeyDown={(event) => event.stopPropagation()}>
+    style={position} onKeyDown={(event) => event.stopPropagation()}>
     {props.readOnly ? <NodeInspection node={node} graph={graph} assets={props.assets} models={props.models} api={props.api} workspace={props.workspace} onOpen={props.onOpen} />
       : <FloatingEditorContent {...content} node={contentNode.current} graph={contentGraph.current} getCurrentGraph={getCurrentGraph} />}
   </div>

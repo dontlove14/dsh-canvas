@@ -7,6 +7,27 @@ afterEach(() => { sessionStorage.clear(); vi.useRealTimers(); vi.restoreAllMocks
 const intent = (id = 'one', fields = {}): PresentationIntent => ({ id, sessionId: 'session', canvasId: 'canvas', epoch: 1,
   action: 'create', graphRevision: 1, nodeIds: ['node'], createdAt: id === 'one' ? 1 : 2, ...fields })
 describe('Independent canvas window coordinator', () => {
+  it('delivers native running/idle changes for the same intent and keeps highlight activity separate from paused follow', () => {
+    const client = new CanvasPresentationClient(), listener = vi.fn()
+    client.subscribe(listener)
+    const value = intent()
+    client.receive({ intent: value, running: true })
+    expect(client.getRunningSnapshot()).toBe(true)
+    client.pause()
+    expect(client.following()).toBe(false)
+    expect(client.getRunningSnapshot()).toBe(true)
+    const count = listener.mock.calls.length
+    client.receive({ intent: value, running: false })
+    expect(listener).toHaveBeenCalledTimes(count + 1)
+    expect(client.getRunningSnapshot()).toBe(false)
+    client.receive({ intent: value, running: false })
+    expect(listener).toHaveBeenCalledTimes(count + 1)
+    client.receive({ intent: intent('two'), running: true })
+    client.receive({ intent: value, running: false })
+    expect(client.getRunningSnapshot()).toBe(true)
+    client.clear()
+    expect(client.getRunningSnapshot()).toBe(false)
+  })
   it('retries a silently ignored open and confirms only an actually loaded target seat', async () => {
     const client = new CanvasPresentationClient(), open = vi.fn()
     client.receive({ intent: intent() })

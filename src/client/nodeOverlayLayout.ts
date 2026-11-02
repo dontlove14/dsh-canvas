@@ -14,3 +14,10 @@ export function nodeEditorPosition(
     top: viewport.y + (position.y + size.height) * viewport.zoom + 18,
   }
 }
+
+/** Scroll the card beneath a centered node; the card never repositions the view. */
+export function readonlyEditorBounds(position: ReturnType<typeof nodeEditorPosition>, canvasWidth: number, canvasHeight: number) {
+  const width = Math.min(530, Math.max(240, canvasWidth - 32))
+  return { ...position, width, left: Math.max(12, Math.min(canvasWidth - width - 12, position.left + (530 - width) / 2)),
+    maxHeight: Math.max(140, canvasHeight - position.top - 77), overflow: 'auto' as const }
+}

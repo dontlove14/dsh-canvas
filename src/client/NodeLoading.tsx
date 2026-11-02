@@ -77,7 +77,7 @@ export function useNodeLoadingEnvironment(root: RefObject<HTMLElement>, active: 
 }
 
 // Only pause/visibility overrides. Geometry and all keyframes come from Beam.
-const beamPauseCss = `
+export const beamPauseCss = `
 [data-beam="{id}"][data-loading-paused] { --beam-opacity-{id}: 1 !important; }
 [data-beam="{id}"][data-loading-paused],
 [data-beam="{id}"][data-loading-paused]::before,

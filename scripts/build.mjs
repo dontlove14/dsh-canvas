@@ -17,6 +17,10 @@ const result = await build({
   plugins: [{
     name: 'inline-css',
     setup(builder) {
+      // The browser loader publishes package-root IDs; reuse its actual controller instead of bundling a second SDK.
+      builder.onResolve({ filter: /^@deepseek-ai\/dsh-client-ui-input-trigger\/client$/ }, () => ({
+        path: '@deepseek-ai/dsh-client-ui-input-trigger', external: true,
+      }))
       builder.onResolve({ filter: /\.css\?inline$/ }, async (args) => {
         const name = args.path.replace(/\?inline$/, '')
         const resolved = await builder.resolve(name, { resolveDir: args.resolveDir, kind: 'import-statement' })

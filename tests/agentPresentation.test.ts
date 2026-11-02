@@ -21,6 +21,19 @@ async function fixture() {
   return { dir, service, report, publish, ack, control: () => control, revoke: () => { control = { ...control, epoch: 2, mode: 'manual' }; service.changed() } }
 }
 describe('Agent presentation identity, visibility and recovery', () => {
+  it('reports native running state without writing it into persisted intent or restoring it after restart', async () => {
+    const f = await fixture()
+    let running = true
+    const service = new AgentPresentation(f.dir, () => f.control(), () => running)
+    await service.init()
+    await service.publish(f.control(), 'node-step', 'update', 1, ['node'])
+    expect(service.state('session')).toMatchObject({ running: true, intent: { nodeIds: ['node'] } })
+    running = false; service.changed()
+    expect(service.state('session')).toMatchObject({ running: false })
+    const saved = JSON.parse(await readFile(join(f.dir, 'agent-presentation.json'), 'utf8'))
+    expect(saved.canvases.canvas.intent.running).toBeUndefined()
+    expect(saved.running).toBeUndefined()
+  })
   it('does not interpret navigation or publishing as a rendered receipt', async () => {
     const f = await fixture(), intent = await f.publish()
     expect(await f.service.wait(intent, new AbortController().signal)).toMatchObject({ status: 'deferred' })

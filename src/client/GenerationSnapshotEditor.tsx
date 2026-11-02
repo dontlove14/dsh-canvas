@@ -3,7 +3,7 @@ import { isTtsSnapshot, type AnyTaskSnapshot, type Asset } from '../shared/contr
 import { providerFor, SEEDANCE_VIDEO_MODES, isMultimodalVideo } from '../shared/modelCatalog'
 import type { CanvasApi } from './api'
 import { SignedImage } from './SignedMedia'
-import { nodeEditorPosition } from './nodeOverlayLayout'
+import { nodeEditorPosition, readonlyEditorBounds } from './nodeOverlayLayout'
 import { MediaIcon } from './MediaIcon'
 
 /** Immutable task inputs: no graph, upload, parameter or submission callbacks. */
@@ -16,14 +16,11 @@ export function GenerationSnapshotEditor({ api, workspace, snapshot, assets = []
   const viewport = useViewport()
   const canvasWidth = useStore((state) => state.width)
   const canvasHeight = useStore((state) => state.height)
-  const position = nodeEditorPosition(anchor.position, viewport, anchor.size)
-  if (readOnly) {
-    const width = Math.min(530, Math.max(240, (canvasWidth || 562) - 32))
-    position.left += (530 - width) / 2; position.width = width
-  }
+  const basePosition = nodeEditorPosition(anchor.position, viewport, anchor.size)
+  const position = readOnly ? readonlyEditorBounds(basePosition, canvasWidth || 562, canvasHeight || 700) : basePosition
   const tts = snapshot && isTtsSnapshot(snapshot)
   return <div className={`dc-editor dc-generation-editor dc-snapshot-editor nodrag nopan nowheel ${tts ? 'dc-tts-editor' : ''}`}
-    style={{ ...position, ...(readOnly ? { maxHeight: Math.max(140, (canvasHeight || 700) - 290), overflow: 'auto' } : {}) }} onKeyDown={(event) => event.stopPropagation()}
+    style={position} onKeyDown={(event) => event.stopPropagation()}
     role="region" aria-label={restoring ? '恢复最后一次提交' : '生成记录（只读）'}>
     <div className="dc-snapshot-heading"><strong>{restoring ? '最后一次提交' : '生成记录'}</strong>
       {!restoring && <small className="dc-muted">{readOnly ? '只读 · 本次任务的提交输入' : '只读 · 收起堆叠后可编辑并生成'}</small>}</div>

@@ -90,7 +90,11 @@ if (process.argv[2] === 'record') {
     const { id } = await configuredCreate.json()
     const graph = await routes.get('/api/canvas/v2/graph').fetch(new Request(`http://localhost/api/canvas/v2/graph?canvas=${id}`))
     assert.equal(graph.status, 200); assert.equal((await graph.json()).graphRevision, 0)
-    assert.equal(routes.size, 38)
+    assert.equal(routes.size, 40)
+    assert.equal((await routes.get('/api/canvas/v2/agent-reference-choices').fetch(
+      new Request('http://localhost/api/canvas/v2/agent-reference-choices?sessionId=offline'))).status, 403)
+    assert.equal((await routes.get('/api/canvas/v2/agent-reference-resolve').fetch(
+      new Request('http://localhost/api/canvas/v2/agent-reference-resolve', { method: 'POST', body: '{}' }))).status, 400)
     const presentationState = routes.get('/api/canvas/v2/agent-presentation')
     assert.deepEqual(await (await presentationState.fetch(new Request('http://localhost/api/canvas/v2/agent-presentation?sessionId=offline'))).json(), { intent: null })
     const presentationStream = await routes.get('/api/canvas/v2/agent-presentation-events').fetch(

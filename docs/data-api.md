@@ -1,10 +1,31 @@
 # 数据与 HTTP 接口参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-30。契约 / Schema / 路由变更时复核。
+文档类型：参考；负责人：项目维护者；最近核对：2026-11-02。契约 / Schema / 路由变更时复核。
 
 可执行事实：[contracts](../src/shared/contracts.ts)、[v2](../src/shared/v2.ts)、[schema.sql](../src/host/persistence/schema.sql)、[service](../src/host/service.ts)。业务行为见[业务参考](business.md)，配置限额见[运行指南](operations.md)。
 
+0.2.100主级`canvas_handoff_generation`输入稳定UUID operationId、当前revision、1–100个无重复图片 / 视频nodeIds及可选note；验证真实节点、有效模型选择、epoch和revision，返回handedOff、submitted=false、nodes、reminder、control与presentation。错误沿GRAPH_CONFLICT / AGENT_CONTROL_REVOKED / 模型选择码，旧回执仅同一manual epoch可读。`canvas_generate`新图片 / 视频提交返回409 / AGENT_MANUAL_GENERATION_REQUIRED，原已接受任务仍可回查。agent-control POST的delegate新增可选`source: "user-message"`，参数检查交接状态仅接受这个新消息来源；一般delegate兼容原调用。CanvasGraph / 两库 / Ledger v1格式不变，详见[ADR-0080](adr/0080-manual-generation-parameter-review-handoff.md)。
+
 ## Agent 控制与工具
+
+0.2.99 主工具总数18，子级仍5，HTTP路由仍40。`canvas_inspect.models`和动态上下文仅返回已配置可用内置组合，附加`modelId / model / provider / providerName`，不返回密钥掩码；主级`modelSelections:{image:choice|null,video:choice|null}`为当前有效确认。
+
+`canvas_select_model({kind:"image"|"video",change?:boolean=false,note?})`仅真实主Agent，已有画布时需有效控制；不接受modelId、供应商或候选数组。原生问题显示所有该类型配置组合。成功`{approved:true,selection:{modelId,kind,name,model,provider,providerName},reused:boolean}`；唯一有效答案且无自定义意见才确认。拒绝 / 混合意见为`{approved:false,answers}`，零候选为`{approved:false,needsConfiguration:true,models:[],hint}`。选择期间配置或控制变化409 / AGENT_MODEL_SELECTION_STALE，接管沿AGENT_CONTROL_REVOKED。
+
+create / update / generate检查具体模型确认：不可用409 / AGENT_MODEL_NOT_AVAILABLE，未确认或选错供应商409 / AGENT_MODEL_SELECTION_REQUIRED，均不提交新任务。create可省略modelId规划；partial update省略字段保留原值，换模型省略params时用共享默认参数。已有操作 / 任务的幂等回查不需要新确认，不自动重提。最小流程：inspect → select_model(kind) → 用户唯一选择 → create_node(modelId=selection.modelId) → 按实际生成授权generate；详见[ADR-0079](adr/0079-configured-generation-model-user-selection.md)。
+
+0.2.98 `POST agent-control` 的delegate可选 `epoch:int>=0`，用于自动恢复控制的乐观校验；已有必填sessionId / revision保持，旧客户端不传epoch沿原行为。不匹配返回409 / AGENT_CONTROL_REVOKED，图revision冲突仍409 / GRAPH_CONFLICT。仅owner认证路径，返回原CanvasControl；无新端点、两库迁移或Ledger字段。新根用户消息在原生pre-step补充恢复，旧排队消息和旧epoch不能重放。详见[ADR-0078](adr/0078-manual-control-message-and-idle-delegation.md)。
+
+0.2.93 新增两个 owner 认证只读路径，V2 注册总数40。`canvas_inspect` / 根动态上下文增加 `userReferences:[{referenceId,ref,messageId}]`，只来自本根会话 source=user 的持久原文；新增主级 `canvas_read_reference({referenceId})`，子级不可用。返回真实图片 admitted / 原生多模态附件、bounded UTF8文本或明确未理解的媒体 / 文件元数据，不创建图边、上传、导出或生成。
+
+| 路径（`/api/canvas/v2/`） | 输入 / 成功输出 | 失败 / 权限 |
+| --- | --- | --- |
+| GET agent-reference-choices | sessionId(1–200)、query(≤1000，默认空)；`{preset:true,cwd,media:[{label,description,kind,section,ref}]}` | live canvas-creator根身份；其他会话403 REFERENCE_SESSION；位置变化409 REFERENCE_STALE；无生成或图更新 |
+| POST agent-reference-resolve | `{sessionId,ref}`；ref为version1 media(session/canvas/node/asset/label)或file(session/cwd/path/label/pin?)；输出`{text:"<canvas-reference>…</canvas-reference>"}`，文件pin固定bytes/mtime/inode | owner认证，只读且不受Agent写入锁阻挡；引用跨会话403，素材 / 工作区 / 文件变化409 REFERENCE_STALE；越界 / symlink / 非文件拒绝；无效Schema400 |
+
+发送使用原生引用codec，失败保留草稿；剪贴板 / 历史保留转义身份标记，原生UserText以短标签展示。读取工具还要求引用已由本根用户实际提交、画布控制未被接管；未提交403 REFERENCE_FORBIDDEN，接管409 AGENT_CONTROL_REVOKED。文件最多min(2MiB,maxReferenceBytes)，超限 / 未支持二进制仅元数据；图片沿既有附件机制，视频 / 音频不伪称理解。没有新增持久Schema。最小流程：输入 `#` 选素材 → 填写反馈并发送 → inspect获取referenceId → read_reference → 按原授权修改；详见[ADR-0076](adr/0076-native-hash-canvas-and-workspace-references.md)。
+
+0.2.92 在存在有效意图的状态响应中增加可选 `running:boolean`，由原生根 Agent.status 即时读取，不持久化；SSE 在主级状态改变时发送同一意图的新 running。旧响应缺少字段时兼容，`{intent:null}` 保持。`operationId:working` 仅用于操作前定位已存在节点，完成后保留原操作呈现 ID；业务回执与 paid taskId 不变，重试不重放旧操作。读取图片 / 查询任务呈现其真实节点，原 HTTP 路由、输入约束与错误状态不变。DOM presented 还要求主节点中心误差 ≤1px，无法容纳仍按原超时延后。见[ADR-0075](adr/0075-agent-node-highlight-and-centered-viewport.md)。
 
 0.2.91 仅主级增加三项工具，HTTP 注册数量仍为38。`canvas_inspect` 与动态上下文增加 `userMedia:[{type,attachmentId,messageId,name,bytes,mime?}]` 和实际 `workspace`；只接受根会话用户附件，子级不获取附件读写或文件工具。关键主级工具可提供 `note`（1–180字符），用于实际工具调用过程说明，不改变业务结果或生成授权。呈现 action 增加 `import`。
 
@@ -22,7 +43,7 @@
 
 | 路径（`/api/canvas/v2/`） | 输入 / 输出 | 语义 |
 | --- | --- | --- |
-| `GET agent-presentation?sessionId=...` | `{intent:null或{id,sessionId,canvasId,epoch,action,graphRevision,nodeIds,taskId?,createdAt}}` | 当前有效控制下最新意图，无则 null；no-store |
+| `GET agent-presentation?sessionId=...` | `{intent:null或{id,sessionId,canvasId,epoch,action,graphRevision,nodeIds,taskId?,createdAt},running?}` | 当前有效控制下最新意图和原生运行状态，无则仅 intent:null；no-store |
 | `GET agent-presentation-events?sessionId=...` | text/event-stream，data 为同一状态；2 秒心跳 | 初始与变化发送，重连读取最新状态，不重放旧操作；关闭流随 Host 释放 |
 | `POST agent-presence` | `{sessionId,viewId,visible}` → `{ok:true}` | 前台当前会话报告，5 秒时效 |
 | `POST agent-view?canvas=...` | `{sessionId,canvasId,epoch,viewId,sequence,visible,following,center?,width?,height?,zoom?,sizes?}` → `{ok:true}` | 有序实际容器坐标与节点尺寸；5 秒有效，30 秒清过期 |

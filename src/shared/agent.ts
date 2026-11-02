@@ -15,6 +15,12 @@ export interface CanvasControl {
   canvasId: string; sessionId: string | null; mode: 'manual' | 'agent'; epoch: number
   updatedAt: number; reason?: string
 }
+/** Persisted through the existing reason field; this handoff requires fresh user input. */
+export const GENERATION_HANDOFF_REASON = '参数已准备，等待用户检查并点击生成'
+export const GENERATION_HANDOFF_REMINDER = '参数已填好，请到对应的图片或视频节点检查提示词、参考素材、模型和参数；可以直接修改，确认后由你点击“生成”。画布已交还给你。'
+export function isGenerationHandoff(control?: CanvasControl | null) {
+  return control?.mode === 'manual' && control.reason === GENERATION_HANDOFF_REASON
+}
 export const CreativeDraftSchema = z.object({
   kind: z.enum(['brief', 'asset-spec', 'storyboard', 'shot-plan', 'audio-plan', 'review']),
   title: z.string().min(1).max(160),
@@ -30,6 +36,8 @@ export const AgentControlCommandSchema = z.object({
   action: z.enum(['delegate', 'takeover']),
   sessionId: z.string().min(1).max(200).optional(),
   revision: z.number().int().nonnegative().optional(),
+  epoch: z.number().int().nonnegative().optional(),
+  source: z.literal('user-message').optional(),
 }).strict()
 export interface AgentSessionState {
   preset: boolean; canvas: CanvasControl | null

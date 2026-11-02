@@ -21,6 +21,10 @@ import { CanvasPresentationClient, installCanvasPresentation } from './presentat
 import { openCanvasTab } from './nativeCanvasNavigation'
 import { installCanvasPlanPreview } from './canvasPlanPreview'
 import { installAgentProgress } from './agentProgress'
+import { installChatReferenceTrigger } from './chatReferenceTrigger'
+import { chatReferenceTextRule, ChatReferenceText } from './chatReferenceText'
+import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
+import type {} from '@deepseek-ai/dsh-client-ui-reference/client'
 import { useRef, useState, useEffect } from 'react'
 
 declare module '@deepseek-ai/dsh-client-ui-sidebar-right/client' {
@@ -71,6 +75,19 @@ const sidebarTab: SidebarRightTabDefinition = {
 export function apply(ctx: Context): void {
   installAgentProgress(ctx)
   const face: Face = { api: new CanvasApi(), presentation: new CanvasPresentationClient() }
+  ctx.inject(['inputTriggers', 'sessions', 'remote', 'remote.fileReferences'], (scope) => {
+    scope.effect(() => installChatReferenceTrigger(scope, face.api, {
+      list: (id, query, signal) => scope.sessions.using(id as Parameters<typeof scope.sessions.using>[0], { source: 'referenceCandidates', signal }, async () => {
+        const result = await scope.remote.fileReferences.list(id as Parameters<typeof scope.remote.fileReferences.list>[0], query, signal)
+        if (!result.ok) throw new Error('工作区文件暂不可用')
+        return result.value
+      }),
+    }))
+  })
+  ctx.inject(['uiConversation'], (scope) => {
+    scope.effect(() => scope.uiConversation.userText.register(chatReferenceTextRule))
+    scope.slots.inject('conversation.user.text.node', () => scope.slots.register({ name: 'conversation.user.text.node', key: 'canvas-hash', priority: 100 }, ChatReferenceText))
+  })
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.plugin = name
@@ -94,11 +111,12 @@ export function apply(ctx: Context): void {
       onMutate: (listener) => scope.on('slots/changed', listener),
     }, face.api))
   })
-  ctx.inject(['sidebarRight', 'connection'], (scope) => {
+  ctx.inject(['sidebarRight', 'connection', 'sessions'], (scope) => {
     scope.effect(() => installCanvasPresentation(face.api, face.presentation, {
       session: () => scope.sidebarRight.mounted.getSnapshot(),
       subscribe: (listener) => scope.sidebarRight.mounted.subscribe(listener),
       open: (canvasId) => openCanvasTab(scope.sidebarRight, canvasId),
+      conversation: (id) => scope.sessions.binding(id as Parameters<typeof scope.sessions.binding>[0])?.session,
     }, (listener) => scope.on('connection/reset', listener)))
   })
 }

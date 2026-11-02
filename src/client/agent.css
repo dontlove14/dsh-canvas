@@ -1,8 +1,10 @@
 .dc-agent-control{display:flex;align-items:center;gap:8px;font-size:12px;white-space:nowrap}
+.dc-chat-reference{border-radius:4px;padding:1px 4px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
 .dc-agent-control>span{color:var(--dc-muted)}
 .dc-root[data-agent-readonly="true"] .dc-welcome{display:none}
 .dc-agent-progress{padding:6px 0;font-size:13px;line-height:1.6;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .dc-agent-progress small{display:block;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.dc-generation-handoff{max-width:460px;padding:10px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.6;pointer-events:none}
 /* Harness's native Toast uses a dark surface in both themes. Override only
    its portal's theme tokens; keep native timing, actions and motion. */
 body>[role="alert"][style*="--dsh-toast-hold"]{

@@ -34,6 +34,8 @@ export interface CanvasConfig {
   maxMediaBytes: number; maxReferenceBytes: number
 }
 export const routeDefinitions = [
+  { suffix: 'agent-reference-choices', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-reference-resolve', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'agent-presentation', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'agent-presentation-events', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'agent-view', methods: ['POST'] as const, requestBody: 'buffered' as const },
@@ -265,6 +267,12 @@ export class CanvasService {
       if (suffix.startsWith('agent-')) {
         const agent = this.agentControl
         if (!agent) throw new CanvasError('当前环境未启用画布 Agent', 503, 'AGENT_UNAVAILABLE')
+        if (suffix === 'agent-reference-choices' && request.method === 'GET') return json(await agent.chatReferences.choices(
+          z.string().min(1).max(200).parse(url.searchParams.get('sessionId')), z.string().max(1000).parse(url.searchParams.get('query') ?? ''), request.signal))
+        if (suffix === 'agent-reference-resolve' && request.method === 'POST') {
+          const input = z.object({ sessionId: z.string().min(1).max(200), ref: z.unknown() }).strict().parse(await request.json())
+          return json({ text: await agent.chatReferences.serialize(input.sessionId, input.ref, request.signal) })
+        }
         if (suffix === 'agent-session' && request.method === 'GET') return json(agent.session(z.string().min(1).max(200).parse(url.searchParams.get('sessionId'))))
         if (suffix === 'agent-models' && request.method === 'GET') return json(await agent.modelCatalog())
         if (suffix === 'agent-presence' && request.method === 'POST') {
@@ -313,7 +321,7 @@ export class CanvasService {
           const input = AgentControlCommandSchema.parse(await request.json())
           if (input.action === 'takeover') return json(await agent.takeover(id))
           if (!input.sessionId || input.revision === undefined) throw new CanvasError('请提供会话与已保存画布版本')
-          return json(await agent.delegate(id, input.sessionId, input.revision))
+          return json(await agent.delegate(id, input.sessionId, input.revision, input.epoch, input.source))
         }
       }
       if (!isV2 && suffix === 'workspace' && request.method === 'GET') return json(this.store.state(canvas()))

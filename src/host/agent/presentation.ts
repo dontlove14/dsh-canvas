@@ -21,7 +21,8 @@ export class AgentPresentation {
   private acks = new Map<string, PresentationAck>()
   private listeners = new Set<() => void>()
   private readonly path: string
-  constructor(dataDir: string, private control: (canvasId: string) => CanvasControl) { this.path = join(dataDir, 'agent-presentation.json') }
+  constructor(dataDir: string, private control: (canvasId: string) => CanvasControl,
+    private running: (sessionId: string) => boolean = () => true) { this.path = join(dataDir, 'agent-presentation.json') }
   async init() {
     try { this.data = FileSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CanvasError('画布呈现记录无法读取', 503, 'PRESENTATION_INVALID') }
@@ -33,7 +34,7 @@ export class AgentPresentation {
   state(sessionId: string) {
     const intent = Object.values(this.data.canvases).map((entry) => entry.intent)
       .filter((entry) => entry.sessionId === sessionId && this.valid(entry)).sort((a, b) => b.createdAt - a.createdAt)[0]
-    return { intent: intent ?? null }
+    return intent ? { intent, running: this.running(sessionId) } : { intent: null }
   }
   current(canvasId: string) {
     const intent = this.data.canvases[canvasId]?.intent

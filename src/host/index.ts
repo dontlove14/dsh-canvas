@@ -11,7 +11,7 @@ import { HarnessVault } from './credentials'
 import { CanvasAgentCoordinator } from './agent/coordinator'
 
 export const name = 'dsh-canvas'
-export const inject = ['connection', 'credentials', 'agents', 'llm', 'sessionController', 'agentPresets']
+export const inject = ['connection', 'credentials', 'agents', 'llm', 'sessionController', 'agentPresets', 'workingDirectory']
 export const Config = z.object({
   dataDir: z.string().default(resolve(homedir(), '.dsh-canvas')),
   maxConcurrentTasks: z.number().int().min(1).max(8).default(2),
