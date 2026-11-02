@@ -508,6 +508,8 @@
 .dc-task-details p,.dc-task-details small{overflow-wrap:anywhere}
 .dc-projects-header{height:88px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 32px;border-bottom:1px solid var(--dc-border);background:var(--dc-surface)}
 .dc-projects-header h1{font-size:20px;font-weight:550;margin:0;outline:none}
+.dc-projects-brand{display:flex;align-items:baseline;gap:8px}
+.dc-plugin-version{color:var(--dc-muted);font-size:12px;white-space:nowrap}
 .dc-projects-layout{display:flex;flex:1;min-height:0}
 .dc-projects-sidebar{width:212px;flex:none;border-right:1px solid var(--dc-border);padding:22px 12px;background:var(--dc-surface);overflow:auto}
 .dc-folder-item{width:100%;display:flex;align-items:center;gap:10px;min-height:42px;padding:9px 12px;margin-bottom:4px;color:var(--dc-muted);background:none;border:0;border-radius:7px;text-align:left}

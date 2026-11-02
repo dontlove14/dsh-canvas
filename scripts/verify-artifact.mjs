@@ -24,6 +24,8 @@ const pkg = JSON.parse(await readFile('package.json', 'utf8'))
 const checkDir = process.env.CANVAS_ARTIFACT_CHECK_DIR ?? join(tmpdir(), `${pkg.name}-artifact-${pkg.version}`)
 await mkdir(checkDir, { recursive: true })
 const lib = await hashes(await files('lib'))
+const clientSource = await readFile('lib/client.js', 'utf8')
+assert(clientSource.includes('data-dc-plugin-version') && clientSource.includes(JSON.stringify(pkg.version)), 'Project header must display the packaged plugin version')
 for (const name of ['lib/index.js', 'lib/client.js', 'lib/agent-preset.js', 'lib/worker.mjs', 'lib/schema.sql', 'lib/review-worker.mjs',
   'lib/review-schema.sql', 'lib/vendor/volcengine-signer.cjs', 'lib/volcengine-signer-LICENSE', 'lib/volcengine-signer-source.json']) assert(lib[name], `missing ${name}`)
 if (process.argv[2] === 'record') {

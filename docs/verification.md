@@ -4,6 +4,8 @@
 
 ## 本次自动化
 
+0.2.102项目页标题与实际包版本联动；产物核验检查data-dc-plugin-version标记与package.json版本字符串。沿全量check、双构建与编译Host / SDK19主5子、精确包安装 / HTTP / 原数据保持检查，视觉布局由用户按383手验。
+
 0.2.101仅客户端顶部交接提示计时，3秒隐藏，以canvas / session / epoch稳定身份隔离状态刷新及新交接；Host控制、图 / 两库、原任务与SDK工具保持。沿全量check、双构建、编译Host / SDK19主5子、同包安装 / HTTP与原数据核验流程，手验382。
 
 0.2.100交接验证见[ADR-0080](adr/0080-manual-generation-parameter-review-handoff.md)：真实ToolRuntime图片 / 视频零提交、呈现后交还、主级可完成提醒 / 子级取消、人工最新参数保存与手动任务快照、重启manual保持、旧回执 / 旧消息 / idle拒绝、新消息恢复；种子100共32轮时间和回复交错。正式交付需全量check、双构建hash、编译Host / 真实SDK19主5子工具、精确安装 / preload与原数据保持。手验377–381，不以离线替身或HTTP代替人工验收。

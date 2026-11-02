@@ -4,6 +4,8 @@
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
 
+0.2.102项目页版本只导入package.json的version，浏览器构建静态折叠为版本字符串；开发与检查沿同一来源，产物管线核对版本标记与包版本，不新设HTTP路由或数据库字段。
+
 0.2.100 `canvas_handoff_generation` → 实际节点update呈现 / 回执 → 提交队列二次校验 → manual / 新epoch / 现有reason → 提醒并保留主级只读回复。Client与Host共同禁止此状态的idle恢复，新用户消息先保存再恢复。`canvas_generate`新的图片 / 视频提交硬拒绝，已接受任务优先只读查回；FishTTS与存量图 / 两库 / Ledger v1保持。见[ADR-0080](adr/0080-manual-generation-parameter-review-handoff.md)。
 
 0.2.99 当前配置目录 → 原生UserQuestions → 主Agent临时模型选择Registry → 图 / 任务前置与提交校验。模型和供应商以配置modelId绑定，图片 / 视频分别确认，接管与项目 / 路线切换清除；inspect和动态上下文同源。已接受任务优先查回原身份，无图 / 两库 / Ledger格式变更。见[ADR-0079](adr/0079-configured-generation-model-user-selection.md)。
