@@ -4,6 +4,7 @@ import { act, type ComponentType } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { nativeInputTrigger } from './support/nativeInputTrigger'
 import { apply, inject } from '../src/client/index'
 import { CanvasApi } from '../src/client/api'
@@ -112,7 +113,12 @@ describe('Harness conversation sidebar canvas', () => {
     const original = new sdk.InputTriggerController({ actx: ctx, sessionId: 'test',
       roster: { all: () => [], sources: () => [] } })
     const triggers = { sessionOf: () => original }
-    const session = { sessionId: 'test' }, binding = { ctx, sessionId: 'test', session }
+    const preset = createSnapshotStore<unknown>(undefined), unsubscribe = vi.fn()
+    const faceOf = vi.fn(() => ({ getSnapshot: preset.getSnapshot, subscribe: (listener: () => void) => {
+      const off = preset.subscribe(listener)
+      return () => { unsubscribe(); off() }
+    } }))
+    const session = { sessionId: 'test', projections: { faceOf } }, binding = { ctx, sessionId: 'test', session }
     const using = vi.fn(async (_id, _options, operation) => operation())
     ctx.reflect.provide('inputTriggers', triggers)
     ctx.reflect.provide('sessions', { sessionOf: () => session, binding: () => binding, using })
@@ -127,15 +133,29 @@ describe('Harness conversation sidebar canvas', () => {
       await vi.waitFor(() => expect(triggers.sessionOf()).not.toBe(original))
       const controller = triggers.sessionOf()
       controller.track('#', 1, { tier: 'plain' }, 1)
+      expect(controller.menu.getSnapshot().open).toBe(false)
+      expect(choices).not.toHaveBeenCalled()
+      preset.set('standard')
+      expect(choices).not.toHaveBeenCalled()
+      preset.set('canvas-creator')
       await vi.waitFor(() => expect(controller.menu.getSnapshot().groups[0]?.items[0]?.name).toBe('反馈.md'))
+      expect(faceOf).toHaveBeenCalledWith('agentPreset')
       expect(list).toHaveBeenCalledWith('test', '', expect.any(AbortSignal))
       expect(using).toHaveBeenCalledWith('test', { source: 'referenceCandidates', signal: expect.any(AbortSignal) }, expect.any(Function))
       expect(controller.menu.getSnapshot().groups[0].items[0].section).toBe('工作区')
+      preset.set('standard')
+      expect(controller.menu.getSnapshot().open).toBe(false)
+      controller.track('#', 1, { tier: 'plain' }, 2)
+      expect(choices).toHaveBeenCalledTimes(1)
+      expect(list).toHaveBeenCalledTimes(1)
     } finally {
       await plugin.dispose()
       original.dispose()
     }
     expect(triggers.sessionOf()).toBe(original)
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    preset.set('canvas-creator')
+    expect(choices).toHaveBeenCalledTimes(1)
   })
   it('retries a late catalog, re-enters on native revision, and respects a manual return across visibility changes', async () => {
     vi.useFakeTimers()
