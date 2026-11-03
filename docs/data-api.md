@@ -1,8 +1,12 @@
 # 数据与 HTTP 接口参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-11-02。契约 / Schema / 路由变更时复核。
+文档类型：参考；负责人：项目维护者；最近核对：2026-11-03。契约 / Schema / 路由变更时复核。
 
 可执行事实：[contracts](../src/shared/contracts.ts)、[v2](../src/shared/v2.ts)、[schema.sql](../src/host/persistence/schema.sql)、[service](../src/host/service.ts)。业务行为见[业务参考](business.md)，配置限额见[运行指南](operations.md)。
+
+0.2.108内置可配置目录移除Wan Model Link两项001f / 0021，Aliyun官方0020 / 0022保持，原配置仍可由模型接口读取且configurable=false。新配置或以该网关模型新生成返回400 / MODEL_NOT_SUPPORTED，提示选择Aliyun；已有记录 / 绑定 / 任务快照与幂等回查保持，不新增端点或DDL。见[ADR-0082](adr/0082-temporary-wan-modellink-suspension.md)。
+
+0.2.107 增加协议`kling-video`和两个独立内置模型UUID（002b Model Link / 002c KlingAI）；沿owner模型设置接口与每UUID独立Vault绑定，不新增HTTP路径。GenerationParams新增可选`klingReferenceRoles:{assetUUID:refer_image|first_frame|middle_frame|last_frame|feature_video|base_video}`，最多15项，非Kling模型拒绝该参数；Kling只接受videoMode=text/reference，默认1080p/16:9、seconds=10、n=1。素材类型 / 用途 / 连接不匹配在保存或生成前拒绝；新模型与参数无DDL或存量回填。模型接口返回两家各自has_api_key与能力，未配置项继续不显示在画布或Agent选择中。现有generate的幂等requestId / revision与错误码保持，固定原提供商 / Key / 输入并仅查原外部ID；unknown响应不自动重提。最小流程：分别配置Key → 视频节点选具体供应商组合 → 连接实际素材并选择用途 → 用户点击生成。详见[协议](providers.md)和[ADR-0081](adr/0081-kling-independent-providers-and-omni-inputs.md)。
 
 0.2.100主级`canvas_handoff_generation`输入稳定UUID operationId、当前revision、1–100个无重复图片 / 视频nodeIds及可选note；验证真实节点、有效模型选择、epoch和revision，返回handedOff、submitted=false、nodes、reminder、control与presentation。错误沿GRAPH_CONFLICT / AGENT_CONTROL_REVOKED / 模型选择码，旧回执仅同一manual epoch可读。`canvas_generate`新图片 / 视频提交返回409 / AGENT_MANUAL_GENERATION_REQUIRED，原已接受任务仍可回查。agent-control POST的delegate新增可选`source: "user-message"`，参数检查交接状态仅接受这个新消息来源；一般delegate兼容原调用。CanvasGraph / 两库 / Ledger v1格式不变，详见[ADR-0080](adr/0080-manual-generation-parameter-review-handoff.md)。
 

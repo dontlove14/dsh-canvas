@@ -5,6 +5,8 @@
 文档类型：解释；负责人：项目维护者 / 开发执行者；最近核对：2026-10-29。
 记录日期：2026-10-29。供应商文档、模型能力、鉴权或恢复边界变化时重审。
 
+2026-11-03：Wan Model Link 的新增可用性被[ADR-0082](0082-temporary-wan-modellink-suspension.md)部分替代，现临时停用；以下原协议保留用于历史任务，Aliyun 官方与 MiniMax 规则继续适用。
+
 ## 背景与驱动因素
 
 1. 用户明确要求 Wan 3.0 接 Model Link、Aliyun，MiniMax H3 接 Model Link、MiniMax，并使用现有视频节点的参考 / 首尾帧交互。

@@ -21,7 +21,7 @@
 | 类型 | 当前支持的主要系列 |
 | --- | --- |
 | 图片 | GPT Image、Nano Banana、Seedream |
-| 视频 | Seedance、Wan、MiniMax H3 |
+| 视频 | Seedance、Wan、MiniMax H3、Kling 4.0 |
 | 语音 | FishTTS |
 
 插件当前已支持 [Model Link](https://api.modellink.online)，也支持部分模型的官方渠道。具体型号、可用渠道和参数，以插件设置中的列表为准。

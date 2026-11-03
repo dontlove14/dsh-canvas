@@ -50,6 +50,7 @@ export class CanvasRuntime {
   }
   isActive(id: string): boolean { return this.active.has(id) }
   private pollDelay(task: Task): number {
+    if (task.snapshot.model.protocol === 'kling-video') return Math.max(5000, this.config.pollIntervalMs)
     return isMultimodalVideo(task.snapshot.model) ? Math.max(3000, this.config.pollIntervalMs) : this.config.pollIntervalMs
   }
   wake(): void {

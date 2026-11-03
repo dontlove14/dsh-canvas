@@ -11,6 +11,7 @@ export const PROVIDERS = [
   { id: 'aliyun', label: 'Aliyun', apiBase: 'https://maas.qianwenaiapi.com/api/v1' },
   { id: 'model-link', label: 'Model Link', apiBase: 'https://api.modellink.online/hailuo' },
   { id: 'minimax', label: 'MiniMax', apiBase: 'https://api.minimax.cn' },
+  { id: 'klingai', label: 'KlingAI', apiBase: 'https://api-beijing.klingai.com' },
 ] as const
 export const IMAGE_MODELS = [
   { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst' },
@@ -63,7 +64,7 @@ export const WAN_MODELS = [
 const wanModels = WAN_MODELS.flatMap((model, index) => [PROVIDERS[7], PROVIDERS[8]].map((provider, channel) => ({
   id: `00000000-0000-4000-b000-${(31 + index * 2 + channel).toString(16).padStart(12, '0')}`,
   kind: 'video' as const, name: model.name, model_id: model.id, api_base: provider.apiBase, protocol: 'wan-video' as const,
-})))
+}))).filter((model) => !isSuspendedModelLinkWan(model))
 export const MINIMAX_H3_MODELS = [
   { id: 'MiniMax-H3', name: 'MiniMax H3' },
   { id: 'MiniMax-H3-Highspeed', name: 'MiniMax H3 Highspeed' },
@@ -74,14 +75,33 @@ const minimaxModels = MINIMAX_H3_MODELS.flatMap((model, index) => [PROVIDERS[9],
   id: `00000000-0000-4000-b000-${(35 + index * 2 + channel).toString(16).padStart(12, '0')}`,
   kind: 'video' as const, name: model.name, model_id: model.id, api_base: provider.apiBase, protocol: 'minimax-video' as const,
 }))).filter((model) => !isUnsupportedModelLinkH3(model))
-export const BUILTIN_MODELS = [...gptModels, ...bananaModels, ...seedreamModels, ...seedanceModels, ...wanModels, ...minimaxModels]
+export const KLING_MODELS = [{ id: 'kling-4.0', name: 'Kling 4.0' }] as const
+const klingModels = [PROVIDERS[2], PROVIDERS[11]].map((provider, channel) => ({
+  id: `00000000-0000-4000-b000-${(43 + channel).toString(16).padStart(12, '0')}`,
+  kind: 'video' as const, name: 'Kling 4.0', model_id: 'kling-4.0', api_base: provider.apiBase, protocol: 'kling-video' as const,
+}))
+export const BUILTIN_MODELS = [...gptModels, ...bananaModels, ...seedreamModels, ...seedanceModels, ...wanModels, ...minimaxModels, ...klingModels]
 export function isMultimodalVideo(model: { protocol: string }): boolean {
-  return ['seedance-video', 'wan-video', 'minimax-video'].includes(model.protocol)
+  return ['seedance-video', 'wan-video', 'minimax-video', 'kling-video'].includes(model.protocol)
+}
+export const KLING_VIDEO_MODES = [{ value: 'text', label: '文生视频' }, { value: 'reference', label: 'Omni 全能参考' }] as const
+export const KLING_VIDEO_LIMITS = { images: 10, videos: 5, imageMB: 30, videoMB: 300, totalDuration: 30 } as const
+export function klingSizePresets(modelId: string): readonly ImageSizePreset[] {
+  if (modelId !== 'kling-4.0') return []
+  return ['720p', '1080p'].flatMap((resolution) => [
+    ...[[16, 9], [9, 16], [1, 1], [21, 9]].map(([width, height]) =>
+      ({ resolution, ratio: `${width}:${height}`, size: `${resolution}/${width}:${height}`, width, height })),
+    { resolution, ratio: 'adaptive', size: `${resolution}/adaptive`, width: 16, height: 9 },
+  ])
 }
 /** Retain old saved identities for history, but disallow new use on this gateway. */
 export function isUnsupportedModelLinkH3(model: { protocol: string; api_base: string; model_id?: string }): boolean {
   return model.protocol === 'minimax-video' && model.api_base === PROVIDERS[9].apiBase
     && model.model_id !== undefined && model.model_id !== 'MiniMax-H3'
+}
+/** Temporarily disable new Wan gateway use; keep provider labels and frozen tasks (ADR-0082). */
+export function isSuspendedModelLinkWan(model: { protocol: string; api_base: string }): boolean {
+  return model.protocol === 'wan-video' && model.api_base === PROVIDERS[7].apiBase
 }
 export const MINIMAX_VIDEO_LIMITS = { images: 9, videos: 3, audios: 3, imageMB: 30, videoMB: 50, audioMB: 15, totalDuration: 15 } as const
 export function minimaxSizePresets(modelId: string): readonly ImageSizePreset[] {
@@ -177,7 +197,8 @@ export function modelRequiresEndpoint(model: { protocol: string; api_base: strin
   return seedreamRequiresEndpoint(model) || seedanceRequiresEndpoint(model)
 }
 export function modelConfigured(model: { protocol: string; api_base: string; model_id?: string; endpoint_id?: string; has_api_key: boolean }): boolean {
-  return model.has_api_key && !isUnsupportedModelLinkH3(model) && (!modelRequiresEndpoint(model) || !!model.endpoint_id)
+  return model.has_api_key && !isUnsupportedModelLinkH3(model) && !isSuspendedModelLinkWan(model)
+    && (!modelRequiresEndpoint(model) || !!model.endpoint_id)
 }
 export function seedanceLimits(modelId: string) {
   const newer = modelId.includes('-2-5-')

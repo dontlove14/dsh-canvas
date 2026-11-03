@@ -1,10 +1,12 @@
 # 文档导航与维护约定
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-30；复核周期：每次发布，最迟每月一次。
+文档类型：参考；负责人：项目维护者；最近核对：2026-11-03；复核周期：每次发布，最迟每月一次。
 
 本目录描述 SQLite / 多画布版本的当前实现。ADR-0001–0012 保留首版补录，0013–0017 记录存储 / Runtime 实施，0018 记录项目列表与编辑器导航；历史实现已标注替代关系。
 
-Wan 3.0与MiniMax H3的四渠道协议、参数与恢复边界见[模型协议](providers.md)和[ADR-0067](adr/0067-wan-and-minimax-native-video-protocols.md)。
+Wan 3.0与MiniMax H3的原协议、参数与恢复边界见[模型协议](providers.md)和[ADR-0067](adr/0067-wan-and-minimax-native-video-protocols.md)。Wan Model Link临时关闭，保留Aliyun官方与原历史，见[ADR-0082](adr/0082-temporary-wan-modellink-suspension.md)，手验390–391。
+
+Kling 4.0 的独立 KlingAI / Model Link 配置、文生与 Omni 参考用途见[ADR-0081](adr/0081-kling-independent-providers-and-omni-inputs.md)；真实账户和交互验收384–389见[手动清单](manual-tests.md)。
 
 多选输出、仅下载工具栏、节点主体接线、@边删除确认与平台快捷键指引见[ADR-0068](adr/0068-selection-output-and-reference-interactions.md)，实际操作验收301–305见[手动清单](manual-tests.md)。
 

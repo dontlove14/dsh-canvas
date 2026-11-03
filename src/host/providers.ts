@@ -6,6 +6,7 @@ import { FISH_TTS_MODEL, isTtsSnapshot, validateGeneration, type Asset, type Any
 import { isGptImage25, builtinDefinition, bananaSizePresets, providerFor, seedreamSizePresets, seedreamRequiresEndpoint, seedanceRequiresEndpoint, isMultimodalVideo } from '../shared/modelCatalog'
 import { receive } from './media/files'
 import { ReviewAssetIdSchema } from '../shared/seedanceReview'
+import { klingReferenceId, klingRole, resolveKlingPrompt } from '../shared/kling'
 
 export class ProviderFailure extends Error {
   constructor(message: string, readonly definitive: boolean) { super(message) }
@@ -95,6 +96,7 @@ export class Providers {
     if (snapshot.model.protocol === 'seedance-video') return this.submitSeedance(snapshot, key, input as Map<string, VideoReference>)
     if (snapshot.model.protocol === 'wan-video') return this.submitWan(snapshot, key, input as Map<string, VideoReference>)
     if (snapshot.model.protocol === 'minimax-video') return this.submitMiniMax(snapshot, key, input as Map<string, VideoReference>)
+    if (snapshot.model.protocol === 'kling-video') return this.submitKling(snapshot, key, input as Map<string, VideoReference>)
     const references = input as Map<string, Buffer>
     const { model, params, prompt, referenceIds } = snapshot
     if (model.protocol === 'seedream-image') return this.submitSeedream(snapshot, key, references)
@@ -186,6 +188,52 @@ export class Providers {
     if (typeof body.code === 'string' && body.code) return { status: 'failed',
       error: typeof body.message === 'string' ? body.message : 'Wan 提交失败', errorCode: body.code.slice(0, 160) }
     return this.wanResult(body)
+  }
+  private async submitKling(snapshot: TaskSnapshot, key: string, references: Map<string, VideoReference>): Promise<ProviderResult> {
+    const { model, params, referenceIds } = snapshot
+    const media = this.nativeVideoMedia(snapshot, key, references).map(({ url, kind }, index) => ({
+      type: klingRole(params, references.get(referenceIds[index])!.asset), url, id: klingReferenceId(kind, index),
+    }))
+    const official = providerFor(model)?.id === 'klingai'
+    const prompt = resolveKlingPrompt(snapshot.prompt, referenceIds, [...references.values()].map((item) => item.asset))
+    const [resolution, aspect_ratio] = params.size.split('/')
+    const body = await this.request(endpoint(model.api_base, `${official ? '' : 'klingapi/'}${media.length ? 'omni-video' : 'text-to-video'}/kling-4.0`), key, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        ...(media.length ? { contents: [{ type: 'prompt', text: prompt }, ...media] } : { prompt }),
+        settings: { duration: params.seconds, resolution, aspect_ratio }, options: { watermark_info: { enabled: false } },
+      }),
+    })
+    if (body.error || typeof body.code === 'number' && body.code !== 0) return {
+      status: 'failed', error: typeof body.error?.message === 'string' ? body.error.message : typeof body.message === 'string' ? body.message : 'Kling 提交失败',
+      errorCode: String(body.error?.code ?? body.code ?? 'EXTERNAL_FAILED').slice(0, 160),
+    }
+    return this.klingResult(body, official)
+  }
+  /** The two providers own different task envelopes and IDs, despite sharing payloads. */
+  private klingResult(body: Record<string, any>, official: boolean, expectedId?: string): ProviderResult {
+    if (body.code !== 0) throw new ProviderFailure('Kling 没有返回成功的响应，请确认原任务', false)
+    const task = official && expectedId
+      ? Array.isArray(body.data) && body.data.length === 1 ? body.data[0] : undefined : body.data
+    const id = official ? task?.id : task?.task_id
+    if (typeof id !== 'string' || !id || id.length > 512 || expectedId && id !== expectedId)
+      throw new ProviderFailure('Kling 没有返回匹配的任务 ID', false)
+    const states: Record<string, ProviderResult['status']> = official
+      ? { submitted: 'queued', processing: 'generating', succeeded: 'completed', failed: 'failed' }
+      : { SUBMITTED: 'queued', IN_PROGRESS: 'generating', SUCCESS: 'completed', FAILURE: 'failed' }
+    const status = typeof task.status === 'string' && Object.hasOwn(states, task.status) ? states[task.status] : undefined
+    if (!status) throw new ProviderFailure('Kling 返回未知任务状态', false)
+    if (status === 'failed') return { id, status, error: typeof (official ? task.message : task.fail_reason) === 'string'
+      ? official ? task.message : task.fail_reason : 'Kling 视频生成失败', errorCode: 'KLING_FAILED' }
+    const progress = typeof task.progress === 'string' && /^\d+(?:\.\d+)?%$/.test(task.progress) ? parseFloat(task.progress) : task.progress
+    if (status !== 'completed') return { id, status, ...(typeof progress === 'number' && progress >= 0 && progress <= 100 ? { progress } : {}) }
+    const results = Array.isArray(task.outputs) && task.outputs.length
+      ? task.outputs.filter((item: any) => item?.type === 'video' || !official && item?.type === undefined)
+      : !official && typeof task.url === 'string' ? [{ url: task.url }] : []
+    if (results.length !== 1) throw new ProviderFailure('Kling 成功任务没有返回单个有效视频', false)
+    let url: URL
+    try { url = new URL(results[0].url) } catch { throw new ProviderFailure('Kling 返回的视频地址无效', false) }
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new ProviderFailure('Kling 返回的视频地址无效', false)
+    return { id, status, outputs: [{ id: randomUUID(), mime: 'video/mp4', filename: 'generated-video.mp4', url: url.href, authenticated: false }] }
   }
   private async submitMiniMax(snapshot: TaskSnapshot, key: string, references: Map<string, VideoReference>): Promise<ProviderResult> {
     const { model, params, prompt } = snapshot
@@ -454,6 +502,12 @@ export class Providers {
   }
   async poll(snapshot: AnyTaskSnapshot, key: string, id: string): Promise<ProviderResult> {
     if (isTtsSnapshot(snapshot)) throw new ProviderFailure('FishTTS 没有可恢复查询的外部任务 ID', true)
+    if (snapshot.model.protocol === 'kling-video') {
+      if (!builtinDefinition(snapshot.model) || !key || snapshot.model.endpoint_id) throw new ProviderFailure('Kling 提供商配置无效', true)
+      const official = providerFor(snapshot.model)?.id === 'klingai'
+      const path = official ? `tasks?task_ids=${encodeURIComponent(id)}` : `klingapi/tasks/${encodeURIComponent(id)}`
+      return this.klingResult(await this.request(endpoint(snapshot.model.api_base, path), key), official, id)
+    }
     if (snapshot.model.protocol === 'minimax-video') {
       const body = await this.request(endpoint(snapshot.model.api_base, `v2/query/video_generation/${encodeURIComponent(id)}`), key)
       return this.minimaxResult(body, id)

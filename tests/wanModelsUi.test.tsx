@@ -30,14 +30,14 @@ function choose(host: ParentNode, label: string, value: string) {
   const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!
   act(() => { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })) })
 }
-it.each(BUILTIN_MODELS.filter((model) => ['wan-video', 'minimax-video'].includes(model.protocol)))('configures $model_id via $api_base without an EP field', async (definition) => {
+it.each(BUILTIN_MODELS.filter((model) => ['wan-video', 'minimax-video', 'kling-video'].includes(model.protocol)))('configures $model_id via $api_base without an EP field', async (definition) => {
   const list = catalog(), api = new CanvasApi(), model = list.find((model) => model.id === definition.id)!
   vi.spyOn(api, 'models').mockResolvedValue(list)
   const save = vi.spyOn(api, 'saveModel').mockResolvedValue(list)
   const host = mount(<ModelSettings api={api} />); await act(async () => {})
   act(() => button(host, '＋ 配置模型').click()); choose(host, '配置模型', `video:${model.model_id}`)
   expect([...host.querySelector<HTMLSelectElement>('select[aria-label="配置供应商"]')!.options].map((option) => option.text))
-    .toEqual(model.protocol === 'wan-video' ? ['Model Link', 'Aliyun']
+    .toEqual(model.protocol === 'kling-video' ? ['Model Link', 'KlingAI'] : model.protocol === 'wan-video' ? ['Aliyun']
       : model.model_id === 'MiniMax-H3' ? ['Model Link', 'MiniMax'] : ['MiniMax'])
   choose(host, '配置供应商', model.api_base)
   expect(host.querySelector('[aria-label="模型供应商 EP"]')).toBeNull()
@@ -50,10 +50,32 @@ it.each(BUILTIN_MODELS.filter((model) => ['wan-video', 'minimax-video'].includes
 })
 it('lists only configured Wan models and shows logical identity in the picker', () => {
   const models = catalog().filter((model) => model.protocol === 'wan-video')
-  models[1].has_api_key = true
-  expect(selectableModels(models).map((model) => model.id)).toEqual([models[1].id])
-  const host = mount(<ModelPicker models={models} value={models[1].id} disabled={false} onChange={vi.fn()} />)
+  models[0].has_api_key = true
+  expect(selectableModels(models).map((model) => model.id)).toEqual([models[0].id])
+  const host = mount(<ModelPicker models={models} value={models[0].id} disabled={false} onChange={vi.fn()} />)
   expect(host.textContent).toContain('Wan 3.0 · Aliyun')
+})
+it('hides both suspended Wan gateway configurations and keeps the official suppliers and other Model Link models', async () => {
+  const list = catalog(), official = list.filter((model) => model.protocol === 'wan-video')
+  const suspended = official.map((model, index) => ({ ...model,
+    id: `00000000-0000-4000-b000-${(31 + index * 2).toString(16).padStart(12, '0')}`,
+    api_base: 'https://api.modellink.online/wan/api/v1', has_api_key: true, configurable: false,
+  }))
+  list.push(...suspended)
+  official.forEach((model) => { model.has_api_key = true })
+  expect(selectableModels(list).map((model) => model.id)).toEqual(official.map((model) => model.id))
+  const api = new CanvasApi(); vi.spyOn(api, 'models').mockResolvedValue(list)
+  const host = mount(<ModelSettings api={api} />); await act(async () => {})
+  expect(host.querySelector('[aria-label="编辑 Wan 3.0 · Model Link"]')).toBeNull()
+  expect(host.querySelector('[aria-label="编辑 Wan 3.0 Prime · Model Link"]')).toBeNull()
+  expect(host.querySelector('[aria-label="编辑 Wan 3.0 · Aliyun"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="编辑 Wan 3.0 Prime · Aliyun"]')).not.toBeNull()
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="配置 Model Link 模型"]')!.click())
+  const options = [...host.querySelector<HTMLSelectElement>('[aria-label="配置模型"]')!.options].map((option) => option.value)
+  expect(options).not.toContain('video:wan3.0-video')
+  expect(options).not.toContain('video:wan3.0-video-prime')
+  expect(options).toContain('video:kling-4.0')
+  expect(options).toContain('video:MiniMax-H3')
 })
 it('excludes a configured retired Model Link H3 variant from settings candidates and generation pickers', async () => {
   const list = catalog(), official = list.find((model) => model.model_id === 'MiniMax-H3-Lite')!
@@ -111,4 +133,40 @@ it('labels first/last references in immutable Wan history', () => {
     anchor={{ position: { x: 0, y: 0 }, size: { width: 320, height: 180 } }} /></ReactFlowProvider>)
   expect([...host.querySelectorAll('.dc-frame-label')].map((label) => label.textContent)).toEqual(['尾帧', '首帧'])
   expect(host.textContent).toContain('Wan 3.0')
+})
+it.each(BUILTIN_MODELS.filter((model) => model.protocol === 'kling-video'))('edits Kling reference roles with two modes and no audio toggle: $api_base', (definition) => {
+  const model = { ...catalog().find((model) => model.id === definition.id)!, has_api_key: true }
+  const assets: Asset[] = ['image', 'video'].map((kind) => ({ id: crypto.randomUUID(), kind: kind as Asset['kind'],
+    mime: kind === 'image' ? 'image/png' : 'video/mp4', filename: 'ref', bytes: 1000, createdAt: 1,
+    nodeId: crypto.randomUUID(), taskId: null, width: 720, height: 720, ...(kind === 'video' ? { duration: 3 } : {}) }))
+  const nodeId = crypto.randomUUID(), report = vi.fn(), patch = vi.fn()
+  function Editor() {
+    const [node, setNode] = useState<CanvasNode>({ id: nodeId, kind: 'video-generation', title: 'Kling', position: { x: 0, y: 0 },
+      modelId: model.id, prompt: '镜头平移', params: defaultParams(model), assetId: null, selectedResultId: null })
+    const graph = { ...emptyGraph(), nodes: [node], edges: assets.map((asset) => ({ id: asset.id, assetId: asset.id, source: asset.nodeId!, target: nodeId })) }
+    return <FloatingEditor api={new CanvasApi()} workspace="w" node={node} graph={graph} assets={assets} tasks={[]} models={[model]}
+      ttsConfigured={false} ttsConfigurationError={false} uploading={false} submitting={false}
+      patchNode={(_id, fields) => { patch(fields); setNode((node) => ({ ...node, ...fields })) }}
+      edit={vi.fn()} report={report} generate={vi.fn()} onResult={vi.fn()} askImport={vi.fn()} taskAction={vi.fn()} onOpen={vi.fn()} />
+  }
+  const host = mount(<ReactFlowProvider><Editor /></ReactFlowProvider>)
+  expect([...host.querySelector<HTMLSelectElement>('[aria-label="视频生成模式"]')!.options].map((item) => item.text)).toEqual(['Omni 全能参考'])
+  choose(host, '素材 1 的 Kling 用途', 'middle_frame'); choose(host, '素材 2 的 Kling 用途', 'base_video')
+  expect(patch.mock.calls.at(-1)![0].params.klingReferenceRoles).toEqual({ [assets[0].id]: 'middle_frame', [assets[1].id]: 'base_video' })
+  expect(host.querySelector<HTMLButtonElement>('[aria-label="生成"]')!.disabled).toBe(false)
+  act(() => host.querySelector<HTMLButtonElement>('.dc-params-trigger')!.click())
+  const dialog = document.querySelector('[role="dialog"]')!
+  expect(dialog.textContent).toContain('720p'); expect(dialog.textContent).toContain('1080p')
+  expect(dialog.querySelectorAll('.dc-ratio-options button')).toHaveLength(5)
+  expect(dialog.querySelector('input[type="checkbox"]')).toBeNull()
+  expect(report).not.toHaveBeenCalled()
+})
+it('shows Kling Omni roles and separate provider name in immutable history', () => {
+  const model = BUILTIN_MODELS.find((model) => model.protocol === 'kling-video' && model.api_base.includes('beijing'))!
+  const input: Asset = { id: crypto.randomUUID(), kind: 'image', mime: 'image/png', filename: 'ref.png', bytes: 1000, createdAt: 1, nodeId: null, taskId: null }
+  const host = mount(<ReactFlowProvider><GenerationSnapshotEditor api={new CanvasApi()} workspace="w" assets={[input]}
+    snapshot={{ model, prompt: '已提交', params: { ...defaultParams(model), videoMode: 'reference', klingReferenceRoles: { [input.id]: 'middle_frame' } }, referenceIds: [input.id] }}
+    anchor={{ position: { x: 0, y: 0 }, size: { width: 320, height: 180 } }} /></ReactFlowProvider>)
+  expect(host.textContent).toContain('KlingAI'); expect(host.textContent).toContain('Omni 全能参考')
+  expect(host.textContent).toContain('素材 1：中间帧'); expect(host.textContent).not.toContain('[object Object]')
 })

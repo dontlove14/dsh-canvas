@@ -1,6 +1,7 @@
 import { useViewport, useStore } from '@xyflow/react'
 import { isTtsSnapshot, type AnyTaskSnapshot, type Asset } from '../shared/contracts'
-import { providerFor, SEEDANCE_VIDEO_MODES, isMultimodalVideo } from '../shared/modelCatalog'
+import { providerFor, SEEDANCE_VIDEO_MODES, KLING_VIDEO_MODES, isMultimodalVideo } from '../shared/modelCatalog'
+import { klingRole, klingRoleLabel, type KlingRole } from '../shared/kling'
 import type { CanvasApi } from './api'
 import { SignedImage } from './SignedMedia'
 import { nodeEditorPosition, readonlyEditorBounds } from './nodeOverlayLayout'
@@ -34,7 +35,9 @@ export function GenerationSnapshotEditor({ api, workspace, snapshot, assets = []
             : <SignedImage api={api} canvas={workspace} assetId={id} alt={`参考素材 ${index + 1}`} />}
           <small className={isMultimodalVideo(snapshot.model) && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames' ? 'dc-frame-label' : ''}>{
             isMultimodalVideo(snapshot.model) && !isTtsSnapshot(snapshot) && snapshot.params.videoMode === 'frames'
-              ? snapshot.params.firstFrameId === id ? '首帧' : '尾帧' : index + 1}</small>
+              ? snapshot.params.firstFrameId === id ? '首帧' : '尾帧'
+              : snapshot.model.protocol === 'kling-video' && !isTtsSnapshot(snapshot) && assets.find((asset) => asset.id === id)
+                ? klingRoleLabel(klingRole(snapshot.params, assets.find((asset) => asset.id === id)!)) : index + 1}</small>
         </button>)}
       </div>}
       <div className="dc-snapshot-prompt" data-dc-text-selectable="true" role="textbox" aria-label={tts ? '文字内容' : '提示词'} aria-readonly="true" contentEditable={false} tabIndex={0}>{snapshot.prompt}</div>
@@ -43,8 +46,10 @@ export function GenerationSnapshotEditor({ api, workspace, snapshot, assets = []
         {Object.entries(snapshot.params).filter(([key]) => key !== 'type').map(([key, value]) => <div key={key}>
           <dt>{{ size: '尺寸', n: '生成数量', seconds: '时长（秒）', background: '背景', quality: '画质',
             videoMode: '生成模式', firstFrameId: '首帧', lastFrameId: '尾帧', generateAudio: '同步音频',
-            audio: '音频', reference_id: '音色 ID', speed: '语速', volume: '音量' }[key] ?? key}</dt><dd data-dc-text-selectable="true">{
-              key === 'videoMode' ? SEEDANCE_VIDEO_MODES.find((mode) => mode.value === value)?.label ?? String(value)
+            klingReferenceRoles: '素材用途', audio: '音频', reference_id: '音色 ID', speed: '语速', volume: '音量' }[key] ?? key}</dt><dd data-dc-text-selectable="true">{
+              key === 'videoMode' ? (snapshot.model.protocol === 'kling-video' ? KLING_VIDEO_MODES : SEEDANCE_VIDEO_MODES).find((mode) => mode.value === value)?.label ?? String(value)
+                : key === 'klingReferenceRoles' ? Object.entries(value as Record<string, KlingRole>).map(([id, role]) =>
+                  `素材 ${snapshot.referenceIds.indexOf(id) + 1}：${klingRoleLabel(role)}`).join('；')
                 : key === 'firstFrameId' || key === 'lastFrameId' ? `图片 ${snapshot.referenceIds.indexOf(String(value)) + 1}`
                   : typeof value === 'boolean' ? value ? '开启' : '关闭' : String(value)}</dd>
         </div>)}

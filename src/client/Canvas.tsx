@@ -58,6 +58,7 @@ import { seedanceFrameParams } from '../shared/seedance'
 import { isMultimodalVideo } from '../shared/modelCatalog'
 import { normalizeVideoGraphReferences, videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
 import { SeedanceFrameRole } from './SeedanceFrameRoles'
+import { KlingReferenceRole } from './KlingReferenceRole'
 import { CanvasReviewState, ReviewContext } from './reviewState'
 import { SeedanceReviewDialog } from './SeedanceReviewDialog'
 import { CanvasTextSelectionProvider } from './canvasTextSelection'
@@ -740,7 +741,13 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
             {reference?.kind === 'image' ? <SignedImage api={api} canvas={workspace} assetId={reference.id} alt={`参考图 ${index + 1}`} onClick={() => onOpen(reference)} /> : <span className="dc-reference-placeholder">{reference ? <MediaIcon kind={reference.kind} size={28} /> : '？'}</span>}
             {model && isMultimodalVideo(model) && params && !isTtsParams(params) && params.videoMode === 'frames'
               ? <SeedanceFrameRole assetId={edge.assetId} index={index} referenceIds={referenceIds} params={params} disabled={submitting}
-                onChange={(params) => patchNode(node.id, { params })} /> : <small>{index + 1}</small>}
+                onChange={(params) => patchNode(node.id, { params })} />
+              : model?.protocol === 'kling-video' && params && !isTtsParams(params) && reference
+                ? <KlingReferenceRole asset={reference} index={index} params={params} disabled={submitting}
+                  onChange={(next) => {
+                    try { validateVideoConnections(next, referenceAssets, model); patchNode(node.id, { params: next }) }
+                    catch (error) { report(error) }
+                  }} /> : <small>{index + 1}</small>}
             <UiButton disabled={submitting} className="dc-ui-remove-reference" aria-label={`移除引用 ${index + 1}`} onClick={() => edit((current) => ({ ...current, edges: current.edges.filter((item) => item.id !== edge.id) }))}>×</UiButton>
           </div>
         })}

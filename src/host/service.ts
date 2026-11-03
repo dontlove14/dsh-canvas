@@ -11,6 +11,7 @@ import { PreviewCache } from './media/previews'
 import type { CredentialVault } from './credentials'
 import { mockRecord, validateMockGeneration } from '../shared/mockModels'
 import { resolvePrompt } from '../shared/promptMentions'
+import { resolveKlingPrompt } from '../shared/kling'
 import { WaveformCache } from './media/waveforms'
 import { TtsSettingsInputSchema, TtsParamsSchema, TtsTaskSnapshotSchema, isTtsParams, validateTtsText, type AnyTaskSnapshot } from '../shared/contracts'
 import { StorageInputSchema, MediaUrlsSchema, MediaVariantSchema } from '../shared/objectStorage'
@@ -193,7 +194,8 @@ export class CanvasService {
         if (isMultimodalVideo(model)) snapshot.params = videoGenerationParams(snapshot.params, snapshot.referenceIds, model)
         if (mock) validateMockGeneration(snapshot, state.assets)
         else validateGeneration(snapshot, state.assets)
-        snapshot.prompt = resolvePrompt(snapshot.prompt, snapshot.referenceIds, state.assets)
+        snapshot.prompt = model.protocol === 'kling-video' ? resolveKlingPrompt(snapshot.prompt, snapshot.referenceIds, state.assets)
+          : resolvePrompt(snapshot.prompt, snapshot.referenceIds, state.assets)
       }
       let bytes = 0
       for (const id of snapshot.referenceIds) {

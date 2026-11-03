@@ -1,15 +1,18 @@
 import type { Asset, CanvasGraph, GenerationParams, ModelCapabilities, ModelRecord, PublicModel } from './contracts'
 import { isMultimodalVideo, WAN_VIDEO_LIMITS, MINIMAX_VIDEO_LIMITS } from './modelCatalog'
 import { seedanceGenerationParams, seedanceReferenceLimit, validateSeedanceConnections, validateSeedanceInputs } from './seedance'
+import { klingGenerationParams, validateKlingConnections, validateKlingInputs } from './kling'
 
 type VideoModel = Pick<ModelRecord, 'protocol' | 'model_id'>
 /** Native video families share mode inference while retaining their own wire protocol. */
 export function videoGenerationParams(params: GenerationParams, ids: readonly string[], model: VideoModel): GenerationParams {
+  if (model.protocol === 'kling-video') return klingGenerationParams(params, ids)
   const next = isMultimodalVideo(model) ? seedanceGenerationParams(params, ids) : params
   if (model.protocol !== 'minimax-video' || videoSizeAllowed(model, next, next.size.split('/')[1])) return next
   return { ...next, size: `${next.size.split('/')[0]}/${next.videoMode === 'frames' ? 'adaptive' : '16:9'}` }
 }
 export function videoSizeAllowed(model: VideoModel, params: GenerationParams, ratio: string): boolean {
+  if (model.protocol === 'kling-video') return params.videoMode === 'reference' || ratio !== 'adaptive'
   if (model.protocol === 'minimax-video') return params.videoMode === 'frames' ? ratio === 'adaptive'
     : (params.videoMode ?? 'text') === 'text' || model.model_id === 'MiniMax-H3-Lite' ? ratio !== 'adaptive' : true
   return model.protocol !== 'seedance-video' || !model.model_id.includes('-2-5-') || params.videoMode !== 'frames' || ratio === 'adaptive'
@@ -20,11 +23,13 @@ export function videoInputCapabilities(model: PublicModel, params: GenerationPar
     maxReferences: params?.videoMode === 'frames' ? 2 : model.capabilities.maxReferences }
 }
 export function videoReferenceLimit(kind: Asset['kind'], protocol: string): number {
+  if (protocol === 'kling-video') return (kind === 'image' ? 30 : kind === 'video' ? 300 : 0) * 1024 * 1024
   if (protocol === 'seedance-video') return seedanceReferenceLimit(kind)
   const limits = protocol === 'minimax-video' ? MINIMAX_VIDEO_LIMITS : WAN_VIDEO_LIMITS
   return ({ image: limits.imageMB, video: limits.videoMB, audio: limits.audioMB }[kind]) * 1024 * 1024
 }
 export function validateVideoConnections(params: GenerationParams, assets: readonly Asset[], model: VideoModel): void {
+  if (model.protocol === 'kling-video') return validateKlingConnections(params, assets)
   if (model.protocol === 'seedance-video') return validateSeedanceConnections(params, assets, model.model_id)
   if (!isMultimodalVideo(model)) return
   const mode = params.videoMode ?? 'text', limits = model.protocol === 'minimax-video' ? MINIMAX_VIDEO_LIMITS : WAN_VIDEO_LIMITS
@@ -38,6 +43,7 @@ export function validateVideoConnections(params: GenerationParams, assets: reado
   }
 }
 export function validateVideoInputs(params: GenerationParams, assets: readonly Asset[], model: VideoModel): void {
+  if (model.protocol === 'kling-video') return validateKlingInputs(params, assets)
   if (model.protocol === 'seedance-video') return validateSeedanceInputs(params, assets, model.model_id)
   validateVideoConnections(params, assets, model)
   const mode = params.videoMode ?? 'text', limits = model.protocol === 'minimax-video' ? MINIMAX_VIDEO_LIMITS : WAN_VIDEO_LIMITS

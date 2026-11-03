@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -10,7 +10,7 @@ import ffmpeg from '@ffmpeg-installer/ffmpeg'
 import { Providers } from '../src/host/providers'
 import { CanvasService } from '../src/host/service'
 import { inspectSeedanceReference } from '../src/host/media/seedanceReferences'
-import { BUILTIN_MODELS, WAN_MODELS, providerFor } from '../src/shared/modelCatalog'
+import { BUILTIN_MODELS, WAN_MODELS, PROVIDERS, providerFor } from '../src/shared/modelCatalog'
 import { capabilitiesFor, defaultParams, emptyGraph, ModelInputSchema, validateGeneration,
   type Asset, type CanvasNode, type TaskSnapshot, type TaskStatus } from '../src/shared/contracts'
 import { normalizeVideoGraphReferences, videoGenerationParams, validateVideoConnections } from '../src/shared/video'
@@ -19,6 +19,10 @@ import { createCanvasNode } from '../src/client/nodeCreation'
 import { initialize, fakeFactory } from './support/objectStorage'
 
 const models = BUILTIN_MODELS.filter((model) => model.protocol === 'wan-video')
+const suspendedModels = WAN_MODELS.map((model, index) => ({
+  ...models[index], id: `00000000-0000-4000-b000-${(31 + index * 2).toString(16).padStart(12, '0')}`,
+  api_base: PROVIDERS[7].apiBase,
+}))
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const snapshot = (index = 0): TaskSnapshot => ({ model: models[index], params: defaultParams(models[index]), prompt: '生成一段视频', referenceIds: [] })
@@ -59,9 +63,10 @@ async function videoBytes(root: string, fps = 24) {
 const options = { requestTimeoutMs: 1000, maxMediaBytes: 1000000, maxReferenceBytes: 100 }
 
 describe('Wan catalog, modes and input boundaries', () => {
-  it('adds Wan through Model Link and Aliyun, preserving all thirty previous identities', async () => {
-    expect(models.map((model) => [model.model_id, model.name, providerFor(model)?.id])).toEqual(WAN_MODELS.flatMap((model) =>
-      ['model-link', 'aliyun'].map((provider) => [model.id, model.name, provider])))
+  it('offers both Wan models only through Aliyun, preserving the official and previous identities', async () => {
+    expect(models.map((model) => [model.model_id, model.name, providerFor(model)?.id])).toEqual(WAN_MODELS.map((model) =>
+      [model.id, model.name, 'aliyun']))
+    expect(models.map((model) => model.id.slice(-2))).toEqual(['20', '22'])
     expect(BUILTIN_MODELS.slice(0, 30).map((model) => model.id)).toEqual(Array.from({ length: 30 }, (_, i) => `00000000-0000-4000-b000-${(i + 1).toString(16).padStart(12, '0')}`))
     expect(new Set(BUILTIN_MODELS.map((model) => model.id)).size).toBe(39)
     const instance = await service(await directory())
@@ -77,6 +82,40 @@ describe('Wan catalog, modes and input boundaries', () => {
     await instance.store.saveModel({ ...models[1], api_key: '' })
     expect(() => instance.store.model(models[1].id)).toThrow('配置模型')
     expect(instance.store.model(models[0].id).key).toBe('wan-key-0')
+  })
+  it('preserves suspended gateway credentials and history on restart while rejecting fresh configuration and generation', async () => {
+    const path = await directory()
+    await writeFile(join(path, 'models.json'), JSON.stringify(suspendedModels))
+    await writeFile(join(path, 'credentials.json'), JSON.stringify({
+      models: Object.fromEntries(suspendedModels.map((model) => [model.id, 'retained-wan-key'])),
+    }))
+    const instance = await service(path), node = await generator(instance)
+    const fetch = vi.fn(async () => Response.json({ code: 'HistoricFailure', message: 'historic rejection' }))
+    vi.stubGlobal('fetch', fetch)
+    const history = await instance.generate('w', node.id, 1)
+    await wait(instance, history.id, 'failed')
+    const historicalSnapshot = { ...history.snapshot, model: suspendedModels[0] }
+    await instance.store.db.batch([sql('UPDATE task_details SET snapshot_json=? WHERE task_id=?', [JSON.stringify(historicalSnapshot), history.id])])
+    const records = await readFile(join(path, 'models.json'), 'utf8')
+    const bindings = await readFile(join(path, 'model-bindings.json'), 'utf8')
+    const ddl = await instance.store.db.all('SELECT sql FROM sqlite_master ORDER BY name')
+    await instance.close(); fetch.mockClear()
+    const resumed = await service(path), tasks = await resumed.store.db.all('SELECT * FROM task_catalog')
+    expect(resumed.store.state('w').tasks[0]).toMatchObject({ id: history.id, status: 'failed', snapshot: historicalSnapshot })
+    for (const model of suspendedModels) {
+      expect(resumed.store.listModels().find((item) => item.id === model.id)).toMatchObject({ ...model, has_api_key: true, configurable: false })
+      expect(() => resumed.store.model(model.id)).toThrow('已暂停提供')
+      await expect(resumed.store.saveModel({ ...model, api_key: 'replacement' })).rejects.toMatchObject({ code: 'MODEL_NOT_SUPPORTED' })
+      await resumed.saveGraph('w', { ...emptyGraph(), nodes: [{ ...node, modelId: model.id }] }, resumed.store.state('w').graphRevision)
+      await expect(resumed.generate('w', node.id, resumed.store.state('w').graphRevision)).rejects.toMatchObject({ code: 'MODEL_NOT_SUPPORTED' })
+      expect(await resumed.store.vault.read(JSON.parse(bindings)[model.id])).toBe('retained-wan-key')
+    }
+    expect(resumed.store.model(models[0].id).key).toBe('original-wan-key')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(await readFile(join(path, 'models.json'), 'utf8')).toBe(records)
+    expect(await readFile(join(path, 'model-bindings.json'), 'utf8')).toBe(bindings)
+    expect(await resumed.store.db.all('SELECT * FROM task_catalog')).toEqual(tasks)
+    expect(await resumed.store.db.all('SELECT sql FROM sqlite_master ORDER BY name')).toEqual(ddl)
   })
   it.each(models)('exposes the native resolutions, durations and one output for $name', (model) => {
     const caps = capabilitiesFor(model)
@@ -125,7 +164,7 @@ describe('Wan catalog, modes and input boundaries', () => {
 })
 
 describe('Wan native wire protocol and durable runtime', () => {
-  it.each(models)('submits text, mixed reference and reversed frame order through $model_id', async (model) => {
+  it.each(models)('supports native wire payloads through $model_id ($api_base)', async (model) => {
     const references = [asset(), asset(), asset('video'), asset('audio')], byId = new Map(references.map((asset) => [asset.id, asset]))
     const inspect = vi.fn(async (_task: string, id: string) => byId.get(id)!), sign = vi.fn(async (_task: string, id: string) => `https://objects.invalid/${id}?ttl=86400`)
     const read = vi.fn(), review = vi.fn(), fetch = vi.fn(async () => Response.json({ output: { task_id: 'wan-task', task_status: 'PENDING' } }))
@@ -153,23 +192,24 @@ describe('Wan native wire protocol and durable runtime', () => {
     expect(read).not.toHaveBeenCalled(); expect(review).not.toHaveBeenCalled()
     expect(inspect.mock.invocationCallOrder[0]).toBeLessThan(sign.mock.invocationCallOrder[0])
   })
-  it('maps query states, checks original identity and never forwards credentials to the result CDN', async () => {
+  it.each([...models, ...suspendedModels])('queries frozen official or suspended gateway tasks and downloads without credentials: $model_id ($api_base)', async (model) => {
+    const input = { ...snapshot(), model }
     let body: object = {}, fetch = vi.fn(async () => Response.json(body))
     vi.stubGlobal('fetch', fetch)
     const provider = new Providers({ readMedia: vi.fn(), stagePath: (name) => name }, options, new AbortController().signal)
     for (const [remote, local] of [['PENDING', 'queued'], ['RUNNING', 'generating'], ['FAILED', 'failed'], ['CANCELED', 'failed'], ['UNKNOWN', 'failed']] as const) {
       body = { output: { task_id: 'wan/id', task_status: remote, code: 'InvalidInput', message: 'provider error' } }
-      expect(await provider.poll(snapshot(), 'secret', 'wan/id')).toMatchObject({ id: 'wan/id', status: local })
+      expect(await provider.poll(input, 'secret', 'wan/id')).toMatchObject({ id: 'wan/id', status: local })
     }
-    expect(fetch.mock.calls.at(-1)![0]).toBe('https://api.modellink.online/wan/api/v1/tasks/wan%2Fid')
+    expect(fetch.mock.calls.at(-1)![0]).toBe(`${model.api_base}/tasks/wan%2Fid`)
     for (const output of [{}, { task_id: 'wrong', task_status: 'RUNNING' }, { task_id: 'wan/id', task_status: 'OTHER' },
       { task_id: 'wan/id', task_status: 'SUCCEEDED', video_url: 'javascript:alert(1)' }]) {
-      body = { output }; await expect(provider.poll(snapshot(), 'secret', 'wan/id')).rejects.toMatchObject({ definitive: false })
+      body = { output }; await expect(provider.poll(input, 'secret', 'wan/id')).rejects.toMatchObject({ definitive: false })
     }
     body = { output: { task_id: 'wan/id', task_status: 'SUCCEEDED', video_url: 'https://cdn.invalid/output.mp4' } }
-    const result = await provider.poll(snapshot(), 'secret', 'wan/id')
+    const result = await provider.poll(input, 'secret', 'wan/id')
     fetch.mockImplementation(async () => new Response('video'))
-    const stream = await provider.outputStream(result.outputs![0], snapshot(), 'secret'); stream.destroy()
+    const stream = await provider.outputStream(result.outputs![0], input, 'secret'); stream.destroy()
     expect(new Headers((fetch.mock.calls.at(-1)! as unknown as [string, RequestInit])[1].headers).get('authorization')).toBeNull()
   })
   it('rejects invalid references before POST and surfaces both body and HTTP provider errors', async () => {

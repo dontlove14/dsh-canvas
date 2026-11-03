@@ -1,17 +1,32 @@
 # 模型协议与媒体参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-10-29。复核周期和触发条件见[文档导航](index.md)。
+文档类型：参考；负责人：项目维护者；最近核对：2026-11-03。复核周期和触发条件见[文档导航](index.md)。
 
 本页描述[已实现的适配器](../src/host/providers.ts)与[能力定义](../src/shared/contracts.ts)，不是对任何厂商当前线上 API 的兼容认证。真实账户联调仍见[验证记录](verification.md)。
+
+## Kling 4.0（0.2.107）
+
+| 提供商 | Base | 提交 | 查询与状态 |
+| --- | --- | --- | --- |
+| KlingAI（官方中国区） | `https://api-beijing.klingai.com` | POST `text-to-video/kling-4.0` / `omni-video/kling-4.0` | GET `tasks?task_ids=<id>`；data数组的id / submitted、processing、succeeded、failed |
+| Model Link | `https://api.modellink.online` | POST `klingapi/text-to-video/kling-4.0` / `klingapi/omni-video/kling-4.0` | GET `klingapi/tasks/{task_id}`；data.task_id / SUBMITTED、IN_PROGRESS、SUCCESS、FAILURE |
+
+两家各配置自己的API Key Bearer，无EP或共用令牌。提交与查询固定为同一提供商，不能用另一家Key查询或自动切换。官方使用新API Key，不接旧AK/SK JWT。文生顶层prompt；Omni的contents含prompt/text与素材type/url/id，绑定引用在接受时映射为@image_N / @video_N。settings为duration、resolution、aspect_ratio，options.watermark_info.enabled固定false。不接独立image-to-video、element、voice或音频开关。
+
+无输入自动文生，有图 / 视频输入自动Omni。图片可选参考图片 / 首帧 / 中间帧 / 尾帧，视频可选特征参考 / 待编辑视频；默认参考图片 / 特征参考，首尾帧及待编辑视频各最多一份。720p / 1080p、3–30秒整数、每次一个结果，默认1080p / 16:9 / 10秒。比例为21:9、16:9、9:16、1:1，Omni另支持adaptive。英文26000 / 非英文11000字符，混合占比合计≤1。
+
+图片最多10份，JPG/JPEG/PNG、≤30MiB、宽高≥300px；视频最多5份，MP4/MOV、≤300MiB，单段3–30秒、总时长≤30秒、宽高700–4553px、总像素≤8294400、24–60FPS；画面比例均0.4–2.5，合计≤15份。实际固定OSS字节在签名URL前重新检查，不把旧存储元数据当校验证据。结果来自outputs中的视频URL，Model Link也允许data.url；原ID严格匹配、查询≥5秒、CDN不带Key。未知响应不重提，保存失败只恢复原输出。来源与兼容策略见[ADR-0081](adr/0081-kling-independent-providers-and-omni-inputs.md)。
 
 ## Wan 3.0 / MiniMax H3（0.2.75）
 
 | 系列 | 原厂 base | Model Link base | 提交 / 查询（相对base） |
 | --- | --- | --- | --- |
-| Wan 3.0 / Prime | `https://maas.qianwenaiapi.com/api/v1`（Aliyun） | `https://api.modellink.online/wan/api/v1` | POST `services/aigc/video-generation/video-synthesis` / GET `tasks/{task_id}` |
+| Wan 3.0 / Prime | `https://maas.qianwenaiapi.com/api/v1`（Aliyun） | `https://api.modellink.online/wan/api/v1`（暂停新增） | POST `services/aigc/video-generation/video-synthesis` / GET `tasks/{task_id}` |
 | MiniMax H3（官方另支持Highspeed / Lite / Max） | `https://api.minimax.cn`（MiniMax） | `https://api.modellink.online/hailuo`（仅MiniMax-H3） | POST `v2/video_generation` / GET `v2/query/video_generation/{task_id}` |
 
-四条渠道独立配置Bearer API Key，不需EP。Wan提交另加 `X-DashScope-Async: enable`，JSON为model、input.prompt / media（type / url）、parameters.resolution / ratio / duration / audio / prompt_extend / watermark；查询读取output，PENDING / RUNNING / SUCCEEDED / FAILED / CANCELED / UNKNOWN分别排队 / 生成 / 保存 / 失败 / 取消 / 过期。H3提交用content.text与image_url / video_url / audio_url的role，resolution / ratio / duration；MiniMax官方另传 `aigc_watermark: false`，Model Link不传该字段，因网关明确拒绝。创建task_id，查询task.id / status / content.url，queued / running / succeeded / failed / cancelled。URI中任务ID编码，严格匹配原ID，成功结果CDN不携带Bearer。
+0.2.108起按用户确认临时停用Wan Model Link。设置和画布 / Agent候选仅保留Aliyun官方；Host拒绝该网关的新配置和新生成。原模型记录、密钥绑定、节点与历史任务保持，已有外部ID仍由原适配器查询和保存；尚未发送的任务不向停用网关新建请求，不自动换官方或重新提交。恢复需用户确认，见[ADR-0082](adr/0082-temporary-wan-modellink-suspension.md)。Model Link其他系列继续可用。
+
+当前三条可用渠道独立配置Bearer API Key，不需EP；原Wan网关协议保留给历史任务。Wan提交另加 `X-DashScope-Async: enable`，JSON为model、input.prompt / media（type / url）、parameters.resolution / ratio / duration / audio / prompt_extend / watermark；查询读取output，PENDING / RUNNING / SUCCEEDED / FAILED / CANCELED / UNKNOWN分别排队 / 生成 / 保存 / 失败 / 取消 / 过期。H3提交用content.text与image_url / video_url / audio_url的role，resolution / ratio / duration；MiniMax官方另传 `aigc_watermark: false`，Model Link不传该字段，因网关明确拒绝。创建task_id，查询task.id / status / content.url，queued / running / succeeded / failed / cancelled。URI中任务ID编码，严格匹配原ID，成功结果CDN不携带Bearer。
 
 Model Link的Highspeed / Lite / Max不属于可配置或生成候选。之前保存的记录 / 密钥 / 历史快照保留，直接调用配置或生成接口会在外部请求前拒绝；节点需用户重新选择标准H3或官方渠道。既有失败任务不自动重提。
 

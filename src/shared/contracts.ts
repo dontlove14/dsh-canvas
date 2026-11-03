@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { resolvePrompt } from './promptMentions'
-import { GPT_IMAGE_SIZES, IMAGE_BACKGROUNDS, IMAGE_QUALITIES, isGptImage25, bananaSizePresets, seedreamSizePresets, seedanceSizePresets, seedanceLimits, SEEDANCE_VIDEO_MODES, isMultimodalVideo, wanSizePresets, WAN_VIDEO_LIMITS, minimaxSizePresets, MINIMAX_VIDEO_LIMITS, type ImageSizePreset } from './modelCatalog'
+import { GPT_IMAGE_SIZES, IMAGE_BACKGROUNDS, IMAGE_QUALITIES, isGptImage25, bananaSizePresets, seedreamSizePresets, seedanceSizePresets, seedanceLimits, SEEDANCE_VIDEO_MODES, isMultimodalVideo, wanSizePresets, WAN_VIDEO_LIMITS, minimaxSizePresets, MINIMAX_VIDEO_LIMITS, KLING_VIDEO_MODES, klingSizePresets, type ImageSizePreset } from './modelCatalog'
 import { validateVideoInputs } from './video'
+import { resolveKlingPrompt, validateKlingPrompt } from './kling'
 
 export const PLUGIN_ID = 'dsh-canvas'
 export const API_ROOT = 'api/canvas'
@@ -13,7 +14,7 @@ export const MediaKindSchema = z.enum(['image', 'video', 'audio'])
 export type MediaKind = z.infer<typeof MediaKindSchema>
 export const ModelKindSchema = z.enum(['image', 'video'])
 export type ModelKind = z.infer<typeof ModelKindSchema>
-export const ProtocolSchema = z.enum(['openai-image', 'openai-dalle-3', 'openai-dalle-2', 'openai-video', 'gemini-image', 'seedream-image', 'seedance-video', 'wan-video', 'minimax-video'])
+export const ProtocolSchema = z.enum(['openai-image', 'openai-dalle-3', 'openai-dalle-2', 'openai-video', 'gemini-image', 'seedream-image', 'seedance-video', 'wan-video', 'minimax-video', 'kling-video'])
 export type Protocol = z.infer<typeof ProtocolSchema>
 
 const ApiBaseSchema = z.string().trim().url().max(2048).refine((value) => {
@@ -75,6 +76,7 @@ export const ProtocolLabels: Record<Protocol, string> = {
   'seedance-video': 'Seedance 视频',
   'wan-video': 'Wan 视频',
   'minimax-video': 'MiniMax H3 视频',
+  'kling-video': 'Kling 4.0 视频',
 }
 
 export function capabilitiesFor(model: Pick<ModelRecord, 'protocol' | 'model_id'>): ModelCapabilities {
@@ -85,6 +87,12 @@ export function capabilitiesFor(model: Pick<ModelRecord, 'protocol' | 'model_id'
     backgrounds: IMAGE_BACKGROUNDS, qualities: IMAGE_QUALITIES,
   }
   switch (model.protocol) {
+    case 'kling-video': {
+      const sizePresets = klingSizePresets(model.model_id)
+      return { sizes: sizePresets.map((preset) => preset.size), sizePresets, defaultSize: '1080p/16:9',
+        counts: [1], seconds: [], secondsRange: { min: 3, max: 30, step: 1 },
+        referenceKinds: ['image', 'video'], maxReferences: 15, supportsAudioToggle: false, videoModes: KLING_VIDEO_MODES }
+    }
     case 'minimax-video': {
       const limits = MINIMAX_VIDEO_LIMITS, sizePresets = minimaxSizePresets(model.model_id)
       return { sizes: sizePresets.map((preset) => preset.size), sizePresets, defaultSize: '768P/16:9',
@@ -142,6 +150,8 @@ export const GenerationParamsSchema = z.object({
   firstFrameId: IdSchema.optional(),
   lastFrameId: IdSchema.optional(),
   generateAudio: z.boolean().optional(),
+  klingReferenceRoles: z.record(IdSchema, z.enum(['refer_image', 'first_frame', 'middle_frame', 'last_frame', 'feature_video', 'base_video']))
+    .refine((roles) => Object.keys(roles).length <= 15, 'Kling 最多设置15份素材用途').optional(),
 }).strict()
 export type GenerationParams = z.infer<typeof GenerationParamsSchema>
 export const TtsParamsSchema = z.object({
@@ -170,6 +180,7 @@ export function defaultParams(model: Pick<ModelRecord, 'protocol' | 'model_id'> 
     ...(model.protocol === 'seedance-video' ? { seconds: 5, videoMode: 'text' as const, generateAudio: true } : {}),
     ...(model.protocol === 'wan-video' ? { seconds: 5, videoMode: 'text' as const, generateAudio: true } : {}),
     ...(model.protocol === 'minimax-video' ? { seconds: 5, videoMode: 'text' as const } : {}),
+    ...(model.protocol === 'kling-video' ? { seconds: 10, videoMode: 'text' as const } : {}),
     ...(caps.backgrounds ? { background: 'auto' as const } : {}), ...(caps.qualities ? { quality: 'auto' as const } : {}) }
 }
 
@@ -338,6 +349,8 @@ export function validateWithCapabilities(snapshot: TaskSnapshot, assets: readonl
   if (!isMultimodalVideo(snapshot.model) && (snapshot.params.videoMode !== undefined || snapshot.params.firstFrameId
     || snapshot.params.lastFrameId || snapshot.params.generateAudio !== undefined)) throw new Error('当前模型不支持这些视频参数')
   if (snapshot.model.protocol === 'wan-video' && snapshot.prompt.length > 20000) throw new Error('Wan 提示词不能超过20000字符')
+  if (snapshot.model.protocol === 'kling-video') validateKlingPrompt(resolveKlingPrompt(snapshot.prompt, snapshot.referenceIds, assets))
+  else if (snapshot.params.klingReferenceRoles !== undefined) throw new Error('当前模型不支持 Kling 素材用途')
   if (snapshot.params.generateAudio !== undefined && !caps.supportsAudioToggle) throw new Error('当前模型不支持音频开关')
   if (snapshot.referenceIds.length > caps.maxReferences) throw new Error(`当前模型最多接受 ${caps.maxReferences} 份参考素材`)
   if (new Set(snapshot.referenceIds).size !== snapshot.referenceIds.length) throw new Error('不能重复引用同一素材')

@@ -24,7 +24,7 @@ export function CanvasSettings({ api, onChanged, initialTab = 'storage', showTit
 }
 
 const modelChoice = (model: PublicModel) => `${model.kind}:${model.model_id}`
-const providerMarks: Readonly<Record<string, string>> = { 'model-link': 'ML', openai: 'AI', gemini: 'G', bytedance: 'BD', byteplus: 'B+' }
+const providerMarks: Readonly<Record<string, string>> = { 'model-link': 'ML', openai: 'AI', gemini: 'G', bytedance: 'BD', byteplus: 'B+', klingai: 'KL' }
 function providerGroups(models: readonly PublicModel[]) {
   const groups = new Map<string, { id: string; label: string; models: PublicModel[] }>()
   for (const model of models) {

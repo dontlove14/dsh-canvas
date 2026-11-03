@@ -13,7 +13,7 @@ import { ModelRecordSchema, WorkspaceStateSchema, emptyGraph, capabilitiesFor, B
   type ModelRecord, type ModelInput, type PublicModel, type WorkspaceState, type Asset, type MediaKind, type Task } from '../shared/contracts'
 import { maskSecret, SettingSecretRequestSchema, type SettingSecretRequest } from '../shared/settingSecrets'
 import { isMockModel } from '../shared/mockModels'
-import { BUILTIN_MODELS, builtinDefinition, correctSeedreamModelId, modelConfigured, modelRequiresEndpoint, isUnsupportedModelLinkH3, providerFor } from '../shared/modelCatalog'
+import { BUILTIN_MODELS, builtinDefinition, correctSeedreamModelId, modelConfigured, modelRequiresEndpoint, isUnsupportedModelLinkH3, isSuspendedModelLinkWan, providerFor } from '../shared/modelCatalog'
 import { inspectSeedanceReference } from './media/seedanceReferences'
 import { FISH_TTS_ENDPOINT, TtsParamsSchema, TtsSettingsInputSchema, type TtsSettingsInput, type PublicTtsSettings, type TtsTaskSnapshot } from '../shared/contracts'
 import { STORAGE_REQUIRED, type ObjectLocator, type ObjectStorageSettings, type StorageInput, type MediaVariant } from '../shared/objectStorage'
@@ -169,6 +169,8 @@ export class SqliteStore {
   }
   model(id: string) {
     const model = this.models.find((m) => m.id === id)
+    if (model && isSuspendedModelLinkWan(model))
+      throw new CanvasError('Model Link 的 Wan 3.0 已暂停提供，请选择 Aliyun 官方供应商', 400, 'MODEL_NOT_SUPPORTED')
     if (model && isUnsupportedModelLinkH3(model))
       throw new CanvasError('Model Link 的 MiniMax H3 仅支持 MiniMax-H3，请重新选择模型', 400, 'MODEL_NOT_SUPPORTED')
     if ((!model && BUILTIN_MODELS.some((m) => m.id === id)) || (model && builtinDefinition(model) && !modelConfigured({ ...model, has_api_key: !!this.keys[id] })))
@@ -221,6 +223,8 @@ export class SqliteStore {
   }
   async saveModel(input: ModelInput): Promise<PublicModel[]> {
     return this.serial(async () => {
+      if (isSuspendedModelLinkWan(input))
+        throw new CanvasError('Model Link 的 Wan 3.0 已暂停提供，请选择 Aliyun 官方供应商', 400, 'MODEL_NOT_SUPPORTED')
       if (isUnsupportedModelLinkH3(input))
         throw new CanvasError('Model Link 的 MiniMax H3 仅支持 MiniMax-H3', 400, 'MODEL_NOT_SUPPORTED')
       const definition = builtinDefinition(input)

@@ -94,6 +94,28 @@ async function chooseGeneration(f: Awaited<ReturnType<typeof fixture>>, model: {
   finally { dispose() }
 }
 describe('Configured generation model choices', () => {
+  it.each(BUILTIN_MODELS.filter((model) => model.protocol === 'kling-video'))('requires the exact Kling provider selected through native questions: $api_base', async (model) => {
+    const f = await fixture()
+    const other = BUILTIN_MODELS.find((item) => item.protocol === 'kling-video' && item.id !== model.id)!
+    await f.service.store.saveModel({ ...model, api_key: 'selected-provider-key' })
+    await f.service.store.saveModel({ ...other, api_key: 'other-provider-key' })
+    const inspect = (await f.call('canvas_inspect', {})).value
+    expect(inspect.models.map((item: any) => [item.id, item.provider])).toEqual(
+      BUILTIN_MODELS.filter((item) => item.protocol === 'kling-video').map((item) => [item.id, providerFor(item)!.id]))
+    await chooseGeneration(f, model)
+    expect(f.coordinator.generationModels.current(f.agent, 'video')).toMatchObject({ modelId: model.id, provider: providerFor(model)!.id })
+    expect(await f.call('canvas_create_node', { operationId: randomUUID(), revision: 0, kind: 'video-generation',
+      title: '错误渠道', prompt: '镜头平移', modelId: other.id })).toMatchObject({ isError: true })
+    const nodeId = randomUUID()
+    expect(await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: 'video-generation',
+      title: 'Kling', prompt: '镜头平移', modelId: model.id })).toMatchObject({ isError: false })
+    expect(f.service.store.state(f.canvasId).graph.nodes[0]).toMatchObject({ modelId: model.id,
+      params: { size: '1080p/16:9', n: 1, seconds: 10, videoMode: 'text' } })
+    const generate = vi.spyOn(f.service, 'generate')
+    expect(await f.call('canvas_generate', { operationId: randomUUID(), revision: 1, nodeId })).toMatchObject({ isError: true })
+    expect(generate).not.toHaveBeenCalled()
+    expect(f.service.store.state(f.canvasId).tasks).toHaveLength(0)
+  })
   it.each([false, true])('filters inspect to configured model/provider pairs, bound=%s', async (bound) => {
     const f = await fixture(bound)
     expect(await f.call('canvas_inspect', {})).toMatchObject({ value: { models: [], modelSelections: { image: null, video: null } } })
@@ -109,8 +131,11 @@ describe('Configured generation model choices', () => {
     const f = await fixture()
     const model = await configureGeneration(f), real = f.service.store.listModels().find((item) => item.id === model.id)!
     const missingEp = { ...real, ...BUILTIN_MODELS.find((item) => item.protocol === 'seedance-video' && providerFor(item)?.id === 'bytedance')!, has_api_key: true }
+    const suspendedWan = BUILTIN_MODELS.filter((item) => item.protocol === 'wan-video').map((model) => ({
+      ...real, ...model, api_base: 'https://api.modellink.online/wan/api/v1', has_api_key: true, configurable: false,
+    }))
     vi.spyOn(f.service.store, 'listModels').mockReturnValue([real, missingEp, { ...real, has_api_key: false },
-      { ...real, model_id: 'legacy-model', configurable: false }, ...MOCK_MODELS.map((model) => ({ ...model, has_api_key: true }))])
+      { ...real, model_id: 'legacy-model', configurable: false }, ...suspendedWan, ...MOCK_MODELS.map((model) => ({ ...model, has_api_key: true }))])
     expect((await f.call('canvas_inspect', {})).value).toMatchObject({ models: [{ modelId: real.id }] })
     expect(f.coordinator.generationModels.models()).toHaveLength(1)
   })
@@ -153,7 +178,7 @@ describe('Configured generation model choices', () => {
   })
   it('requires the exact user-selected provider and media type on create, update and generate, including manually configured nodes', async () => {
     const f = await fixture(), selected = await configureGeneration(f), other = await configureGeneration(f, 'image', 'https://api.openai.com/v1')
-    const video = await configureGeneration(f, 'video', 'https://api.modellink.online/wan/api/v1')
+    const video = await configureGeneration(f, 'video', 'https://maas.qianwenaiapi.com/api/v1')
     const generate = vi.spyOn(f.service, 'generate'), nodeId = randomUUID()
     await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: 'image-generation', title: '规划', prompt: '猫' })
     const update = (modelId: string) => f.call('canvas_update_node', { operationId: randomUUID(), revision: 1, nodeId, patch: { modelId } })
@@ -170,7 +195,7 @@ describe('Configured generation model choices', () => {
     expect(f.service.store.state(f.canvasId).tasks).toHaveLength(0)
   })
   it('can confirm video independently; requesting a replacement asks again and revokes the old choice on decline', async () => {
-    const f = await fixture(), image = await configureGeneration(f), video = await configureGeneration(f, 'video', 'https://api.modellink.online/wan/api/v1')
+    const f = await fixture(), image = await configureGeneration(f), video = await configureGeneration(f, 'video', 'https://maas.qianwenaiapi.com/api/v1')
     await chooseGeneration(f, image); await chooseGeneration(f, video)
     expect(f.coordinator.generationModels.selections(f.agent)).toMatchObject({ image: { modelId: image.id }, video: { modelId: video.id } })
     const ask = vi.fn(async (request: AskUserQuestionRequest) => ({ answers: [{ id: request.questions[0].id, selected: [], custom: '暂时不用' }] }))
@@ -289,7 +314,7 @@ describe('Configured generation model choices', () => {
 })
 describe('Manual image and video generation handoff', () => {
   async function ready(kind: 'image' | 'video' = 'image') {
-    const f = await fixture(), model = await configureGeneration(f, kind, kind === 'video' ? 'https://api.modellink.online/wan/api/v1' : 'https://api.modellink.online/v1'), nodeId = randomUUID()
+    const f = await fixture(), model = await configureGeneration(f, kind, kind === 'video' ? 'https://maas.qianwenaiapi.com/api/v1' : 'https://api.modellink.online/v1'), nodeId = randomUUID()
     await chooseGeneration(f, model)
     expect(await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: `${kind}-generation`, title: '待检查节点', prompt: '一只猫', modelId: model.id })).toMatchObject({ isError: false })
     return { ...f, model, nodeId }

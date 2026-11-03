@@ -168,6 +168,11 @@ if (process.argv[2] === 'record') {
     assert.equal(imageModels.status, 200)
     const catalog = (await imageModels.json()).models
     assert.equal(catalog.length, 39)
+    const kling = catalog.filter((model) => model.protocol === 'kling-video')
+    assert.equal(kling.length, 2)
+    assert.deepEqual(kling.map((model) => model.api_base), ['https://api.modellink.online', 'https://api-beijing.klingai.com'])
+    assert(kling.every((model) => model.capabilities.videoModes.length === 2 && !model.capabilities.supportsAudioToggle
+      && model.capabilities.maxReferences === 15 && model.capabilities.secondsRange.max === 30))
     assert(catalog.every((model) => model.configurable && !model.has_api_key))
     const gptCatalog = catalog.filter((model) => model.protocol === 'openai-image')
     assert.equal(gptCatalog.length, 4)
@@ -238,9 +243,9 @@ if (process.argv[2] === 'record') {
       assert.equal(actual.endpoint_id, official ? 'ep-offline-video' : undefined)
     }
     const wanCatalog = catalog.filter((model) => model.protocol === 'wan-video')
-    assert.equal(wanCatalog.length, 4)
+    assert.equal(wanCatalog.length, 2)
     for (const model of wanCatalog) {
-      assert(['https://api.modellink.online/wan/api/v1', 'https://maas.qianwenaiapi.com/api/v1'].includes(model.api_base))
+      assert.equal(model.api_base, 'https://maas.qianwenaiapi.com/api/v1')
       assert.deepEqual(model.capabilities.secondsRange, { min: 2, max: 30, step: 1 })
       assert.equal(model.capabilities.sizePresets.length, 21)
       assert.deepEqual(model.capabilities.referenceKinds, ['image', 'video', 'audio'])
@@ -252,6 +257,10 @@ if (process.argv[2] === 'record') {
       const configured = (await saved.json()).models.find((item) => item.id === model.id)
       assert.equal(configured.model_id, model.model_id); assert.equal(configured.has_api_key, true)
       assert.equal(configured.endpoint_id, undefined)
+      const rejected = await routes.get('/api/canvas/v2/models').fetch(new Request('http://localhost/api/canvas/v2/models', {
+        method: 'POST', body: JSON.stringify({ ...record, api_base: 'https://api.modellink.online/wan/api/v1', api_key: 'offline-disabled-key' }),
+      }))
+      assert.equal(rejected.status, 400); assert.equal((await rejected.json()).code, 'MODEL_NOT_SUPPORTED')
     }
     const h3Catalog = catalog.filter((model) => model.protocol === 'minimax-video')
     assert.equal(h3Catalog.length, 5)
