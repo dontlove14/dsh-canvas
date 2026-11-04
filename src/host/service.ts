@@ -270,7 +270,9 @@ export class CanvasService {
         const agent = this.agentControl
         if (!agent) throw new CanvasError('当前环境未启用画布 Agent', 503, 'AGENT_UNAVAILABLE')
         if (suffix === 'agent-reference-choices' && request.method === 'GET') return json(await agent.chatReferences.choices(
-          z.string().min(1).max(200).parse(url.searchParams.get('sessionId')), z.string().max(1000).parse(url.searchParams.get('query') ?? ''), request.signal))
+          z.string().min(1).max(200).parse(url.searchParams.get('sessionId')), z.string().max(1000).parse(url.searchParams.get('query') ?? ''), request.signal,
+          { ...(url.searchParams.has('browse') ? z.record(z.string(), z.unknown()).parse(JSON.parse(z.string().max(1000).parse(url.searchParams.get('browse')))) : {}),
+            ...(url.searchParams.has('view') ? { view: url.searchParams.get('view') } : {}) }))
         if (suffix === 'agent-reference-resolve' && request.method === 'POST') {
           const input = z.object({ sessionId: z.string().min(1).max(200), ref: z.unknown() }).strict().parse(await request.json())
           return json({ text: await agent.chatReferences.serialize(input.sessionId, input.ref, request.signal) })

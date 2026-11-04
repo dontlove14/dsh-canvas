@@ -3,13 +3,14 @@ import { webcrypto } from 'node:crypto'
 import { act, type ComponentType } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { nativeInputTrigger } from './support/nativeInputTrigger'
 import { apply, inject } from '../src/client/index'
 import { CanvasApi } from '../src/client/api'
 import { useCanvas } from '../src/client/useCanvas'
 import { CanvasApp } from '../src/client/Canvas'
+import { CanvasPresentationClient } from '../src/client/presentation'
 import { emptyGraph, type CanvasNode } from '../src/shared/contracts'
 import type { CanvasSnapshot, GraphMutation } from '../src/shared/v2'
 import type { SidebarRightTabDefinition } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -98,14 +99,8 @@ describe('Harness conversation sidebar canvas', () => {
     } finally { await plugin.dispose() }
     expect(stop).toHaveBeenCalledTimes(1)
   })
-  it('waits for the file RPC namespace and loads # workspace candidates inside a real injected client scope', async () => {
+  it('loads # canvas candidates without remote file services inside a real injected client scope', async () => {
     const ctx = new Context()
-    // Cordis traces this.ctx into the caller's plugin scope, including nested services.
-    class RemoteNamespaces extends Service {
-      constructor(ctx: Context) { super(ctx, 'remote') }
-      get fileReferences() { return this.ctx.get('remote.fileReferences') }
-    }
-    new RemoteNamespaces(ctx)
     ctx.reflect.provide('slots', { entries: () => [], inject: () => () => {}, register: () => () => {} })
     ctx.reflect.provide('layout', {})
     ctx.reflect.provide('sidebarRightTabs', { register: () => () => {} })
@@ -122,15 +117,16 @@ describe('Harness conversation sidebar canvas', () => {
     const using = vi.fn(async (_id, _options, operation) => operation())
     ctx.reflect.provide('inputTriggers', triggers)
     ctx.reflect.provide('sessions', { sessionOf: () => session, binding: () => binding, using })
-    const choices = vi.spyOn(CanvasApi.prototype, 'referenceChoices').mockResolvedValue({ preset: true, cwd: '/workspace', media: [] })
+    const ref = { version: 1 as const, kind: 'media' as const, sessionId: 'test', canvasId: crypto.randomUUID(), nodeId: crypto.randomUUID(), assetId: crypto.randomUUID(), label: '产品图' }
+    const choices = vi.spyOn(CanvasApi.prototype, 'referenceChoices').mockResolvedValue({ preset: true, media: [
+      { label: ref.label, kind: 'image', description: '当前', section: '画布 · 项目', ref },
+    ] })
     const list = vi.fn(async () => ({ ok: true, value: [{ path: '反馈.md', kind: 'file' }] }))
     const plugin = ctx.plugin({ inject, apply })
     try {
       await plugin.await()
-      expect(triggers.sessionOf()).toBe(original)
+      expect(triggers.sessionOf()).not.toBe(original)
       expect(choices).not.toHaveBeenCalled()
-      ctx.reflect.provide('remote.fileReferences', { list })
-      await vi.waitFor(() => expect(triggers.sessionOf()).not.toBe(original))
       const controller = triggers.sessionOf()
       controller.track('#', 1, { tier: 'plain' }, 1)
       expect(controller.menu.getSnapshot().open).toBe(false)
@@ -138,16 +134,19 @@ describe('Harness conversation sidebar canvas', () => {
       preset.set('standard')
       expect(choices).not.toHaveBeenCalled()
       preset.set('canvas-creator')
-      await vi.waitFor(() => expect(controller.menu.getSnapshot().groups[0]?.items[0]?.name).toBe('反馈.md'))
+      await vi.waitFor(() => expect(controller.menu.getSnapshot().groups[0]?.items[0]?.name).toBe('产品图'))
       expect(faceOf).toHaveBeenCalledWith('agentPreset')
-      expect(list).toHaveBeenCalledWith('test', '', expect.any(AbortSignal))
-      expect(using).toHaveBeenCalledWith('test', { source: 'referenceCandidates', signal: expect.any(AbortSignal) }, expect.any(Function))
-      expect(controller.menu.getSnapshot().groups[0].items[0].section).toBe('工作区')
+      expect(using).not.toHaveBeenCalled()
+      ctx.reflect.provide('remote.fileReferences', { list })
+      controller.refreshOpenMenu()
+      await vi.waitFor(() => expect(choices).toHaveBeenCalledTimes(2))
+      expect(controller.menu.getSnapshot().groups[0].items[0].section).toBe('画布 · 项目')
+      expect(list).not.toHaveBeenCalled()
       preset.set('standard')
       expect(controller.menu.getSnapshot().open).toBe(false)
       controller.track('#', 1, { tier: 'plain' }, 2)
-      expect(choices).toHaveBeenCalledTimes(1)
-      expect(list).toHaveBeenCalledTimes(1)
+      expect(choices).toHaveBeenCalledTimes(2)
+      expect(list).not.toHaveBeenCalled()
     } finally {
       await plugin.dispose()
       original.dispose()
@@ -155,7 +154,7 @@ describe('Harness conversation sidebar canvas', () => {
     expect(triggers.sessionOf()).toBe(original)
     expect(unsubscribe).toHaveBeenCalledTimes(1)
     preset.set('canvas-creator')
-    expect(choices).toHaveBeenCalledTimes(1)
+    expect(choices).toHaveBeenCalledTimes(2)
   })
   it('retries a late catalog, re-enters on native revision, and respects a manual return across visibility changes', async () => {
     vi.useFakeTimers()
@@ -165,14 +164,17 @@ describe('Harness conversation sidebar canvas', () => {
     vi.spyOn(api, 'catalog').mockImplementation(async () => ({ folders: [], canvases: ready
       ? [{ id: 'w', name: 'Agent目标', folderId: null, revision: 1, hash: '', moving: false }] : [] }))
     vi.spyOn(api, 'state').mockResolvedValue(snapshot())
-    const { root, container } = render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={1} />)
+    const presentation = new CanvasPresentationClient()
+    const { root, container } = render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={1} presentation={presentation} />)
     await act(async () => { await Promise.resolve() })
     expect(container.querySelector('.dc-workspace-title')).toBeNull()
     ready = true
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(container.querySelector('.dc-workspace-title')?.textContent).toContain('Agent目标')
+    expect(presentation.currentCanvas('test')).toBe('w')
     await act(async () => { container.querySelector<HTMLButtonElement>('.dc-ui-back')!.click() })
     expect(container.querySelector('.dc-workspace-title')).toBeNull()
+    expect(presentation.currentCanvas('test')).toBeNull()
     act(() => root.render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={1} active={false} />))
     act(() => root.render(<CanvasApp api={api} requestedCanvas="w" navigationRevision={1} active />))
     await act(async () => { await vi.advanceTimersByTimeAsync(1000) })

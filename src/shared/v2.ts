@@ -31,7 +31,7 @@ export interface CanvasSnapshot extends Omit<WorkspaceState, 'tasks'> {
   hashes: { nodes: Record<string, string>; edges: Record<string, string>; viewport: string }
 }
 export interface Folder { id: string; name: string; revision: number; hash: string }
-export interface CanvasChoice { id: string; name: string; folderId: string | null; revision: number; hash: string; moving: boolean; moveError?: string }
+export interface CanvasChoice { id: string; name: string; folderId: string | null; revision: number; hash: string; moving: boolean; moveError?: string; updatedAt?: number }
 export interface Catalog { folders: Folder[]; canvases: CanvasChoice[] }
 export const TaskSearchQuerySchema = z.object({
   taskId: z.string().uuid().transform((value) => value.toLowerCase()).optional(),

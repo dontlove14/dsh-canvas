@@ -27,6 +27,7 @@ export class CanvasPresentationClient {
   private running = false
   private listeners = new Set<() => void>()
   private seats = new Map<string, CanvasViewSeat>()
+  private viewListeners = new Set<() => void>()
   private paused = new Set<string>()
   private automatic = new Set<string>()
   private seen = new Set<string>()
@@ -67,6 +68,16 @@ export class CanvasPresentationClient {
     await this.restoreManual(true, signal)
     signal?.throwIfAborted()
     this.resume()
+  }
+  /** A reference can name a hidden canvas; flush its existing draft without navigating or delegating. */
+  async prepareReference(canvasId: string, signal: AbortSignal) {
+    signal.throwIfAborted()
+    for (const [id, seat] of this.seats) if (seat.canvasId === canvasId) {
+      if (!seat.loaded) throw new Error('引用画布尚未载入，请稍后重试')
+      await seat.prepare()
+      signal.throwIfAborted()
+      if (this.disposed || this.seats.get(id)?.canvasId !== canvasId) throw new Error('画布已切换，请重新选择引用')
+    }
   }
   failedMessage() { this.pendingReply = false; this.stopAdmission(); this.changed() }
   private restoreManual(force = false, signal?: AbortSignal): Promise<void> {
@@ -194,7 +205,19 @@ export class CanvasPresentationClient {
     try { sessionStorage.removeItem(`dc-follow:${this.key(this.intent)}`) } catch {}
     this.intent = { ...this.intent }; this.lastAttempt = 0; this.notify()
   } }
-  seat(id: string, seat: CanvasViewSeat) { this.seats.set(id, seat); return () => { if (this.seats.get(id) === seat) this.seats.delete(id) } }
+  readonly subscribeViews = (listener: () => void) => { this.viewListeners.add(listener); return () => { this.viewListeners.delete(listener) } }
+  currentCanvas(sessionId: string): string | null {
+    const visible = [...this.seats.values()].filter((seat) => seat.visible)
+    const seat = visible.find((seat) => seat.sessionId === sessionId) ?? visible.find((seat) => !seat.sessionId)
+    return seat?.canvasId ?? null
+  }
+  private viewsChanged() { for (const listener of this.viewListeners) listener() }
+  seat(id: string, seat: CanvasViewSeat) {
+    const previous = this.seats.get(id)
+    this.seats.set(id, seat)
+    if (previous?.canvasId !== seat.canvasId || previous?.sessionId !== seat.sessionId || previous?.visible !== seat.visible) this.viewsChanged()
+    return () => { if (this.seats.get(id) === seat) { this.seats.delete(id); this.viewsChanged() } }
+  }
   async prepare(id: string) { await this.seats.get(id)?.prepare() }
   async navigate(sessionId: string, open: (canvasId: string) => void, now = Date.now(), current = () => true) {
     const intent = this.intent
@@ -214,7 +237,7 @@ export class CanvasPresentationClient {
       else open(intent.canvasId)
     } catch { /* Slow mount or an unsaved draft remains pending; never mark it opened. */ }
   }
-  clear() { this.disposed = true; this.activityVersion++; this.stopIdle(); this.stopAdmission(); this.interactions.clear(); this.manualSeats.clear(); this.conversation = null; this.pendingReply = false; this.intent = null; this.running = false; this.notify(); this.listeners.clear(); this.seats.clear() }
+  clear() { this.disposed = true; this.activityVersion++; this.stopIdle(); this.stopAdmission(); this.interactions.clear(); this.manualSeats.clear(); this.conversation = null; this.pendingReply = false; this.intent = null; this.running = false; this.notify(); this.listeners.clear(); this.seats.clear(); this.viewsChanged() }
 }
 
 export function installCanvasPresentation(api: CanvasApi, client: CanvasPresentationClient, window: {

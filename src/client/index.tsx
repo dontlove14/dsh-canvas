@@ -22,9 +22,9 @@ import { openCanvasTab } from './nativeCanvasNavigation'
 import { installCanvasPlanPreview } from './canvasPlanPreview'
 import { installAgentProgress } from './agentProgress'
 import { installChatReferenceTrigger } from './chatReferenceTrigger'
+import { installChatReferencePlaceholder } from './chatReferencePlaceholder'
 import { chatReferenceTextRule, ChatReferenceText } from './chatReferenceText'
 import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
-import type {} from '@deepseek-ai/dsh-client-ui-reference/client'
 import { useRef, useState, useEffect } from 'react'
 
 declare module '@deepseek-ai/dsh-client-ui-sidebar-right/client' {
@@ -74,15 +74,13 @@ const sidebarTab: SidebarRightTabDefinition = {
 
 export function apply(ctx: Context): void {
   installAgentProgress(ctx)
+  ctx.effect(() => installChatReferencePlaceholder({
+    entries: (key) => ctx.slots.entries(key as Parameters<typeof ctx.slots.entries>[0]),
+    onMutate: (listener) => ctx.on('slots/changed', listener),
+  }))
   const face: Face = { api: new CanvasApi(), presentation: new CanvasPresentationClient() }
-  ctx.inject(['inputTriggers', 'sessions', 'remote', 'remote.fileReferences'], (scope) => {
-    scope.effect(() => installChatReferenceTrigger(scope, face.api, {
-      list: (id, query, signal) => scope.sessions.using(id as Parameters<typeof scope.sessions.using>[0], { source: 'referenceCandidates', signal }, async () => {
-        const result = await scope.remote.fileReferences.list(id as Parameters<typeof scope.remote.fileReferences.list>[0], query, signal)
-        if (!result.ok) throw new Error('工作区文件暂不可用')
-        return result.value
-      }),
-    }))
+  ctx.inject(['inputTriggers', 'sessions'], (scope) => {
+    scope.effect(() => installChatReferenceTrigger(scope, face.api, face.presentation))
   })
   ctx.inject(['uiConversation'], (scope) => {
     scope.effect(() => scope.uiConversation.userText.register(chatReferenceTextRule))

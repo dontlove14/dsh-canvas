@@ -11,7 +11,7 @@ import { isMultimodalVideo } from '../shared/modelCatalog'
 import { videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
 import type { CanvasControl, AgentSessionState } from '../shared/agent'
 import type { PresentationState, PresentationAck, ViewReport } from '../shared/presentation'
-import type { ChatReference, ChatReferenceChoices } from '../shared/chatReferences'
+import type { ChatReference, ChatReferenceChoices, ChatReferenceBrowse } from '../shared/chatReferences'
 export { ApiError } from './resumableUploads'
 
 export class CanvasApi {
@@ -62,8 +62,9 @@ export class CanvasApi {
   }
   state(canvas: string): Promise<CanvasSnapshot> { return this.request('graph', { canvas }) }
   agentSession(sessionId: string): Promise<AgentSessionState> { return this.request('agent-session', { sessionId }) }
-  referenceChoices(sessionId: string, query: string, signal: AbortSignal): Promise<ChatReferenceChoices> {
-    return this.request('agent-reference-choices', { sessionId, query }, { signal, cache: 'no-store' })
+  referenceChoices(sessionId: string, query: string, signal: AbortSignal, browse?: ChatReferenceBrowse): Promise<ChatReferenceChoices> {
+    return this.request('agent-reference-choices', { sessionId, query, ...(browse?.view ? { view: browse.view } : {}),
+      ...(browse ? { browse: JSON.stringify(browse) } : {}) }, { signal, cache: 'no-store' })
   }
   resolveReference(sessionId: string, ref: ChatReference, signal: AbortSignal): Promise<{ text: string }> {
     return this.request('agent-reference-resolve', {}, { ...this.json({ sessionId, ref }), signal })

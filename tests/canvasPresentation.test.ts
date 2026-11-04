@@ -7,6 +7,38 @@ afterEach(() => { sessionStorage.clear(); vi.useRealTimers(); vi.restoreAllMocks
 const intent = (id = 'one', fields = {}): PresentationIntent => ({ id, sessionId: 'session', canvasId: 'canvas', epoch: 1,
   action: 'create', graphRevision: 1, nodeIds: ['node'], createdAt: id === 'one' ? 1 : 2, ...fields })
 describe('Independent canvas window coordinator', () => {
+  it('flushes a referenced hidden or global canvas draft without navigation or delegation and checks cancellation', async () => {
+    const client = new CanvasPresentationClient(), prepare = vi.fn(async () => {}), other = vi.fn(async () => {}), navigate = vi.fn()
+    client.seat('hidden', { canvasId: 'referenced', sessionId: 'session', visible: false, loaded: true, prepare, navigate })
+    client.seat('global', { canvasId: 'other', visible: true, loaded: true, prepare: other, navigate })
+    await client.prepareReference('referenced', new AbortController().signal)
+    expect(prepare).toHaveBeenCalledTimes(1); expect(other).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
+    expect(client.currentCanvas('session')).toBe('other')
+    prepare.mockRejectedValueOnce(new Error('保存冲突'))
+    await expect(client.prepareReference('referenced', new AbortController().signal)).rejects.toThrow('保存冲突')
+    const abort = new AbortController()
+    prepare.mockImplementationOnce(async () => { abort.abort() })
+    await expect(client.prepareReference('referenced', abort.signal)).rejects.toThrow()
+  })
+  it('reports the actual visible editor, releases closed seats and ignores streaming intent/hidden sessions', () => {
+    const client = new CanvasPresentationClient(), listener = vi.fn(), prepare = async () => {}
+    client.subscribeViews(listener)
+    const global = client.seat('main', { canvasId: 'main-canvas', visible: true, loaded: true, prepare })
+    const hidden = client.seat('hidden', { sessionId: 'session', canvasId: 'old', visible: false, loaded: true, prepare })
+    expect(client.currentCanvas('session')).toBe('main-canvas')
+    const current = client.seat('right', { sessionId: 'session', canvasId: 'new', visible: true, loaded: false, prepare })
+    expect(client.currentCanvas('session')).toBe('new')
+    const count = listener.mock.calls.length
+    client.receive({ intent: intent() })
+    client.seat('right', { sessionId: 'session', canvasId: 'new', visible: true, loaded: true, prepare })
+    expect(listener).toHaveBeenCalledTimes(count)
+    current() // Cleanup of an older registration must not erase the current seat.
+    expect(client.currentCanvas('session')).toBe('new')
+    const list = client.seat('right', { sessionId: 'session', visible: true, loaded: false, prepare })
+    expect(client.currentCanvas('session')).toBeNull()
+    list(); expect(client.currentCanvas('session')).toBe('main-canvas')
+    hidden(); global(); expect(client.currentCanvas('session')).toBeNull()
+  })
   it('delivers native running/idle changes for the same intent and keeps highlight activity separate from paused follow', () => {
     const client = new CanvasPresentationClient(), listener = vi.fn()
     client.subscribe(listener)

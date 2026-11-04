@@ -13,7 +13,7 @@ import { MessageId } from '@deepseek-ai/dsh-llm'
 import { z } from 'zod'
 import { CreativeDraftSchema, SpecialistRoleSchema, StepNote, DocumentSchema, GENERATION_HANDOFF_REMINDER, isGenerationHandoff, type CanvasControl } from '../../shared/agent'
 import { AutoPlacementSchema, type PresentationIntent } from '../../shared/presentation'
-import { CanvasNodeSchema, IdSchema, defaultParams } from '../../shared/contracts'
+import { CanvasNodeSchema, IdSchema, defaultParams, type Asset } from '../../shared/contracts'
 import { nodeFor } from '../../shared/nodeFactory'
 import { connectAssetReference } from '../../shared/referenceConnection'
 import { hash } from '../persistence/database'
@@ -27,6 +27,8 @@ import { AgentWorkspace, type WorkspaceFile } from './workspace'
 import { createAgentCanvas } from './catalog'
 import { safeName, extension } from '../media/files'
 import { choiceFor } from './modelSelection'
+import { ReferenceCatalog } from '../../shared/referenceCatalog'
+import { WorkspaceIdSchema } from '../../shared/contracts'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap { 'canvas-agent': { kind: 'canvas-agent' } }
@@ -35,7 +37,8 @@ export const name = 'dsh-canvas-agent-preset'
 export const inject = ['canvasAgent', 'tools', 'systemPrompt', 'agents', 'llm', 'subagents', 'attachments', 'userQuestions', 'workingDirectory']
 export const Config = z.object({ role: z.union([z.literal('main'), SpecialistRoleSchema]).default('main') })
 const Empty = z.object({}).strict()
-const Operation = { operationId: IdSchema, revision: z.number().int().nonnegative(), ...StepNote }
+const Operation = { operationId: IdSchema, revision: z.number().int().nonnegative(),
+  canvasId: WorkspaceIdSchema.optional(), referenceId: z.string().regex(/^[a-f0-9]{64}$/).optional(), ...StepNote }
 const uuid = (input: unknown) => {
   const h = hash(input).slice(0, 32)
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20)}`
@@ -111,10 +114,30 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
     })
   }
   const read = (agent: Agent) => { const c = coordinator.attached(agent); coordinator.assert(agent, c, false); return c }
-  const write = async (exec: BoundExec, args: { operationId: string; nodeId?: string; target?: string }, run: (control: ReturnType<typeof read>) => Promise<unknown>, action?: PresentationIntent['action']) => {
+  const referenceTarget = (exec: BoundExec, c: CanvasControl, args: { canvasId?: string; referenceId?: string }, targets: string[]) => {
+    if (args.canvasId && args.canvasId !== c.canvasId) throw new CanvasError('引用目标不在当前受控画布，请先完成画布委托', 409, 'AGENT_SESSION_BUSY')
+    const refs = submittedReferences(exec.agent)
+    if (args.referenceId) {
+      const entry = refs.find((entry) => entry.referenceId === args.referenceId)
+      if (!entry || entry.ref.kind !== 'node' || !targets.includes(entry.ref.nodeId))
+        throw new CanvasError('操作目标与已提交节点引用不一致', 403, 'REFERENCE_FORBIDDEN')
+      if (entry.ref.canvasId !== c.canvasId) throw new CanvasError('请先委托引用所在画布，再修改该节点', 409, 'AGENT_SESSION_BUSY')
+    }
+    for (const id of targets) {
+      const matching = refs.filter((entry) => entry.ref.kind === 'node' && entry.ref.nodeId === id)
+      if (matching.length && !matching.some((entry) => entry.ref.kind === 'node' && entry.ref.canvasId === c.canvasId))
+        throw new CanvasError('节点引用属于其他画布，请先完成委托', 409, 'AGENT_SESSION_BUSY')
+      if (!args.referenceId && matching.some((entry) => entry.ref.kind === 'node' && entry.ref.canvasId !== c.canvasId) &&
+        matching.some((entry) => entry.ref.kind === 'node' && entry.ref.canvasId === c.canvasId))
+        throw new CanvasError('同名身份在多个画布出现，请提供目标 referenceId', 403, 'REFERENCE_FORBIDDEN')
+    }
+  }
+  const write = async (exec: BoundExec, args: { operationId: string; nodeId?: string; target?: string; source?: string; canvasId?: string; referenceId?: string }, run: (control: ReturnType<typeof read>) => Promise<unknown>, action?: PresentationIntent['action']) => {
     const c = read(exec.agent)
+    referenceTarget(exec, c, args, [args.nodeId, args.target, args.source].filter((id): id is string => !!id))
     const value = await coordinator.serial(async () => {
       exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c)
+      referenceTarget(exec, c, args, [args.nodeId, args.target, args.source].filter((id): id is string => !!id))
       const key = `${c.canvasId}:${args.operationId}`, receipt = coordinator.ledger.receipt(key, args)
       if (receipt) { await checkFileReceipt(exec, receipt.value); return receipt.value }
       coordinator.ledger.reserveReceipts([key, `${key}:input`])
@@ -205,23 +228,31 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
       ...modelContext, tts: service.store.ttsSettings(), drafts: coordinator.ledger.drafts(c.canvasId).slice(-30), userMedia, userReferences, ...(cwd ? { workspace: cwd } : {}) }
   })
   tool('canvas_method', '按需读取专业制作方法；不向全局安装任何技能。', z.object({ role: SpecialistRoleSchema }).strict(), async ({ role }) => ({ method: METHODS[role] }))
-  const viewImage = async (assetId: string, exec: BoundExec) => {
-    const c = read(exec.agent), asset = service.store.state(c.canvasId).assets.find((a) => a.id === assetId)
+  const admitImage = async (canvasId: string, asset: Asset | undefined, exec: BoundExec, valid: () => Promise<void>, present?: () => Promise<unknown>) => {
     if (!asset || asset.kind !== 'image' || !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime)) throw new CanvasError('请选择 PNG、JPEG 或 WebP 图片')
-    const locator = await service.store.locator(c.canvasId, assetId)
+    exec.signal.throwIfAborted()
+    await valid()
+    const locator = await service.store.locator(canvasId, asset.id)
     if (locator.bytes > service.config.maxReferenceBytes) throw new CanvasError('图片超过理解输入大小限制', 413)
-    if (role === 'main' && asset.nodeId) await coordinator.presentation.publish(c, `view:${crypto.randomUUID()}`, 'open',
-      service.store.state(c.canvasId).graphRevision, [asset.nodeId])
+    await present?.()
     const stream = await (await service.store.objects.adapter(locator.providerId, locator.credentialRef)).openRead(locator)
     const abort = () => stream.destroy(new Error('图片读取已取消'))
     exec.signal.addEventListener('abort', abort, { once: true })
     const chunks: Buffer[] = []; let bytes = 0
     try { for await (const chunk of stream) { exec.signal.throwIfAborted(); bytes += chunk.length; if (bytes > service.config.maxReferenceBytes) throw new CanvasError('图片过大', 413); chunks.push(Buffer.from(chunk)) } }
     finally { exec.signal.removeEventListener('abort', abort); stream.destroy() }
+    await valid(); exec.signal.throwIfAborted()
     const attachment = await ctx.attachments.saveImage({ data: Buffer.concat(chunks), mediaType: asset.mime as 'image/png', name: asset.filename })
-    coordinator.assert(exec.agent, c, false); exec.signal.throwIfAborted()
-    exec.deferContext({ id: MessageId(crypto.randomUUID()), role: 'user', source, content: [{ type: 'text', text: `画布图片 assetId=${assetId}` }, { type: 'image', attachment }] })
-    return { assetId, admitted: true }
+    await valid(); exec.signal.throwIfAborted()
+    exec.deferContext({ id: MessageId(crypto.randomUUID()), role: 'user', source, content: [{ type: 'text', text: `画布图片 canvasId=${canvasId} assetId=${asset.id}` }, { type: 'image', attachment }] })
+    return { assetId: asset.id, admitted: true }
+  }
+  const viewImage = async (assetId: string, exec: BoundExec) => {
+    const c = read(exec.agent), asset = service.store.state(c.canvasId).assets.find((a) => a.id === assetId)
+    return admitImage(c.canvasId, asset, exec, async () => { coordinator.assert(exec.agent, c, false) }, async () => {
+      if (role === 'main' && asset?.nodeId) await coordinator.presentation.publish(c, `view:${crypto.randomUUID()}`, 'open',
+        service.store.state(c.canvasId).graphRevision, [asset.nodeId])
+    })
   }
   tool('canvas_view_image', '把当前画布的真实图片作为原生多模态附件提供给下一次模型请求；视频与音频不可用此工具理解。', z.object({ assetId: IdSchema }).strict(), async ({ assetId }, exec) => viewImage(assetId, exec))
   tool('canvas_task', '查询原有持久任务的当前状态和结果；不会重新提交生成请求。', z.object({ taskId: IdSchema }).strict(), async ({ taskId }, exec) => {
@@ -262,24 +293,59 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
         return { approved: false, answers: result.answers }
       return { approved: true, selection: coordinator.generationModels.confirm(exec.agent, kind, token, models[index]), reused: false }
     })
-    tool('canvas_read_reference', '读取用户通过 # 实际提交的素材或工作区文件；图片进入真实多模态上下文，文本有大小限制，视频/音频仅返回元数据与反馈。', z.object({ referenceId: z.string().regex(/^[a-f0-9]{64}$/) }).strict(), async ({ referenceId }, exec) => {
+    tool('canvas_read_reference', '读取本会话已提交的 # 节点、精确素材或旧文件引用。节点返回当前配置、修订、直接上下游与输出摘要；节点下可用 assetId 按需读取自身或直接输入素材。图片进入真实多模态上下文，视频/音频仅元数据，不获得写权限。', z.object({
+      referenceId: z.string().regex(/^[a-f0-9]{64}$/), assetId: IdSchema.optional(),
+    }).strict(), async ({ referenceId, assetId }, exec) => {
       const entry = submittedReferences(exec.agent).find((entry) => entry.referenceId === referenceId)
       if (!entry) throw new CanvasError('请从本会话 canvas_inspect 的 userReferences 选择', 403, 'REFERENCE_FORBIDDEN')
       const c = coordinator.session(exec.agent.id).canvas
-      if (c) coordinator.assert(exec.agent, c, false)
+      const valid = () => {
+        exec.signal.throwIfAborted(); coordinator.member(exec.agent)
+        if (c) coordinator.assert(exec.agent, c, false)
+        else if (coordinator.session(exec.agent.id).canvas) throw new CanvasError('读取期间会话画布已变化，请重试', 409, 'REFERENCE_STALE')
+      }
+      valid()
       const ref = await coordinator.chatReferences.resolve(exec.agent.id, entry.ref, exec.signal)
+      valid()
+      if (assetId && ref.kind !== 'node') throw new CanvasError('素材或文件引用不能用 assetId 切换对象', 403, 'REFERENCE_FORBIDDEN')
+      if (ref.kind === 'node') {
+        const snapshot = await service.store.snapshot(ref.canvasId), index = new ReferenceCatalog(snapshot), node = index.nodes.get(ref.nodeId)
+        if (!node) throw new CanvasError('节点已移除，请重新选择', 409, 'REFERENCE_STALE')
+        valid()
+        if (!assetId) return { referenceId, ref, ...index.context(node),
+          model: service.store.listModels().find((model) => model.id === node.modelId) ?? null,
+          hint: '节点引用明确对象，动作以用户文字为准。直接上下游是理解范围；修改前核对 canvasId、nodeId 和 graphRevision。' }
+        const asset = index.related(node, assetId)
+        if (!asset) throw new CanvasError('素材不属于该节点或当前直接上游', 403, 'REFERENCE_FORBIDDEN')
+        const relatedValid = async () => {
+          valid()
+          await coordinator.chatReferences.resolve(exec.agent.id, ref, exec.signal)
+          const current = new ReferenceCatalog(await service.store.snapshot(ref.canvasId)), target = current.nodes.get(ref.nodeId)
+          if (!target || current.snapshot.graphRevision !== snapshot.graphRevision || hash(current.related(target, assetId)) !== hash(asset))
+            throw new CanvasError('节点或输入关系已变化，请重新读取引用', 409, 'REFERENCE_STALE')
+          valid()
+        }
+        await relatedValid()
+        if (asset.kind === 'image') return { referenceId, ref, graphRevision: snapshot.graphRevision,
+          ...await admitImage(ref.canvasId, asset, exec, relatedValid) }
+        await service.store.locator(ref.canvasId, asset.id); await relatedValid()
+        return { referenceId, ref, asset, graphRevision: snapshot.graphRevision, understood: false,
+          hint: '仅这份原素材的元数据；视频与音频内容请结合用户反馈，不声称已观看或聆听。' }
+      }
       if (ref.kind === 'media') {
         const asset = service.store.state(ref.canvasId).assets.find((item) => item.id === ref.assetId)!
-        if (asset.kind === 'image') return { referenceId, ref, ...await viewImage(asset.id, exec) }
+        if (asset.kind === 'image') return { referenceId, ref, ...await admitImage(ref.canvasId, asset, exec, async () => {
+          await coordinator.chatReferences.resolve(exec.agent.id, ref, exec.signal); valid()
+        }) }
         return { referenceId, ref, asset, understood: false, hint: '已定位这份原素材；视频与音频内容请结合用户反馈，不声称已观看或聆听。' }
       }
       const file = await coordinator.chatReferences.file(exec.agent, ref, exec.signal, true)
-      if (c) coordinator.assert(exec.agent, c, false)
+      valid()
       const media = file.data && detectMedia(file.data.subarray(0, 512))
       if (file.data && media?.kind === 'image' && ['image/png', 'image/jpeg', 'image/webp'].includes(media.mime)) {
         const attachment = await ctx.attachments.saveImage({ data: file.data, mediaType: media.mime as 'image/png', name: ref.label })
         await coordinator.chatReferences.file(exec.agent, ref, exec.signal, false)
-        if (c) coordinator.assert(exec.agent, c, false)
+        valid()
         exec.signal.throwIfAborted()
         exec.deferContext({ id: MessageId(crypto.randomUUID()), role: 'user', source, content: [
           { type: 'text', text: `用户 # 工作区图片：${ref.label}` }, { type: 'image', attachment },
@@ -436,6 +502,7 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
       ...Operation, nodeIds: z.array(IdSchema).min(1).max(100),
     }).strict(), async (args, exec) => {
       const c = coordinator.attached(exec.agent), key = `${c.canvasId}:generation-handoff:${args.operationId}`
+      referenceTarget(exec, c, args, args.nodeIds)
       const prepared = await coordinator.serial(async () => {
         exec.signal.throwIfAborted()
         const receipt = coordinator.ledger.receipt(key, args)

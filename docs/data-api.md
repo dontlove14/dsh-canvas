@@ -12,6 +12,14 @@
 
 ## Agent 控制与工具
 
+0.2.112节点 / 素材统一目录为同包客户端的加法契约。`GET agent-reference-choices?sessionId=实际根会话&view=node-media&query=镜头`显式启用；browse保留currentCanvasId / folderId / browseCanvasId，增加nodeId、taskId与cursor。nodeId需要browseCanvasId，taskId需要nodeId，节点 / 分页需要node-media视图；query及JSON browse各最多1000字符，cursor最多500，ID仍为真实UUID。成功增加items（node / media / directory）、graphRevision、nextCursor及truncated，media保留兼容投影；旧请求继续原media目录，不返回工作区候选。节点行用version2 kind=node，素材和旧文件仍version1；Host / 客户端同包升级，未知版本不可转成名称猜测。
+
+每页最多200行，节点及直接当前素材不在边界拆开；完整folders不截断。Host签名游标绑定session、query、browse、画布、修订和行身份，不能跨会话 / 搜索复用，重启或图变化409 REFERENCE_STALE，客户端保留关键词重查。读路径无图写入或任务提交，可安全重试；strict错误400 INVALID_REQUEST，不污染其他请求。
+
+`canvas_read_reference({referenceId,assetId?})`只主Agent可用且仅限本根用户实际提交项。节点默认返回canvasId/nodeId/graphRevision、当前node、公开model、currentOutput、outputs/tasks摘要、upstream（edgeId/source/assetId/asset/available）与downstream（edgeId/target/assetId），来自同一保存快照。可选assetId只读取该节点实际输出 / 绑定或当前直接上游，读取前后与saveImage后重新核验关系、原素材身份、修订及控制；图片进入原附件通道，视频音频明确未理解。media/file不接受assetId换对象，403 REFERENCE_FORBIDDEN；不存在的节点 / 画布409 REFERENCE_STALE。同owner其他画布可只读，不自动导航或委托；已有控制权被接管仍409 AGENT_CONTROL_REVOKED。
+
+原更新 / 连接 / 生成 / 交接操作增加可选canvasId/referenceId；核对受控画布与实际节点引用，跨画布误写409 AGENT_SESSION_BUSY，引用与目标不匹配403 REFERENCE_FORBIDDEN。revision / operationId / owner / epoch原规则保持，GRAPH_CONFLICT重新读取再决定。示例：inspect取得已提交节点referenceId → read_reference → 按用户要求调用update_node，提供读到的canvasId、nodeId、graphRevision及同referenceId；上下游不自动成为修改目标。节点codec与候选查询先等待已挂载相关画布保存，冲突保留输入；无持久图 / 数据库迁移。见[ADR-0085](adr/0085-node-and-media-chat-references.md)。
+
 0.2.99 主工具总数18，子级仍5，HTTP路由仍40。`canvas_inspect.models`和动态上下文仅返回已配置可用内置组合，附加`modelId / model / provider / providerName`，不返回密钥掩码；主级`modelSelections:{image:choice|null,video:choice|null}`为当前有效确认。
 
 `canvas_select_model({kind:"image"|"video",change?:boolean=false,note?})`仅真实主Agent，已有画布时需有效控制；不接受modelId、供应商或候选数组。原生问题显示所有该类型配置组合。成功`{approved:true,selection:{modelId,kind,name,model,provider,providerName},reused:boolean}`；唯一有效答案且无自定义意见才确认。拒绝 / 混合意见为`{approved:false,answers}`，零候选为`{approved:false,needsConfiguration:true,models:[],hint}`。选择期间配置或控制变化409 / AGENT_MODEL_SELECTION_STALE，接管沿AGENT_CONTROL_REVOKED。
@@ -24,8 +32,10 @@ create / update / generate检查具体模型确认：不可用409 / AGENT_MODEL_
 
 | 路径（`/api/canvas/v2/`） | 输入 / 成功输出 | 失败 / 权限 |
 | --- | --- | --- |
-| GET agent-reference-choices | sessionId(1–200)、query(≤1000，默认空)；`{preset:true,cwd,media:[{label,description,kind,section,ref}]}` | live canvas-creator根身份；其他会话403 REFERENCE_SESSION；位置变化409 REFERENCE_STALE；无生成或图更新 |
+| GET agent-reference-choices | sessionId(1–200)、query(≤1000，默认空)、browse(可选JSON，≤1000，strict `{currentCanvasId?:UUID\|null,folderId?:UUID\|null,browseCanvasId?:UUID}`)；`{preset:true,folders:[{id,name,canvases:[{id,name,updatedAt}]}],currentCanvasId,expandedCanvasId?,mediaTruncated,media:[{label,description,kind,section,ref}]}` | live canvas-creator根身份；currentCanvasId=null无编辑器，省略沿用绑定偏好；所有owner目录、当前画布优先 / 其余编辑时间倒序，未分类id=null；folderId只列画布，browseCanvasId须属于所选分类；只读展开画布媒体，过滤后最多200；不查询工作区或返回cwd；其他会话403，目录删除 / 移出409，无效browse400；无图 / 控制 / 任务更新 |
 | POST agent-reference-resolve | `{sessionId,ref}`；ref为version1 media(session/canvas/node/asset/label)或file(session/cwd/path/label/pin?)；输出`{text:"<canvas-reference>…</canvas-reference>"}`，文件pin固定bytes/mtime/inode | owner认证，只读且不受Agent写入锁阻挡；引用跨会话403，素材 / 工作区 / 文件变化409 REFERENCE_STALE；越界 / symlink / 非文件拒绝；无效Schema400 |
+
+0.2.110媒体解析允许同owner其他画布的原素材，不要求等于Agent控制画布；用户切编辑器不使已选引用失效。选择 / 解析不隐式委托、导航或导入。`canvas_read_reference`仍限主Agent实际用户提交项并核验现行控制权限，图片读取原canvasId的实际字节、前后复核，视频 / 音频只元数据。catalog新增可选updatedAt来自原数据库字段；无图 / 引用Schema迁移。API可安全重试，错误要求重新选择或修正输入；新客户端显式传browse，省略browse的偏好保持。0.2.111停止返回原可选cwd，候选只依赖画布目录；旧客户端能展示画布而不展示文件，新文件选择走原生@。POST resolve和旧文件引用的pin / 权限 / 读取限制保持，不修改历史。详见[ADR-0083](adr/0083-visible-canvas-reference-catalog.md)与[ADR-0084](adr/0084-canvas-only-hash-references.md)。
 
 发送使用原生引用codec，失败保留草稿；剪贴板 / 历史保留转义身份标记，原生UserText以短标签展示。读取工具还要求引用已由本根用户实际提交、画布控制未被接管；未提交403 REFERENCE_FORBIDDEN，接管409 AGENT_CONTROL_REVOKED。文件最多min(2MiB,maxReferenceBytes)，超限 / 未支持二进制仅元数据；图片沿既有附件机制，视频 / 音频不伪称理解。没有新增持久Schema。最小流程：输入 `#` 选素材 → 填写反馈并发送 → inspect获取referenceId → read_reference → 按原授权修改；详见[ADR-0076](adr/0076-native-hash-canvas-and-workspace-references.md)。
 

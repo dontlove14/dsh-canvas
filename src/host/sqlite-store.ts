@@ -547,7 +547,7 @@ export class SqliteStore {
   async catalog(): Promise<Catalog> {
     const [folders, canvases] = await this.db.batch([
       sql('SELECT id,name,meta_revision AS revision,content_hash AS hash FROM folders WHERE owner_id=? ORDER BY name', [this.owner], 'all'),
-      sql(`SELECT c.id,c.name,c.folder_id AS folderId,c.meta_revision AS revision,c.content_hash AS hash,
+      sql(`SELECT c.id,c.name,c.folder_id AS folderId,c.meta_revision AS revision,c.content_hash AS hash,c.updated_at AS updatedAt,
         EXISTS(SELECT 1 FROM file_operations f WHERE f.canvas_id=c.id AND f.state IN ('pending','running')) AS moving,
         (SELECT error FROM file_operations f WHERE f.canvas_id=c.id AND f.state='failed' ORDER BY updated_at DESC LIMIT 1) AS moveError
         FROM canvases c WHERE owner_id=? AND deleted_at IS NULL ORDER BY c.created_at`, [this.owner], 'all'),

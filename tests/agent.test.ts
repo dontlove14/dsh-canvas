@@ -17,10 +17,11 @@ import { referenceText, referenceSpans, type ChatReference } from '../src/shared
 import { submittedReferences } from '../src/host/agent/chatReferences'
 import { BUILTIN_MODELS, providerFor } from '../src/shared/modelCatalog'
 import { MOCK_MODELS } from '../src/shared/mockModels'
-import { hash } from '../src/host/persistence/database'
+import { hash, sql } from '../src/host/persistence/database'
 import { GENERATION_HANDOFF_REASON, isGenerationHandoff } from '../src/shared/agent'
 import { MAIN_PROMPT } from '../src/host/agent/methods'
 import { AgentLedger } from '../src/host/agent/ledger'
+import { CanvasNodeSchema, NodeKindSchema, defaultTtsParams } from '../src/shared/contracts'
 
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
@@ -415,7 +416,127 @@ describe('Submitted # references', () => {
   }
   const fileRef = (f: Awaited<ReturnType<typeof fixture>>, path = '方案.md'): ChatReference =>
     ({ version: 1, kind: 'file', sessionId: f.agent.id, cwd: f.dir, path, label: path })
-  it('serializes and reads a real file while Agent controls the canvas, without mutating graph/tasks', async () => {
+  it('exposes six empty nodes in the opt-in catalog, resolves latest identity and rejects deleted targets', async () => {
+    const f = await fixture(), signal = new AbortController().signal
+    await f.service.store.update(f.canvasId, (state) => {
+      state.graph.nodes = NodeKindSchema.options.map((kind) => CanvasNodeSchema.parse({ id: randomUUID(), kind, title: '相同名称', position: { x: 0, y: 0 },
+        ...(kind === 'tts-generation' ? { params: defaultTtsParams() } : {}) }))
+      state.graphRevision++
+    })
+    const before = await f.service.store.snapshot(f.canvasId)
+    const response = await f.service.handle(new Request(`http://local/api/canvas/v2/agent-reference-choices?${new URLSearchParams({ sessionId: f.agent.id, view: 'node-media' })}`))
+    expect(response.status).toBe(200)
+    const choices = await response.json()
+    expect(choices.items).toHaveLength(6); expect(choices.media).toEqual([])
+    expect(choices.items.map((item: any) => item.ref.nodeId)).toEqual(before.graph.nodes.map((node) => node.id))
+    const ref = choices.items[0].ref, entry = submit(f, ref)!
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ isError: false, value: {
+      graphRevision: before.graphRevision, node: { id: ref.nodeId }, currentOutput: null, upstream: [], downstream: [],
+    } })
+    await f.service.store.update(f.canvasId, (state) => { state.graph.nodes[0].title = '现在的名称'; state.graph.nodes[0].prompt = '人工改过'; state.graphRevision++ })
+    expect(await f.coordinator.chatReferences.resolve(f.agent.id, ref, signal)).toEqual(ref)
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ value: { node: { title: '现在的名称', prompt: '人工改过' } } })
+    await f.service.store.update(f.canvasId, (state) => { state.graph.nodes.shift(); state.graphRevision++ })
+    await expect(f.coordinator.chatReferences.resolve(f.agent.id, ref, signal)).rejects.toThrow('已移除')
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ isError: true })
+  })
+  it('pages every node without losing folders and rejects cursor tampering, query changes and graph revisions', async () => {
+    const f = await fixture(), signal = new AbortController().signal
+    await f.service.store.update(f.canvasId, (state) => {
+      state.graph.nodes = Array.from({ length: 430 }, (_, index) => CanvasNodeSchema.parse({ id: randomUUID(), kind: 'video-generation', title: `镜头 ${index}`, position: { x: 0, y: 0 } }))
+      state.graphRevision++
+    })
+    const refs = f.coordinator.chatReferences, browse = { view: 'node-media' as const, currentCanvasId: f.canvasId }
+    const before = await f.service.store.snapshot(f.canvasId), first = await refs.choices(f.agent.id, '', signal, browse)
+    const second = await refs.choices(f.agent.id, '', signal, { ...browse, cursor: first.nextCursor })
+    const third = await refs.choices(f.agent.id, '', signal, { ...browse, cursor: second.nextCursor })
+    expect([first.items!.length, second.items!.length, third.items!.length]).toEqual([200, 200, 30])
+    expect([first.truncated, second.truncated, third.truncated]).toEqual([true, true, false])
+    expect([...first.items!, ...second.items!, ...third.items!].map((item: any) => item.ref.nodeId)).toEqual(before.graph.nodes.map((node) => node.id))
+    expect(second.folders).toEqual(first.folders)
+    await expect(refs.choices(f.agent.id, '', signal, { ...browse, cursor: first.nextCursor! + 'x' })).rejects.toThrow('无效')
+    await expect(refs.choices(f.agent.id, '镜头', signal, { ...browse, cursor: first.nextCursor })).rejects.toThrow('查询已变化')
+    await expect(refs.choices(f.agent.id, '', signal, { ...browse, nodeId: before.graph.nodes[0].id })).rejects.toThrow()
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    await f.service.store.update(f.canvasId, (state) => { state.graph.nodes[0].title = '人工改名'; state.graphRevision++ })
+    await expect(refs.choices(f.agent.id, '', signal, { ...browse, cursor: first.nextCursor })).rejects.toThrow('查询已变化')
+    const invalid = await f.service.handle(new Request(`http://local/api/canvas/v2/agent-reference-choices?${new URLSearchParams({ sessionId: f.agent.id, view: 'unknown' })}`))
+    expect(invalid.status).toBe(400)
+  })
+  it('reads original incoming image bytes through a node and rejects unrelated assets or a changed edge before admission', async () => {
+    const f = await fixture(), png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex')
+    const attachment = { attachmentId: 'node-input', mediaType: 'image/png', bytes: png.length, name: '上游旧图.png' }
+    f.events.push({ type: 'user/message', data: { id: 'user', source: { kind: 'user' }, content: [{ type: 'image', attachment }] } })
+    Object.assign(f.ctx.attachments, { readImage: async () => ({ ref: attachment, data: png }), saveImage: vi.fn(async () => attachment) })
+    await f.call('canvas_import_attachment', { operationId: randomUUID(), revision: 0, attachmentId: attachment.attachmentId, kind: 'image', purpose: '引用' })
+    await f.service.runtime.uploads.run()
+    const source = (await f.service.store.snapshot(f.canvasId)).graph.nodes[0], assetId = source.assetId!
+    const saved = await f.service.store.snapshot(f.canvasId)
+    await f.call('canvas_import_attachment', { operationId: randomUUID(), revision: saved.graphRevision, attachmentId: attachment.attachmentId, kind: 'image', purpose: '结果夹具' })
+    await f.service.runtime.uploads.run()
+    const output = (await f.service.store.snapshot(f.canvasId)).graph.nodes.find((node) => node.id !== source.id)!, outputId = output.assetId!
+    const target = CanvasNodeSchema.parse({ ...output, kind: 'image-generation', title: '镜头02', assetId: null })
+    const downstream = CanvasNodeSchema.parse({ id: randomUUID(), kind: 'image-generation', title: '下游', position: { x: 0, y: 0 } })
+    await f.service.store.update(f.canvasId, (state) => {
+      state.graph.nodes = state.graph.nodes.map((node) => node.id === target.id ? target : node)
+      state.graph.nodes.push(downstream)
+      state.graph.edges.push({ id: randomUUID(), source: source.id, target: target.id, assetId },
+        { id: randomUUID(), source: target.id, target: downstream.id, assetId: outputId })
+      state.graphRevision++
+    })
+    const ref: ChatReference = { version: 2, kind: 'node', sessionId: f.agent.id, canvasId: f.canvasId, nodeId: target.id, label: target.title }
+    const entry = submit(f, ref)!, before = await f.service.store.snapshot(f.canvasId), publish = vi.spyOn(f.coordinator.presentation, 'publish')
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ value: {
+      upstream: [{ assetId, source: { nodeId: source.id } }], downstream: [{ target: { nodeId: downstream.id } }], graphRevision: before.graphRevision,
+    } })
+    expect(f.ctx.attachments.saveImage).not.toHaveBeenCalled()
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId, assetId })).toMatchObject({ isError: false, value: { admitted: true, assetId },
+      additionalContexts: [{ content: [{ type: 'text' }, { type: 'image' }] }] })
+    expect(f.ctx.attachments.saveImage).toHaveBeenCalledWith(expect.objectContaining({ data: png }))
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId, assetId: randomUUID() })).toMatchObject({ isError: true })
+    expect(publish).not.toHaveBeenCalled(); expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    f.ctx.attachments.saveImage.mockImplementationOnce(async () => {
+      await f.service.store.update(f.canvasId, (state) => { state.graph.edges.shift(); state.graphRevision++ })
+      return attachment
+    })
+    const stale = await f.call('canvas_read_reference', { referenceId: entry.referenceId, assetId })
+    expect(stale).toMatchObject({ isError: true }); expect(stale.additionalContexts ?? []).toEqual([])
+    const media = submit(f, { version: 1, kind: 'media', sessionId: f.agent.id, canvasId: f.canvasId, nodeId: source.id, assetId, label: '旧图' })!
+    expect(await f.call('canvas_read_reference', { referenceId: media.referenceId, assetId })).toMatchObject({ isError: true })
+  })
+  it('allows a foreign node read without delegation but blocks writes to a duplicate ID in the controlled canvas', async () => {
+    const f = await fixture(), other = await f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-create', name: '引用画布' })
+    const node = CanvasNodeSchema.parse({ id: randomUUID(), kind: 'image-generation', title: '目标', position: { x: 0, y: 0 } })
+    for (const canvasId of [f.canvasId, other.id]) await f.service.store.update(canvasId, (state) => { state.graph.nodes.push(node); state.graphRevision++ })
+    const ref: ChatReference = { version: 2, kind: 'node', sessionId: f.agent.id, canvasId: other.id, nodeId: node.id, label: node.title }
+    const entry = submit(f, ref)!, before = await f.service.store.snapshot(f.canvasId), control = f.coordinator.session(f.agent.id).canvas
+    const publish = vi.spyOn(f.coordinator.presentation, 'publish')
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ isError: false, value: { canvasId: other.id, nodeId: node.id } })
+    expect(f.coordinator.session(f.agent.id).canvas).toEqual(control); expect(publish).not.toHaveBeenCalled()
+    for (const extra of [{}, { canvasId: other.id }, { referenceId: entry.referenceId }]) {
+      expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: before.graphRevision, nodeId: node.id, patch: { title: '改过' }, ...extra })).toMatchObject({ isError: true })
+    }
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    await f.coordinator.takeover(f.canvasId); await f.coordinator.delegate(other.id, f.agent.id, 1)
+    expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: 1, canvasId: other.id, referenceId: entry.referenceId, nodeId: node.id, patch: { title: '已修改' } })).toMatchObject({ isError: false })
+  })
+  it('lists only canvas choices even when the working directory is unavailable', async () => {
+    const f = await fixture(), before = await f.service.store.snapshot(f.canvasId)
+    const ensure = vi.spyOn(f.ctx.workingDirectory, 'ensure').mockRejectedValue(new Error('工作区不可用'))
+    const get = vi.spyOn(f.ctx.workingDirectory, 'get').mockImplementation(() => { throw new Error('不读取工作区') })
+    const response = await f.service.handle(new Request(`http://local/api/canvas/v2/agent-reference-choices?${new URLSearchParams({
+      sessionId: f.agent.id, browse: JSON.stringify({ currentCanvasId: f.canvasId }),
+    })}`))
+    expect(response.status).toBe(200)
+    const choices = await response.json()
+    expect(choices.expandedCanvasId).toBe(f.canvasId)
+    expect(choices).not.toHaveProperty('cwd')
+    expect(choices.media).toEqual([])
+    expect(ensure).not.toHaveBeenCalled()
+    expect(get).not.toHaveBeenCalled()
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it('serializes and reads a legacy # file while Agent controls the canvas, without mutating graph/tasks', async () => {
     const f = await fixture()
     await writeFile(join(f.dir, '方案.md'), '第一镜头需要修改')
     const before = await f.service.store.snapshot(f.canvasId)
@@ -495,7 +616,7 @@ describe('Submitted # references', () => {
     expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ isError: true })
     const another = await f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-create', name: '另一个' })
     await f.coordinator.delegate(another.id, f.agent.id, 0)
-    await expect(f.coordinator.chatReferences.resolve(f.agent.id, ref, signal)).rejects.toThrow('当前画布已切换')
+    await expect(f.coordinator.chatReferences.resolve(f.agent.id, ref, signal)).rejects.toThrow('已移除')
   })
   it.each(['video', 'audio'] as const)('pins exact %s originals and returns honest metadata without image admission or generation', async (kind) => {
     const f = await fixture(), signal = new AbortController().signal
@@ -509,11 +630,77 @@ describe('Submitted # references', () => {
     expect(choices.media).toHaveLength(1)
     expect(choices.media[0].kind).toBe(kind)
     const entry = submit(f, choices.media[0].ref)!
+    await f.coordinator.takeover(f.canvasId)
+    const another = await f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-create', name: '正在编辑的另一个画布' })
+    await f.coordinator.delegate(another.id, f.agent.id, 0)
     expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ isError: false, value: {
       understood: false, asset: { id: before.assets[0].id, kind }, ref: { assetId: before.assets[0].id },
     } })
     expect(f.ctx.attachments.saveImage).not.toHaveBeenCalled()
     expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it('orders every folder and canvas by visible editor then edit time, including empty current canvases', async () => {
+    const f = await fixture(), refs = f.coordinator.chatReferences, signal = new AbortController().signal
+    const first = await f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'folder-create', name: '当前分类' })
+    const second = await f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'folder-create', name: '最近分类' })
+    const make = (name: string, folderId: string) => f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-create', name, folderId })
+    const older = await make('人工打开', first.id), newer = await make('同分类更新', first.id), latest = await make('最新编辑', second.id)
+    for (const [id, time] of [[f.canvasId, 1], [older.id, 10], [newer.id, 20], [latest.id, 30]] as const)
+      await f.service.store.db.batch([sql('UPDATE canvases SET updated_at=? WHERE id=?', [time, id])])
+    const before = await f.service.store.catalog(), control = f.coordinator.session(f.agent.id).canvas
+    const choices = await refs.choices(f.agent.id, '', signal, { currentCanvasId: older.id })
+    expect(choices.expandedCanvasId).toBe(older.id)
+    expect(choices.folders!.map((folder) => folder.name)).toEqual(['当前分类', '最近分类', '未分类'])
+    expect(choices.folders![0].canvases.map((canvas) => canvas.id)).toEqual([older.id, newer.id])
+    expect(choices.media).toEqual([])
+    const none = await refs.choices(f.agent.id, '', signal, { currentCanvasId: null })
+    expect(none.expandedCanvasId).toBe(latest.id)
+    expect(none.folders![0].name).toBe('最近分类')
+    const folder = await refs.choices(f.agent.id, '', signal, { currentCanvasId: older.id, folderId: second.id })
+    expect(folder.expandedCanvasId).toBeUndefined()
+    const canvas = await refs.choices(f.agent.id, '', signal, { currentCanvasId: older.id, folderId: second.id, browseCanvasId: latest.id })
+    expect(canvas.expandedCanvasId).toBe(latest.id)
+    await expect(refs.choices(f.agent.id, '', signal, { folderId: first.id, browseCanvasId: latest.id })).rejects.toThrow('移出文件夹')
+    const response = await f.service.handle(new Request(`http://local/api/canvas/v2/agent-reference-choices?${new URLSearchParams({
+      sessionId: f.agent.id, browse: JSON.stringify({ currentCanvasId: older.id }),
+    })}`))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ expandedCanvasId: older.id, currentCanvasId: older.id })
+    expect(await f.service.store.catalog()).toEqual(before)
+    expect(f.coordinator.session(f.agent.id).canvas).toEqual(control)
+  })
+  it('admits a submitted image from another canvas without navigating, rebinding or replacing the original', async () => {
+    const f = await fixture(), signal = new AbortController().signal
+    const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex')
+    const attachment = { attachmentId: 'foreign', mediaType: 'image/png', bytes: png.length, name: '旧画布原图.png' }
+    f.events.push({ type: 'user/message', data: { id: 'user', source: { kind: 'user' }, content: [{ type: 'image', attachment }] } })
+    Object.assign(f.ctx.attachments, { readImage: async () => ({ ref: attachment, data: png }), saveImage: vi.fn(async () => attachment) })
+    await f.call('canvas_import_attachment', { operationId: randomUUID(), revision: 0, attachmentId: attachment.attachmentId, kind: 'image', purpose: '引用' })
+    await f.service.runtime.uploads.run()
+    const original = await f.service.store.snapshot(f.canvasId)
+    const ref = (await f.coordinator.chatReferences.choices(f.agent.id, '', signal)).media[0].ref
+    const entry = submit(f, ref)!
+    await f.coordinator.takeover(f.canvasId)
+    const another = await f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-create', name: '人工打开' })
+    await f.coordinator.delegate(another.id, f.agent.id, 0)
+    const before = await f.service.store.snapshot(another.id), publish = vi.spyOn(f.coordinator.presentation, 'publish')
+    expect(await f.coordinator.chatReferences.resolve(f.agent.id, ref, signal)).toEqual(ref)
+    expect(await f.call('canvas_read_reference', { referenceId: entry.referenceId })).toMatchObject({ isError: false, value: {
+      admitted: true, assetId: original.assets[0].id, ref: { canvasId: f.canvasId },
+    }, additionalContexts: [{ content: [{ type: 'text' }, { type: 'image' }] }] })
+    expect(f.ctx.attachments.saveImage).toHaveBeenCalledWith(expect.objectContaining({ data: png }))
+    expect(publish).not.toHaveBeenCalled()
+    expect(await f.service.store.snapshot(another.id)).toEqual(before)
+    f.ctx.attachments.saveImage.mockImplementationOnce(async () => { await f.coordinator.takeover(another.id); return attachment })
+    const cancelled = await f.call('canvas_read_reference', { referenceId: entry.referenceId })
+    expect(cancelled).toMatchObject({ isError: true })
+    expect(cancelled.additionalContexts ?? []).toEqual([])
+    await f.coordinator.takeover(another.id)
+    // Discovery/serialization is possible before granting Agent edit control.
+    expect(await f.coordinator.chatReferences.resolve(f.agent.id, ref, signal)).toEqual(ref)
+    const row = (await f.service.store.catalog()).canvases.find((canvas) => canvas.id === f.canvasId)!
+    await f.service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-delete', id: row.id, revision: row.revision })
+    await expect(f.coordinator.chatReferences.resolve(f.agent.id, ref, signal)).rejects.toThrow('画布已移除')
   })
 })
 describe('Native canvas plan reviews', () => {
