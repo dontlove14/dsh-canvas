@@ -13,6 +13,7 @@ await mkdir('lib', { recursive: true })
 const shared = ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', 'zod', '@deepseek-ai/dsh-client-ui-primitives']
 const result = await build({
   entryPoints: ['src/client/index.tsx'], bundle: true, write: false, platform: 'browser', format: 'cjs',
+  loader: { '.png': 'dataurl' },
   target: 'es2022', minify: true, external: shared, define: { 'process.env.NODE_ENV': '"production"' },
   plugins: [{
     name: 'inline-css',

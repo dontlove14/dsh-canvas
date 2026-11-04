@@ -5,6 +5,7 @@ import { UiActionMenu, UiButton, UiInput, UiModal, UiSelect } from './ui'
 import { CanvasSettings } from './Settings'
 import { STORAGE_REQUIRED } from '../shared/objectStorage'
 import { version as pluginVersion } from '../../package.json'
+import brandLogo from './brandLogo.png'
 
 type CatalogCommand = Parameters<CanvasApi['catalogCommand']>[0]
 interface NameTarget { kind: 'canvas' | 'folder'; item?: CanvasChoice | Folder; folderId: string | null }
@@ -109,7 +110,7 @@ export function ProjectList({ api, folder, onFolder, onOpen, active = true }: Pr
 
   return <div className="dc-root dc-projects">
     <header className="dc-projects-header">
-      <div className="dc-title"><span className="dc-brand-mark" aria-hidden="true">✦</span><div className="dc-projects-brand"><h1 ref={heading} tabIndex={-1}>无限画布</h1><span className="dc-plugin-version" data-dc-plugin-version={pluginVersion} title={`插件版本 ${pluginVersion}`}>v{pluginVersion}</span></div></div>
+      <div className="dc-title"><img className="dc-brand-mark" src={brandLogo} alt="" aria-hidden="true" width={44} height={36} draggable={false} /><div className="dc-projects-brand"><h1 ref={heading} tabIndex={-1}>无限画布</h1><span className="dc-plugin-version" data-dc-plugin-version={pluginVersion} title={`插件版本 ${pluginVersion}`}>v{pluginVersion}</span></div></div>
       <div className="dc-header-actions"><UiButton variant="outline" onClick={() => setShowSettings(true)}>⚙ 设置</UiButton>
         <UiButton variant="primary" size="md" disabled={!catalog || busy} onClick={() => nameCommand('canvas')}>＋ 新建画布</UiButton></div>
     </header>
