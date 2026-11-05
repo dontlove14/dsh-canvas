@@ -46,7 +46,7 @@ export function GenerationSnapshotEditor({ api, workspace, snapshot, assets = []
         {Object.entries(snapshot.params).filter(([key]) => key !== 'type').map(([key, value]) => <div key={key}>
           <dt>{{ size: '尺寸', n: '生成数量', seconds: '时长（秒）', background: '背景', quality: '画质',
             videoMode: '生成模式', firstFrameId: '首帧', lastFrameId: '尾帧', generateAudio: '同步音频',
-            klingReferenceRoles: '素材用途', audio: '音频', reference_id: '音色 ID', speed: '语速', volume: '音量' }[key] ?? key}</dt><dd data-dc-text-selectable="true">{
+            klingReferenceRoles: '素材用途', audio: '音频', reference_id: '音色 ID', reference_text: '参考音频原文', speed: '语速', volume: '音量' }[key] ?? key}</dt><dd data-dc-text-selectable="true">{
               key === 'videoMode' ? (snapshot.model.protocol === 'kling-video' ? KLING_VIDEO_MODES : SEEDANCE_VIDEO_MODES).find((mode) => mode.value === value)?.label ?? String(value)
                 : key === 'klingReferenceRoles' ? Object.entries(value as Record<string, KlingRole>).map(([id, role]) =>
                   `素材 ${snapshot.referenceIds.indexOf(id) + 1}：${klingRoleLabel(role)}`).join('；')

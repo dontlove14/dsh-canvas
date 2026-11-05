@@ -85,9 +85,9 @@ const EMPTY_TASKS: TaskSummary[] = []
 const EMPTY_ASSETS: Asset[] = []
 const EMPTY_CARDS: GenerationCard[] = []
 
-export function CanvasApp({ api, active = true, sessionId, requestedCanvas, navigationRevision, presentation, viewId: suppliedViewId }: {
+export function CanvasApp({ api, active = true, sessionId, requestedCanvas, requestedNode, navigationRevision, presentation, viewId: suppliedViewId }: {
   api: CanvasApi; active?: boolean; sessionId?: string; requestedCanvas?: string; navigationRevision?: number
-  presentation?: CanvasPresentationClient; viewId?: string
+  presentation?: CanvasPresentationClient; viewId?: string; requestedNode?: string
 }) {
   const viewId = useRef(suppliedViewId ?? crypto.randomUUID()).current
   const [workspace, setWorkspace] = useState<CanvasChoice | null>(null)
@@ -121,6 +121,7 @@ export function CanvasApp({ api, active = true, sessionId, requestedCanvas, navi
     {workspace
       ? <ReactFlowProvider key={workspace.id}><CanvasWorkspace api={api} active={active} sessionId={sessionId} workspace={workspace.id} title={workspace.name}
         presentation={presentation} viewId={viewId} registerPrepare={registerPrepare} onLoaded={loaded}
+        requestedNode={requestedCanvas === workspace.id ? requestedNode : undefined} navigationRevision={navigationRevision}
         onBack={() => { presentation?.pause(); setWorkspace(null); setReadyCanvas('') }} /></ReactFlowProvider>
       : <ProjectList api={api} active={active} folder={folder} onFolder={setFolder} onOpen={setWorkspace} />}
   </div>
@@ -198,9 +199,10 @@ function downloadJson(name: string, data: unknown) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function CanvasWorkspace({ api, workspace, title, onBack, active = true, sessionId, presentation, viewId = workspace, registerPrepare, onLoaded }: {
+export function CanvasWorkspace({ api, workspace, title, onBack, active = true, sessionId, presentation, viewId = workspace, registerPrepare, onLoaded, requestedNode, navigationRevision }: {
   api: CanvasApi; workspace: string; title: string; onBack: () => void; active?: boolean; sessionId?: string
   presentation?: CanvasPresentationClient; viewId?: string; registerPrepare?: (flush: () => Promise<unknown>) => () => void; onLoaded?: (id: string) => void
+  requestedNode?: string; navigationRevision?: number
 }) {
   const canvas = useCanvas(api, workspace, active)
   useEffect(() => registerPrepare?.(canvas.flush), [registerPrepare, canvas.flush])
@@ -319,6 +321,15 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 300,
     })
   }, [flow])
+  const handledNode = useRef('')
+  useEffect(() => {
+    if (!active || !requestedNode || !state) return
+    const token = `${requestedNode}:${navigationRevision ?? 0}`
+    if (handledNode.current === token) return
+    if (!graph.nodes.some((node) => node.id === requestedNode)) { handledNode.current = token; report(new Error('该协作节点已不存在')); return }
+    // Explicit inspection pauses automatic following; selection never changes the graph.
+    handledNode.current = token; presentation?.pause(); onFocus(requestedNode)
+  }, [active, requestedNode, navigationRevision, state, graph.nodes, onFocus, presentation, report])
   const onSize = useCallback((id: string, width: number, height: number) => setMediaSizes((current) => {
     const layoutKey = mediaSizeKeys.current[id]
     return current[id]?.width === width && current[id]?.height === height && current[id]?.layoutKey === layoutKey
@@ -713,6 +724,7 @@ const FloatingEditorContent = memo(function FloatingEditorContent(props: Omit<Ed
   const candidates = useMemo(() => inputCaps ? promptCandidates(graph, node.id, assets, tasks, inputCaps) : [], [graph, node.id, assets, tasks, model, node.params])
   const task = latestTask(node.id, tasks)
   if (node.kind === 'tts-generation') return <TtsEditor node={node} task={task} submitting={submitting} configured={props.ttsConfigured} configurationError={props.ttsConfigurationError}
+      references={references} assets={assets} disconnect={(id) => edit((current) => ({ ...current, edges: current.edges.filter((edge) => edge.id !== id) }))}
       patchNode={patchNode} generate={generate} onError={report} />
   let reason = ''
   if (generation) {

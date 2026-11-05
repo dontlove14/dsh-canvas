@@ -32,7 +32,7 @@ export async function apply(ctx: Context, input: Partial<Config> = {}): Promise<
   await service.init()
   coordinator.installModelSelectionGuard()
   coordinator.installPresetRosterGuard()
-  ctx.effect(() => async () => { coordinator.presentation.close(); await coordinator.drain(); await service.close() })
+  ctx.effect(() => async () => { coordinator.presentation.close(); await coordinator.drain(); await coordinator.collaboration.close(); await service.close() })
   for (const route of routeDefinitions) ctx.effect(() => ctx.connection.fetch.register({
     path: `/${V2_ROOT}/${route.suffix}`,
     methods: route.methods,

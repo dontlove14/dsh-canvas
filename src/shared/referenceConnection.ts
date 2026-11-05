@@ -1,4 +1,4 @@
-import { isGeneration, isTtsParams, validateGraph, type Asset, type CanvasGraph, type PublicModel, type Task } from './contracts'
+import { isGeneration, isTtsParams, validateGraph, validateTtsReferences, type Asset, type CanvasGraph, type PublicModel, type Task } from './contracts'
 import { isMultimodalVideo } from './modelCatalog'
 import { videoGenerationParams, videoInputCapabilities, validateVideoConnections } from './video'
 
@@ -8,7 +8,17 @@ export function connectAssetReference(graph: CanvasGraph, sourceId: string, targ
   const target = graph.nodes.find((node) => node.id === targetId)
   const asset = assets.find((asset) => asset.id === assetId)
   if (!target || !asset || !isGeneration(target.kind)) throw new Error('请从已有素材连接到生成节点')
-  if (target.kind === 'tts-generation') throw new Error('语音生成节点不支持输入连线')
+  if (target.kind === 'tts-generation') {
+    if (!isTtsParams(target.params)) throw new Error('语音参数不可用')
+    validateTtsReferences(target.params, [...graph.edges.filter((edge) => edge.target === target.id).map((edge) => {
+      const item = assets.find((item) => item.id === edge.assetId)
+      if (!item) throw new Error('引用音频不可用')
+      return item
+    }), asset], false)
+    const next = { ...graph, edges: [...graph.edges, { id: edgeId, source: sourceId, target: target.id, assetId: asset.id }] }
+    validateGraph(next, assets, tasks)
+    return next
+  }
   const model = models.find((item) => item.id === target.modelId)
   if (asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime))
     throw new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')

@@ -1,8 +1,16 @@
 # 当前架构与执行流程
 
-文档类型：解释；负责人：项目维护者；最近核对：2026-11-02。每次模块 / SDK / 存储边界变化时复核。
+0.2.122的[Fish流程](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)沿原分工：voiceTools只供voice专业子级读取限定官网页面，候选成果在保存/交接时核对本批次实际来源；主级选择/授权，执行级精确写入与原TTS队列合成。TTS共用真实边，params仅可选新增reference_text；Providers在issued前准备固定音频，用@msgpack/msgpack二进制序列化。chatAudio将只读canvas_show_audio回执投影为原生直接聊天行，audio-result读取原任务/成果元数据，复用签名媒体和AudioPlayer；隐藏/卸载停止播放/查询。两库DDL、CanvasGraph版本与已有sidecar结构不变。
+
+0.2.121的[模型预算与原始一致性依赖](adr/0090-model-aware-video-consistency-references.md)由video的现有限额、Agent模型目录、references的只读保存来源投影和preset原子写入/交接共同执行。来源取实际成果任务snapshot.referenceIds，任务摘要仍脱敏；不读源节点最新结果替代旧身份。主级规划五类用途及明确排除，执行子级不猜语义，不支持音频时宿主标unsupported。CanvasGraph/DDL/sidecar版本保持。
+
+0.2.116新增[只读协作日志](adr/0087-visible-agent-collaboration-journal.md)：delegation在spawn前记录批次与预留childId，原生session/event记录公开步骤，creative提供成果快照索引，ledger持久后提供实际回执。0.2.124按[ADR-0092](adr/0092-floating-agent-collaboration-network.md)改为原生输入框上方悬浮卡片，0.2.125按用户截图改为右侧；缩小用指定Voice Ring，展开按实际root/childId圆点和曲线显示，不注册协作页签。临时activity/activeTasks仅来自公开日志投影，原v1 sidecar、CanvasGraph与DDL不变；同root共享一个GET/SSE，慢读者至多排队一个最新快照，详情按需读取。查看/重连/定位不触发执行。
+
+文档类型：解释；负责人：项目维护者；最近核对：2026-11-05。每次模块 / SDK / 存储边界变化时复核。
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
+
+0.2.115的Agent分工以[ADR-0086](adr/0086-creative-projects-and-scoped-canvas-executor.md)为准：主级协调；story/assets/shots/audio/review专业角色按来源和成果ID创作；同级canvas-executor按精确清单执行节点写入。shared/execution是工具与清单共用Schema，coordinator保留root身份、模型选择、CAS/epoch、幂等和持久任务。creative-projects.json与creative-sources负责原文快照、已读范围、成果版本/依赖/认可和批次进度，不改原CanvasGraph/DDL。主级可在创建画布前委派文本分析，正文只通过专业分页工具进入子上下文。原生spawn预留childId，首步前绑定授权；完成只以宿主每项实际回执为证。
 
 0.2.102项目页版本只导入package.json的version，浏览器构建静态折叠为版本字符串；开发与检查沿同一来源，产物管线核对版本标记与包版本，不新设HTTP路由或数据库字段。
 

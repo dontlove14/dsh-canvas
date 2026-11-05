@@ -21,30 +21,35 @@ import { CanvasPresentationClient, installCanvasPresentation } from './presentat
 import { openCanvasTab } from './nativeCanvasNavigation'
 import { installCanvasPlanPreview } from './canvasPlanPreview'
 import { installAgentProgress } from './agentProgress'
+import { installChatAudio, ChatAudioCard } from './chatAudio'
 import { installChatReferenceTrigger } from './chatReferenceTrigger'
 import { installChatReferencePlaceholder } from './chatReferencePlaceholder'
+import { installAgentNames } from './agentNames'
 import { chatReferenceTextRule, ChatReferenceText } from './chatReferenceText'
 import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 import { useRef, useState, useEffect } from 'react'
+import { CollaborationClient } from './collaboration'
+import { CollaborationLauncher, DispatchCard, installCollaborationDispatch } from './collaborationView'
 
 declare module '@deepseek-ai/dsh-client-ui-sidebar-right/client' {
-  interface SidebarRightTabParamsMap { 'dsh-canvas': { canvasId?: string } }
+  interface SidebarRightTabParamsMap { 'dsh-canvas': { canvasId?: string; nodeId?: string } }
 }
 
 export const name = 'dsh-canvas'
 export const inject = ['slots', 'layout', 'sidebarRightTabs']
 const PANEL_ID = 'dsh-canvas' as MainPanelId
 const components = { Button, Input, Checkbox, SegmentedControl, Menu, Modal, Tooltip }
-interface Face { api: CanvasApi; presentation: CanvasPresentationClient }
+interface Face { api: CanvasApi; presentation: CanvasPresentationClient; collaboration: CollaborationClient }
 function MainPanel({ api, sessionId, presentation }: Face & { sessionId?: string }) {
   return <HarnessUiProvider components={components}><CanvasApp api={api} sessionId={sessionId} presentation={presentation} /></HarnessUiProvider>
 }
 function SidebarPanel({ api, useTabInfo, sessionId, presentation }: Face & { useTabInfo: UseSidebarRightTabInfo; sessionId?: string }) {
   const { tab } = useTabInfo()
   const viewId = useRef(crypto.randomUUID()).current
-  const params = tab.navigation.params as { canvasId?: string } | undefined
+  const params = tab.navigation.params as { canvasId?: string; nodeId?: string } | undefined
   return <HarnessUiProvider components={components}><CanvasApp api={api} active={tab.visible} sessionId={sessionId} requestedCanvas={params?.canvasId}
     navigationRevision={tab.navigation.revision} presentation={presentation} viewId={viewId}
+    requestedNode={params?.nodeId}
     /></HarnessUiProvider>
 }
 function SettingsPanel({ api }: { api: CanvasApi }) {
@@ -74,11 +79,24 @@ const sidebarTab: SidebarRightTabDefinition = {
 
 export function apply(ctx: Context): void {
   installAgentProgress(ctx)
+  ctx.effect(() => installAgentNames({
+    entries: (key) => ctx.slots.entries(key as Parameters<typeof ctx.slots.entries>[0]),
+    onMutate: (listener) => ctx.on('slots/changed', listener),
+  }))
   ctx.effect(() => installChatReferencePlaceholder({
     entries: (key) => ctx.slots.entries(key as Parameters<typeof ctx.slots.entries>[0]),
     onMutate: (listener) => ctx.on('slots/changed', listener),
   }))
-  const face: Face = { api: new CanvasApi(), presentation: new CanvasPresentationClient() }
+  const api = new CanvasApi()
+  installChatAudio(ctx, api, (props) => <HarnessUiProvider components={components}><ChatAudioCard {...props} /></HarnessUiProvider>)
+  const face: Face = { api, presentation: new CanvasPresentationClient(), collaboration: new CollaborationClient(api) }
+  ctx.effect(() => () => face.collaboration.close())
+  ctx.inject(['sidebarRight', 'connection'], (scope) => {
+    installCollaborationDispatch(scope, { client: face.collaboration, locate: (canvasId, nodeId) => openCanvasTab(scope.sidebarRight, canvasId, nodeId) }, (props) =>
+      <HarnessUiProvider components={components}><DispatchCard {...props} /></HarnessUiProvider>, (props) =>
+      <HarnessUiProvider components={components}><CollaborationLauncher {...props} /></HarnessUiProvider>)
+    scope.effect(() => scope.on('connection/reset', () => face.collaboration.reset()))
+  })
   ctx.inject(['inputTriggers', 'sessions'], (scope) => {
     scope.effect(() => installChatReferenceTrigger(scope, face.api, face.presentation))
   })

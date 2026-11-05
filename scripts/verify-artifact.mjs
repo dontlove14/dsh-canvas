@@ -42,7 +42,7 @@ if (process.argv[2] === 'record') {
     agents: { get: () => undefined },
     agentPresets: { composedPreset: () => undefined, remoteExportList: async () => ({ presets: [
       { id: 'standard', isDefault: true }, { id: 'canvas-creator', name: '无限画布', isDefault: false },
-      ...['story', 'assets', 'shots', 'audio', 'review'].map((role) => ({ id: `canvas-${role}`, isDefault: false })),
+      ...['story', 'assets', 'shots', 'audio', 'review', 'voice'].map((role) => ({ id: `canvas-${role}`, isDefault: false })),
     ] }) },
   }
   try {
@@ -92,7 +92,13 @@ if (process.argv[2] === 'record') {
     const { id } = await configuredCreate.json()
     const graph = await routes.get('/api/canvas/v2/graph').fetch(new Request(`http://localhost/api/canvas/v2/graph?canvas=${id}`))
     assert.equal(graph.status, 200); assert.equal((await graph.json()).graphRevision, 0)
-    assert.equal(routes.size, 40)
+    assert.equal(routes.size, 45)
+    const chatAudioRoute = routes.get('/api/canvas/v2/audio-result')
+    assert(chatAudioRoute && chatAudioRoute.methods.length === 1 && chatAudioRoute.methods[0] === 'GET')
+    assert.equal((await chatAudioRoute.fetch(new Request(`http://localhost/api/canvas/v2/audio-result?canvas=${id}`))).status, 400)
+    assert.equal((await chatAudioRoute.fetch(new Request(`http://localhost/api/canvas/v2/audio-result?canvas=${id}&taskId=${randomUUID()}`))).status, 404)
+    assert.equal((await routes.get('/api/canvas/v2/agent-collaboration').fetch(
+      new Request('http://localhost/api/canvas/v2/agent-collaboration?sessionId=offline'))).status, 200)
     assert.equal((await routes.get('/api/canvas/v2/agent-reference-choices').fetch(
       new Request('http://localhost/api/canvas/v2/agent-reference-choices?sessionId=offline'))).status, 403)
     assert.equal((await routes.get('/api/canvas/v2/agent-reference-resolve').fetch(

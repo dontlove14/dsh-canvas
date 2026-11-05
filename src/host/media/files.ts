@@ -8,11 +8,19 @@ import { CanvasError, detectMedia } from '../store'
 import type { MediaKind } from '../../shared/contracts'
 
 export const pathKey = (v: string): string => v.normalize('NFC').toLocaleLowerCase('en-US')
+export const MAX_FILENAME_BYTES = 140
 export function safeName(value: string): string {
   let result = value.normalize('NFC').replace(/[/\\:\x00-\x1f<>\"|?*]/g, '_').replace(/[ .]+$/g, '').trim()
   if (!result || /^\.+$/.test(result) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(result)) result = `_${result || 'media'}`
-  while (Buffer.byteLength(result) > 140) result = [...result].slice(0, -1).join('')
+  while (Buffer.byteLength(result) > MAX_FILENAME_BYTES) result = [...result].slice(0, -1).join('')
   return result
+}
+/** Reserve identity and extension before the publisher sanitizes the entire filename. */
+export function documentName(title: string, id: string): string {
+  const suffix = `-${id}.md`
+  let stem = safeName(title)
+  while (Buffer.byteLength(stem + suffix) > MAX_FILENAME_BYTES) stem = [...stem].slice(0, -1).join('')
+  return `${stem}${suffix}`
 }
 export const extension = (mime: string): string => ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp', 'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm', 'audio/mp4': '.m4a', 'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg', 'audio/flac': '.flac' }[mime] ?? '.bin')
 export async function checkedDirectory(root: string, component?: string): Promise<string> {

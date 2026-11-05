@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
+import { encode } from '@msgpack/msgpack'
 import { CanvasError, detectMedia, type Output } from './store'
-import { FISH_TTS_MODEL, isTtsSnapshot, validateGeneration, type Asset, type AnyTaskSnapshot, type TtsTaskSnapshot, type TaskSnapshot } from '../shared/contracts'
+import { FISH_TTS_MODEL, isTtsSnapshot, validateGeneration, validateTtsReferences, type Asset, type AnyTaskSnapshot, type TtsTaskSnapshot, type TaskSnapshot } from '../shared/contracts'
 import { isGptImage25, builtinDefinition, bananaSizePresets, providerFor, seedreamSizePresets, seedreamRequiresEndpoint, seedanceRequiresEndpoint, isMultimodalVideo } from '../shared/modelCatalog'
 import { receive } from './media/files'
 import { ReviewAssetIdSchema } from '../shared/seedanceReview'
@@ -60,6 +61,17 @@ export class Providers {
     return jsonResponse(response, Math.ceil(this.options.maxMediaBytes * 1.4) + 1024 * 1024)
   }
   async prepare(snapshot: AnyTaskSnapshot, taskId?: string): Promise<PreparedReferences> {
+    if (isTtsSnapshot(snapshot)) {
+      validateTtsReferences(snapshot.params, snapshot.referenceIds.map(() => ({ kind: 'audio' })))
+      const references = new Map<string, Buffer>()
+      for (const id of snapshot.referenceIds) {
+        const bytes = await this.store.readMedia(id, this.options.maxReferenceBytes, taskId)
+        if (bytes.length > this.options.maxReferenceBytes) throw new ProviderFailure('参考音频超过大小限制', true)
+        if (detectMedia(bytes)?.kind !== 'audio') throw new ProviderFailure('FishTTS 参考素材必须是有效音频', true)
+        references.set(id, bytes)
+      }
+      return references
+    }
     if (isMultimodalVideo(snapshot.model)) {
       const references = new Map<string, VideoReference>()
       if (snapshot.referenceIds.length && (!taskId || !this.store.inspectReference || !this.store.modelReferenceUrl))
@@ -91,7 +103,7 @@ export class Providers {
     return references
   }
   async submit(snapshot: AnyTaskSnapshot, key: string, prepared?: PreparedReferences): Promise<ProviderResult> {
-    if (isTtsSnapshot(snapshot)) return this.submitTts(snapshot, key)
+    if (isTtsSnapshot(snapshot)) return this.submitTts(snapshot, key, (prepared ?? await this.prepare(snapshot)) as Map<string, Buffer>)
     const input = prepared ?? await this.prepare(snapshot)
     if (snapshot.model.protocol === 'seedance-video') return this.submitSeedance(snapshot, key, input as Map<string, VideoReference>)
     if (snapshot.model.protocol === 'wan-video') return this.submitWan(snapshot, key, input as Map<string, VideoReference>)
@@ -483,13 +495,22 @@ export class Providers {
     if (!outputs.length) throw new ProviderFailure('Nano Banana 返回的 Base64 图片无效、超限或格式不一致，提交结果需要确认', false)
     return { status: 'completed', outputs }
   }
-  private async submitTts(snapshot: TtsTaskSnapshot, key: string): Promise<ProviderResult> {
+  private async submitTts(snapshot: TtsTaskSnapshot, key: string, references: Map<string, Buffer>): Promise<ProviderResult> {
     const signal = AbortSignal.any([this.signal, AbortSignal.timeout(this.options.requestTimeoutMs)])
-    const { reference_id, speed, volume } = snapshot.params
+    const { reference_id, reference_text, speed, volume } = snapshot.params
+    validateTtsReferences(snapshot.params, snapshot.referenceIds.map(() => ({ kind: 'audio' })))
+    const payload = { text: snapshot.prompt, prosody: { speed, volume }, format: 'mp3',
+      ...(snapshot.referenceIds.length ? { references: snapshot.referenceIds.map((id) => {
+        const audio = references.get(id)
+        if (!audio || audio.length > this.options.maxReferenceBytes || detectMedia(audio)?.kind !== 'audio')
+          throw new ProviderFailure('参考音频尚未准备或超过限制', true)
+        return { audio: new Uint8Array(audio), text: reference_text!.trim() }
+      }) } : reference_id ? { reference_id } : {}) }
+    const cloning = snapshot.referenceIds.length > 0
     const response = await fetch(snapshot.model.api_base, {
       method: 'POST', redirect: 'error', signal,
-      headers: { 'Content-Type': 'application/json', model: FISH_TTS_MODEL, ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-      body: JSON.stringify({ text: snapshot.prompt, ...(reference_id ? { reference_id } : {}), prosody: { speed, volume }, format: 'mp3' }),
+      headers: { 'Content-Type': cloning ? 'application/msgpack' : 'application/json', model: FISH_TTS_MODEL, ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+      body: cloning ? new Uint8Array(encode(payload)) : JSON.stringify(payload),
     })
     if (!response.ok) {
       const body: Record<string, any> = await jsonResponse(response, 64 * 1024).catch(() => ({}))

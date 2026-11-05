@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { NodeToolbar, Position, useUpdateNodeInternals } from '@xyflow/react'
-import { type Asset, type CanvasNode } from '../shared/contracts'
+import { isTtsParams, type Asset, type CanvasNode } from '../shared/contracts'
 import type { TaskSummary } from '../shared/v2'
 import { TtsIcon } from './TtsIcon'
 import { CanvasApi } from './api'
@@ -26,12 +26,13 @@ function AudioNodeBody({ node, asset, api, workspace, selected, playing, task, o
   const [visible, setVisible] = useState(false)
   useNodeMediaLoading(!visible)
   const updateInternals = useUpdateNodeInternals()
+  const acceptsAudio = node.kind === 'tts-generation' && isTtsParams(node.params) && !node.params.reference_id.trim()
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '160px' })
     if (frame.current) observer.observe(frame.current)
     return () => observer.disconnect()
   }, [])
-  useEffect(() => { onSize(node.id, 360, 180); updateInternals(node.id) }, [node.id, onSize, updateInternals])
+  useEffect(() => { onSize(node.id, 360, 180); updateInternals(node.id) }, [node.id, onSize, updateInternals, acceptsAudio])
   useEffect(() => { if (!visible && playing) onStop(node.id) }, [visible, playing, node.id, onStop])
   useEffect(() => {
     const hide = () => { if (document.hidden) onStop(node.id) }
@@ -52,6 +53,7 @@ function AudioNodeBody({ node, asset, api, workspace, selected, playing, task, o
     {visible ? <AudioPlayer asset={asset} api={api} workspace={workspace} label={node.title} active={playing}
       onPlay={() => onPlay(node.id)} onStop={() => onStop(node.id)} /> : <div className="dc-audio-wave-message">音频</div>}
     <NodeLoading task={task} title={node.title} />
+    {acceptsAudio && <CanvasHandle type="target" />}
     <CanvasHandle type="source" />
   </article>
 }

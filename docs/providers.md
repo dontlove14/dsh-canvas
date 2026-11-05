@@ -203,11 +203,13 @@ promptFeedback明确blockReason或候选明确安全 / 无图finishReason映射f
 
 ## FishTTS 请求与返回
 
+0.2.122重新核对上述[接口文档](https://apidoc.modellink.online/388232172e0)：references是参考音频列表，MessagePack序列化且覆盖reference_id；每项audio为实际二进制、text为参考音频原文。文档未声明数量上限，用户要求本插件只接一份。音频复刻请求`Content-Type: application/msgpack`，body为`{text:新朗读文字,references:[{audio:音频字节,text:参考原文}],prosody:{speed,volume},format:"mp3"}`，不传reference_id；仍Header model:s1 / Bearer。采用@msgpack/msgpack 3.1.3，不自写编码器、不发Base64 JSON。参考原文字段为params.reference_text，与prompt分开；有效音频签名和maxReferenceBytes在issued之前核对。旧ID路径仍用原JSON。音色目录仅官网公开页读取，不能据此证明网关s1接受该音色；真实试听及复刻效果待用户联调。详情见[ADR-0091](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)。
+
 0.2.35：语音节点独立读取TTS的has_api_key，未配置 / 读取中 / 读取失败均提示并禁用生成；Host新任务接纳同时要求配置记录和非空Key。空Key记录与清除后的记录不能生成，已接受任务仍用原凭据版本恢复，见[ADR-0041](adr/0041-tts-configuration-readiness.md)。
 
 0.2.31核对：文档的model是**Header参数**，请求固定 `model: s1`，与Content-Type和Authorization并列；Body不增加model。原实现漏传该Header会默认speech-1.5，而文档注明只有s1支持情绪处理。text / reference_id / prosody.speed / prosody.volume / format=mp3与文档一致，其他可选项使用供应商默认值。内部任务model_id仍fish-tts，无历史快照迁移；见[ADR-0038](adr/0038-model-configuration-summary-and-tts-header.md)。
 
-来源：[表达指南](https://apidoc.modellink.online/7812015m0)、[TTS接口](https://apidoc.modellink.online/388232172e0)，2026-10-27核对。`POST https://api.modellink.online/fish/v1/tts`，JSON为 `{"text":"(happy) 你好","reference_id":"音色ID","prosody":{"speed":1,"volume":0},"format":"mp3"}`。reference_id空时省略；speed为有限正数、volume有限且可负数，文档未给上下界。新设置仅使用固定完整端点、不追加路径，独立Model Link凭据；旧任务仍使用原快照地址 / 密钥。有Key时Bearer，禁止重定向。节点无模型和素材输入。
+来源：[表达指南](https://apidoc.modellink.online/7812015m0)、[TTS接口](https://apidoc.modellink.online/388232172e0)，2026-10-27核对。`POST https://api.modellink.online/fish/v1/tts`，JSON为 `{"text":"(happy) 你好","reference_id":"音色ID","prosody":{"speed":1,"volume":0},"format":"mp3"}`。reference_id空时省略；speed为有限正数、volume有限且可负数，文档未给上下界。新设置仅使用固定完整端点、不追加路径，独立Model Link凭据；旧任务仍使用原快照地址 / 密钥。有Key时Bearer，禁止重定向。节点无图片/视频模型选择；0.2.122起可选单音频输入复刻。
 
 @从文档选择 `(happy)`、`(sad)`、`(soft tone)`、`(in a hurry tone)`、`(laughing)`、`(break)`、`(long-break)` 等，按文档拼写原样发送，支持叠加；不是资产引用或 `[参考图N]`。英文情绪标签须句首，语调 / 声音效果可放其他位置，界面提示位置规则。
 

@@ -5,7 +5,7 @@
 /* Harness owns the palette. CSS inheritance follows light/dark/system and custom
    alias overrides without a second theme store or React re-renders.
    The fallback palette is used only by the standalone development entry. */
-.dc-app,.dc-root,.dc-settings,.dc-modal,.dc-overlay-scope,.dc-ui-popup{
+.dc-app,.dc-root,.dc-settings,.dc-modal,.dc-overlay-scope,.dc-ui-popup,.dc-chat-audio{
   --dc-bg:var(--dsw-alias-bg-base,#151518);
   --dc-surface:var(--dsw-alias-bg-layer-1,#202023);
   --dc-raised:var(--dsw-alias-bg-module-platform,#29292e);

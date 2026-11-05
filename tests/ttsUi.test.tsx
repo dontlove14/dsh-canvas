@@ -72,7 +72,7 @@ describe('TTS editing controls', () => {
     expect(editorText(editor)).toBe('前(calm)后'); expect(editorSelection(editor)).toEqual({ start: 7, end: 7 })
     expect(editor.querySelector('.dc-emotion-token')?.textContent).toBe('@平静')
   })
-  it('matches the generation empty frame with one monochrome icon and only an output handle', () => {
+  it('keeps the generation empty frame and shows an audio input only without a voice ID', () => {
     const node: CanvasNode = { id: crypto.randomUUID(), kind: 'tts-generation', title: '语音生成1', position: { x: 0, y: 0 }, modelId: null, assetId: null, selectedResultId: null, params: defaultTtsParams(), prompt: '(calm)不显示这段文字' }
     const size = vi.fn()
     const container = mount(<ReactFlowProvider><TtsNode node={node} selected={false} onRename={vi.fn()} onSize={size} /></ReactFlowProvider>)
@@ -83,7 +83,10 @@ describe('TTS editing controls', () => {
     expect(frame.querySelector('.dc-tts-icon svg')?.getAttribute('viewBox')).toBe('0 0 1024 1024')
     expect([...frame.querySelectorAll('.dc-tts-icon path')].every((path) => path.getAttribute('fill') === 'currentColor')).toBe(true)
     expect(size).toHaveBeenCalledWith(node.id, 320, 180)
-    expect(container.querySelector('.react-flow__handle.source')).toBeTruthy(); expect(container.querySelector('.react-flow__handle.target')).toBeNull()
+    expect(container.querySelector('.react-flow__handle.source')).toBeTruthy(); expect(container.querySelector('.react-flow__handle.target')).toBeTruthy()
+    act(() => roots.at(-1)!.render(<ReactFlowProvider><TtsNode node={{ ...node, params: { ...defaultTtsParams(), reference_id: 'fixed-voice' } }}
+      selected={false} onRename={vi.fn()} onSize={size} /></ReactFlowProvider>))
+    expect(container.querySelector('.react-flow__handle.target')).toBeNull()
   })
   it('shows Chinese badges while preserving the exact FishTTS tokens and caret through parent echoes', () => {
     const changed = vi.fn()
@@ -139,6 +142,23 @@ describe('TTS editing controls', () => {
     expect(container.querySelector('input[aria-label="音色 ID"]')).toBeTruthy()
     expect(container.querySelector('[role="combobox"]')).toBeNull(); expect(container.querySelector('input[type="file"]')).toBeNull()
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="生成语音"]')!.click()); expect(generate).toHaveBeenCalledWith(node)
+  })
+  it('hides voice ID for a connected audio, requires its transcript, and removes the exact edge', () => {
+    const node: CanvasNode = { id: crypto.randomUUID(), kind: 'tts-generation', title: 'TTS', position: { x: 0, y: 0 }, modelId: null,
+      assetId: null, selectedResultId: null, params: defaultTtsParams(), prompt: '新朗读文字' }
+    const asset = { id: crypto.randomUUID(), kind: 'audio' as const, mime: 'audio/wav', bytes: 1, filename: '角色声音.wav', createdAt: 1, nodeId: null, taskId: null }
+    const edge = { id: crypto.randomUUID(), source: crypto.randomUUID(), target: node.id, assetId: asset.id }
+    const disconnect = vi.fn(), generate = vi.fn(), patchNode = vi.fn()
+    const props = { node, submitting: false, configured: true, references: [edge], assets: [asset], disconnect, generate, patchNode }
+    const container = mount(<TtsEditor {...props} />)
+    expect(container.querySelector('[aria-label="音色 ID"]')).toBeNull()
+    expect(container.querySelector('[aria-label="参考音频原文"]')).toBeTruthy()
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="生成语音"]')!.disabled).toBe(true)
+    act(() => roots.at(-1)!.render(<TtsEditor {...props} node={{ ...node, params: { ...defaultTtsParams(), reference_text: '音频里实际说的内容' } }} />))
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="生成语音"]')!.disabled).toBe(false)
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="移除参考音频"]')!.click())
+    expect(disconnect).toHaveBeenCalledWith(edge.id)
+    expect(patchNode).not.toHaveBeenCalled()
   })
   it('keeps TTS inputs and generate available during earlier tasks and disables them only while dispatching', () => {
     const node: CanvasNode = { id: crypto.randomUUID(), kind: 'tts-generation', title: 'TTS', position: { x: 0, y: 0 }, modelId: null, assetId: null,

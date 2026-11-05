@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { useUpdateNodeInternals } from '@xyflow/react'
-import { TRACKED_STATUSES, TaskStatusLabels, type Asset, type CanvasNode } from '../shared/contracts'
+import { TRACKED_STATUSES, TaskStatusLabels, isTtsParams, type Asset, type CanvasNode } from '../shared/contracts'
 import { type CanvasApi } from './api'
 import { type GenerationCard, historyFrame, resultHandle, submissionIdentity } from './generationHistory'
 import type { HistoryInspection } from './useHistoryInspection'
@@ -26,12 +26,13 @@ export const HistoryNode = memo(function HistoryNode({ node, cards, connectedAss
   onInspect?: (value: HistoryInspection) => void; inspection?: HistoryInspection
 }) {
   const audio = node.kind === 'tts-generation'
+  const acceptsInput = !audio || isTtsParams(node.params) && !node.params.reference_id.trim()
   const size = historyFrame(cards, audio, expanded)
   const shown = expanded ? cards : cards.slice(0, 1)
   const actionsVisible = useNodeActions(node.id, selected, true)
   const [playingAsset, setPlayingAsset] = useState<string | null>(null)
   const internals = useUpdateNodeInternals()
-  const geometry = JSON.stringify([expanded, size, expanded ? cards.map((card) => card.results.map((asset) => asset.id)) : connectedAssets])
+  const geometry = JSON.stringify([expanded, size, acceptsInput, expanded ? cards.map((card) => card.results.map((asset) => asset.id)) : connectedAssets])
   useEffect(() => { onSize(node.id, size.width, size.height); internals(node.id) },
     [node.id, size.width, size.height, geometry, onSize, internals])
   useEffect(() => { setPlayingAsset(null); onStop(node.id) }, [expanded, node.id, onStop])
@@ -43,7 +44,7 @@ export const HistoryNode = memo(function HistoryNode({ node, cards, connectedAss
   return <article className={`dc-node dc-generation-node dc-history-node has-result ${selected ? 'selected' : ''} ${expanded ? 'expanded' : 'stacked'}`}
     style={{ width: size.width, height: size.height }}>
     <NodeTitle node={node} onRename={onRename} assetId={!expanded ? cards[0]?.results[0]?.id : undefined} />
-    {!audio && <CanvasHandle type="target" />}
+    {acceptsInput && <CanvasHandle type="target" />}
     {!expanded && connectedAssets.map((id) => <CanvasHandle key={id} type="source" id={resultHandle(id)} disabled hidden />)}
     {!expanded && cards.slice(1, 3).reverse().map((card, index, layers) =>
       <div key={card.task.id} className={`dc-result-layer ${layers.length > 1 && index === 0 ? 'second' : 'first'}`}>

@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, scopeTarget, scopeOf } from '@deepseek-ai/dsh-scope'
-import { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import { ToolRuntime, assertObjectJsonSchema, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { UserQuestionService, type AskUserQuestionRequest, type AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { mkdtemp, readFile, stat, rm, writeFile, symlink, readdir } from 'node:fs/promises'
+import { mkdtemp, readFile, stat, rm, writeFile, symlink, readdir, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { CanvasService } from '../src/host/service'
 import { CanvasAgentCoordinator } from '../src/host/agent/coordinator'
 import { apply as preset } from '../src/host/agent/preset'
@@ -19,12 +19,18 @@ import { BUILTIN_MODELS, providerFor } from '../src/shared/modelCatalog'
 import { MOCK_MODELS } from '../src/shared/mockModels'
 import { hash, sql } from '../src/host/persistence/database'
 import { GENERATION_HANDOFF_REASON, isGenerationHandoff } from '../src/shared/agent'
-import { MAIN_PROMPT } from '../src/host/agent/methods'
+import { MAIN_PROMPT, METHODS } from '../src/host/agent/methods'
 import { AgentLedger } from '../src/host/agent/ledger'
 import { CanvasNodeSchema, NodeKindSchema, defaultTtsParams } from '../src/shared/contracts'
+import { EXECUTION_SCHEMAS, type ExecutionCommand } from '../src/shared/execution'
+import { CreativeProjects, readCreativeSource } from '../src/host/agent/creative'
+import { SpecialistOutput } from '../src/host/agent/delegation'
+import { assetToken, resolvePrompt } from '../src/shared/promptMentions'
 
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
+const simpleDraft = (title = '单元分析', dependencies: string[] = []) => ({ kind: 'brief' as const, title, content: '实际读取的单元分析', dependencies, assetIds: [] })
+const hashBytes = (body: Buffer) => createHash('sha256').update(body).digest('hex')
 async function fixture(delegate = true) {
   const dir = await mkdtemp(join(tmpdir(), 'canvas-agent-test-'))
   cleanup.push(() => rm(dir, { recursive: true, force: true }))
@@ -67,31 +73,53 @@ async function fixture(delegate = true) {
   await ctx.serial(scopeTarget(agent, agent), 'agent/created', { agent, source: 'startup' })
   const created = await service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-create', name: 'Agent test' })
   if (delegate) await coordinator.delegate(created.id, agent.id, 0)
-  const call = (name: string, args: unknown, signal = new AbortController().signal) => registry.execute({ name, arguments: args, callId: ToolCallId(randomUUID()), agent, signal })
-  const child = async () => {
+  const rawCall = (name: string, args: unknown, signal = new AbortController().signal) => registry.execute({ name, arguments: args, callId: ToolCallId(randomUUID()), agent, signal })
+  const child = async (role: 'assets' | 'executor' = 'assets', id = `child-${randomUUID()}`) => {
     const childPreset = createScope(ctx, {}, { parent: scopeOf(ctx) })
-    preset(childPreset.ctx, { role: 'assets' })
-    const child = { id: `child-${randomUUID()}`, cancel: vi.fn(), options: agent.options } as unknown as Agent
+    preset(childPreset.ctx, { role })
+    const child = { id, session: { snapshotEvents: () => [] }, cancel: vi.fn(), options: agent.options } as unknown as Agent
     const childScope = createScope(childPreset.ctx, child, { parent: scopeOf(childPreset.ctx) })
     Object.assign(child, { ctx: childScope.ctx })
-    parents.set(child.id, agent); agents.set(child.id, child); presets.set(child.ctx, 'canvas-assets')
+    parents.set(child.id, agent); agents.set(child.id, child); presets.set(child.ctx, `canvas-${role}`)
     child.ctx.tools.register({ name: 'structured_output', description: 'SDK-owned capture fixture', parameters: { type: 'object', properties: {} },
       output: { schema: { type: 'object' }, render: () => [] }, execute: async () => ({ captured: true }) })
     await ctx.serial(scopeTarget(child, child), 'agent/created', { agent: child, source: 'startup' })
+    let bound = false
+    try { coordinator.binding(child); bound = true } catch {}
+    if (role === 'assets' && !bound) {
+      const project = coordinator.creative.project(agent.id, await realpath(dir), coordinator.session(agent.id).canvas?.canvasId, 'Agent test')
+      const taskId = randomUUID()
+      coordinator.creative.begin(project.id, taskId, role, {}, 'fixture professional task', [], [])
+      coordinator.bind(child, { projectId: project.id, taskId, sourceIds: [], artifactIds: [], nodeIds: [], assetIds: [] })
+    }
     return child
   }
-  return { ctx, dir, service, coordinator, agent, registry, call, child, canvasId: created.id, selectModel, resolveModelInfo, events, contexts, setCwd: (next: string) => { cwd = next } }
+  let writer: Promise<Agent> | undefined
+  // Existing mutation tests now exercise the actual scoped executor tools.
+  // rawCall remains available to prove the root cannot bypass delegation.
+  const call = async (name: string, args: unknown, signal = new AbortController().signal) => {
+    if (!Object.hasOwn(EXECUTION_SCHEMAS, name)) return rawCall(name, args, signal)
+    const executor = await (writer ??= child('executor'))
+    const control = coordinator.attached(agent)
+    const project = coordinator.creative.project(agent.id, await realpath(dir), control.canvasId, 'Agent test'), taskId = randomUUID()
+    coordinator.creative.begin(project.id, taskId, 'executor', {}, 'test operation', [], [])
+    coordinator.bind(executor, { projectId: project.id, taskId, sourceIds: [], artifactIds: [], nodeIds: [], assetIds: [] })
+    const input = EXECUTION_SCHEMAS[name as keyof typeof EXECUTION_SCHEMAS].parse(args)
+    coordinator.grantExecution(executor, control, [{ tool: name, input } as ExecutionCommand], true)
+    return registry.execute({ name, arguments: args, callId: ToolCallId(randomUUID()), agent: executor, signal })
+  }
+  return { ctx, dir, service, coordinator, agent, registry, call, rawCall, child, canvasId: created.id, selectModel, resolveModelInfo, events, contexts, setCwd: (next: string) => { cwd = next } }
 }
 async function configureGeneration(f: Awaited<ReturnType<typeof fixture>>, kind: 'image' | 'video' = 'image', apiBase = 'https://api.modellink.online/v1') {
   const model = BUILTIN_MODELS.find((model) => model.kind === kind && model.api_base === apiBase)!
   await f.service.store.saveModel({ ...model, api_key: 'fixture-model-key' })
   return model
 }
-async function chooseGeneration(f: Awaited<ReturnType<typeof fixture>>, model: { id: string; kind: 'image' | 'video'; name: string; api_base: string }) {
+async function chooseGeneration(f: Awaited<ReturnType<typeof fixture>>, model: { id: string; kind: 'image' | 'video'; name: string; api_base: string }, change = false) {
   const dispose = f.agent.ctx.on('user-questions/request', async (request) => ({ answers: [{
     id: request.questions[0].id, selected: [`${model.name} · ${providerFor(model)!.label}`],
   }] }))
-  try { expect(await f.call('canvas_select_model', { kind: model.kind })).toMatchObject({ isError: false, value: { approved: true, selection: { modelId: model.id } } }) }
+  try { expect(await f.call('canvas_select_model', { kind: model.kind, ...(change ? { change: true } : {}) })).toMatchObject({ isError: false, value: { approved: true, selection: { modelId: model.id } } }) }
   finally { dispose() }
 }
 describe('Configured generation model choices', () => {
@@ -313,7 +341,620 @@ describe('Configured generation model choices', () => {
     expect(await f.call('canvas_generate', { ...args, revision: 2 })).toMatchObject({ isError: true })
   })
 })
+
+describe('Creative project sources and scoped delegation', () => {
+  it('imports workspace and root attachments without creating a canvas, snapshots changed sources and reads Unicode pages honestly', async () => {
+    const f = await fixture(false), text = '第1章 起点\n' + '汉字🙂'.repeat(7000) + '\n第2章 后续\n结尾'
+    const path = join(f.dir, '原文.txt'); await writeFile(path, text)
+    const before = await f.service.store.catalog()
+    const imported = (await f.call('creative_source_import', { path: '原文.txt' })).value as any
+    expect(imported.source).toMatchObject({ version: 1, length: text.length, encoding: 'utf-8' })
+    expect(imported).not.toHaveProperty('text')
+    expect(await f.service.store.catalog()).toEqual(before)
+    const project = (await f.call('creative_project', {})).value as any
+    const page = await f.coordinator.creative.page(project.project.id, imported.source.id, 0, 12000, new AbortController().signal)
+    const rest = await f.coordinator.creative.page(project.project.id, imported.source.id, page.next!, 12000, new AbortController().signal)
+    expect(page.text + rest.text).toBe(text.slice(0, rest.end))
+    expect(/[\uD800-\uDBFF]$/.test(page.text)).toBe(false)
+    await writeFile(path, '第1章 改版\n新的正文')
+    expect((await f.call('creative_source_import', { path: '原文.txt' })).value).toMatchObject({ source: { version: 2 } })
+    expect((await f.coordinator.creative.page(project.project.id, imported.source.id, 0, 100, new AbortController().signal)).text).toBe(text.slice(0, 100))
+    f.events.push({ type: 'user/message', data: { id: 'source-message', source: { kind: 'user' }, content: [
+      { type: 'file', attachment: { attachmentId: 'novel-upload', name: '上传.md', bytes: 20 } },
+    ] } })
+    Object.assign(f.ctx.attachments, { readFileStream: async function* () { yield Buffer.from('# 上传资料\n正文') } })
+    expect((await f.call('creative_source_import', { attachmentId: 'novel-upload' })).value).toMatchObject({ source: { origin: 'attachment:novel-upload' }, sectionCount: 1 })
+    expect(await f.call('creative_source_import', { attachmentId: 'invented' })).toMatchObject({ isError: true })
+    await symlink(path, join(f.dir, '链接.txt'))
+    expect(await f.call('creative_source_import', { path: '链接.txt' })).toMatchObject({ isError: true })
+    expect(await f.call('creative_source_import', { path: '../outside.txt' })).toMatchObject({ isError: true })
+    expect(f.registry.get('creative_source_read', f.agent)).toBeUndefined()
+  })
+  it('spawns a professional before canvas creation, restricts source reads and persists checkpoint artifacts through an interrupted batch', async () => {
+    const f = await fixture(false); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    await writeFile(join(f.dir, '小说.txt'), '第1章\n第一单元正文\n第2章\n第二单元正文')
+    await writeFile(join(f.dir, '未授权.txt'), '不应读取')
+    const first = ((await f.call('creative_source_import', { path: '小说.txt' })).value as any).source
+    const other = ((await f.call('creative_source_import', { path: '未授权.txt' })).value as any).source
+    const artifactId = randomUUID(), taskId = randomUUID(), requests: any[] = []
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      requests.push(spec)
+      const record = f.coordinator.collaboration.task(f.agent.id, taskId)
+      expect(record).toMatchObject({ childId: spec.childId, role: 'assets', state: 'dispatched', commandCount: 0 })
+      f.coordinator.collaboration.observe(spec.childId, { seq: 0, type: 'step/start', time: 1, data: { turn: 1, step: 1 } } as any)
+      const child = await f.child('assets', spec.childId)
+      // Real startup registration consumes the host-reserved binding before any tool executes.
+      const call = (name: string, args: unknown) => f.registry.execute({ agent: child, name, arguments: args, callId: ToolCallId(randomUUID()), signal: spec.signal })
+      const result = (async () => {
+        expect(await call('creative_source_read', { sourceId: other.id, start: 0 })).toMatchObject({ isError: true })
+        expect(await call('creative_source_read', { sourceId: first.id, start: 0, length: 12 })).toMatchObject({ isError: false })
+        expect(await call('creative_artifact_save', { artifactId: randomUUID(), draft: simpleDraft(), sources: [{ sourceId: first.id, start: 12, end: 20 }] })).toMatchObject({ isError: true })
+        expect(await call('creative_artifact_save', { artifactId, draft: simpleDraft(), sources: [{ sourceId: first.id, start: 0, end: 12 }] })).toMatchObject({ isError: false })
+        return { stopReason: 'max-tokens', output: [] }
+      })()
+      return { childId: child.id, result, dispose: async () => { f.coordinator.unregister(child) } }
+    } })
+    expect(await f.call('canvas_specialist', { operationId: taskId, role: 'assets', task: '按单元分析；未读取部分保持待分析', sourceIds: [first.id] })).toMatchObject({ isError: true })
+    const project = (await f.call('creative_project', {})).value as any
+    expect(project.runs.find((r: any) => r.id === taskId)).toMatchObject({ state: 'blocked', artifactOutputIds: [artifactId], readRanges: [{ sourceId: first.id, start: 0, end: 12 }] })
+    expect(project.artifacts[0]).toMatchObject({ id: artifactId, status: 'draft' })
+    expect(f.coordinator.collaboration.task(f.agent.id, taskId)).toMatchObject({ state: 'blocked', artifactRefs: [{ id: artifactId, status: 'draft' }] })
+    expect(JSON.stringify(requests[0].request.prompt)).not.toContain('第一单元正文')
+    expect(await f.call('canvas_specialist', { operationId: taskId, role: 'assets', task: '按单元分析；未读取部分保持待分析', sourceIds: [first.id] })).toMatchObject({ isError: true })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({ label: '视觉资产', request: { agentPreset: 'canvas-assets' } })
+    const reloaded = new CreativeProjects(f.dir); await reloaded.init()
+    expect(reloaded.run(project.project.id, taskId)).toMatchObject({ state: 'blocked', artifactOutputIds: [artifactId] })
+    expect(reloaded.artifact(project.project.id, artifactId).file.path).toContain('Agent 创作')
+    expect(f.coordinator.session(f.agent.id).canvas).toBeNull()
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      requests.push(spec)
+      const child = await f.child('assets', spec.childId)
+      const result = (async () => {
+        expect(await f.registry.execute({ agent: child, name: 'creative_source_read', arguments: { sourceId: first.id, start: 12, length: 12 },
+          callId: ToolCallId(randomUUID()), signal: spec.signal })).toMatchObject({ isError: false })
+        return { stopReason: 'completed', structured: simpleDraft('第二单元', [artifactId]), output: [] }
+      })()
+      return { childId: child.id, result, dispose: async () => { f.coordinator.unregister(child) } }
+    } })
+    const nextArgs = { operationId: randomUUID(), role: 'assets', task: '从已读12处继续，复用上一单元成果', sourceIds: [first.id], artifactIds: [artifactId] }
+    const completed = await f.call('canvas_specialist', nextArgs)
+    expect(completed).toMatchObject({ isError: false, value: { taskId: nextArgs.operationId, status: 'draft', baseRevision: null } })
+    const finalArtifactId = (completed.value as any).artifactId
+    expect(finalArtifactId).not.toBe(nextArgs.operationId)
+    expect(await f.call('canvas_specialist', nextArgs)).toMatchObject({ isError: false })
+    expect(requests).toHaveLength(2)
+    const finalReload = new CreativeProjects(f.dir); await finalReload.init()
+    expect(finalReload.run(project.project.id, nextArgs.operationId)).toMatchObject({ state: 'completed' })
+    expect(finalReload.artifact(project.project.id, finalArtifactId).draft.dependencies).toEqual([artifactId])
+    expect(f.coordinator.collaboration.task(f.agent.id, taskId).main).toBe('responded')
+    const monitored = await f.service.handle(new Request(`http://localhost/api/canvas/v2/agent-collaboration?sessionId=${f.agent.id}`))
+    expect(await monitored.json()).toMatchObject({ total: 2 })
+    expect((await f.service.handle(new Request(`http://localhost/api/canvas/v2/agent-collaboration-detail?sessionId=unrelated&id=${taskId}`))).status).toBe(404)
+    expect((await f.service.handle(new Request(`http://localhost/api/canvas/v2/agent-collaboration?sessionId=${f.agent.id}&limit=101`))).status).toBe(400)
+  })
+  it('uses an object-rooted native schema for saved references and unsaved drafts', () => {
+    assertObjectJsonSchema(SpecialistOutput)
+    expect(validateJsonSchemaValue(SpecialistOutput, { result: { artifactId: randomUUID(), summary: '已保存' } })).toEqual([])
+    expect(validateJsonSchemaValue(SpecialistOutput, { result: simpleDraft() })).toEqual([])
+    expect(validateJsonSchemaValue(SpecialistOutput, simpleDraft())).not.toEqual([])
+    expect(validateJsonSchemaValue(SpecialistOutput, { result: { artifactId: randomUUID(), ...simpleDraft() } })).not.toEqual([])
+  })
+  it('hands off saved final artifacts once, retaining exact files, citations, versions and user approval', async () => {
+    const f = await fixture(false); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    await writeFile(join(f.dir, '原文.txt'), '一份已实际读取的原文')
+    const source = ((await f.call('creative_source_import', { path: '原文.txt' })).value as any).source
+    const taskId = randomUUID(), artifactId = randomUUID(), sources = [{ sourceId: source.id, start: 0, end: 6 }]
+    let saved: any, initialStat: any
+    const spawn = vi.fn(async (spec: any) => {
+      assertObjectJsonSchema(spec.request.outputSchema)
+      const child = await f.child('assets', spec.childId)
+      const call = (name: string, args: unknown) => f.registry.execute({ agent: child, name, arguments: args, callId: ToolCallId(randomUUID()), signal: spec.signal })
+      const result = (async () => {
+        expect(await call('creative_source_read', { sourceId: source.id, start: 0, length: 6 })).toMatchObject({ isError: false })
+        expect(await call('creative_artifact_save', { artifactId: randomUUID(), draft: simpleDraft('最终分镜'), sources })).toMatchObject({ isError: false })
+        const receipt = await call('creative_artifact_save', { artifactId, draft: { ...simpleDraft('最终分镜'), content: '第二版最终内容' }, sources })
+        expect(receipt).toMatchObject({ isError: false })
+        saved = (receipt.value as any).artifact
+        expect(await f.call('creative_artifact_decide', { artifactId, status: 'approved', userDecision: '用户确认此版' })).toMatchObject({ isError: false })
+        saved = f.coordinator.creative.artifact(saved.projectId, artifactId)
+        initialStat = await stat(saved.file.path)
+        return { stopReason: 'completed', structured: { result: { artifactId, summary: '交接已保存的第二版' } } }
+      })()
+      return { childId: child.id, result, dispose: async () => f.coordinator.unregister(child) }
+    })
+    Object.assign(f.ctx.subagents, { startActivation: spawn })
+    const args = { operationId: taskId, role: 'assets', task: '保存并交接最终成果', sourceIds: [source.id] }
+    const receipt = await f.call('canvas_specialist', args)
+    expect(receipt).toMatchObject({ isError: false, value: {
+      taskId, artifactId, version: 2, status: 'approved', sources, file: saved.file, draft: saved.draft, needsReview: false,
+    } })
+    expect((receipt.value as any).artifactOutputIds).toHaveLength(2)
+    expect(await f.call('canvas_specialist', args)).toMatchObject({ isError: false, value: receipt.value })
+    expect(spawn).toHaveBeenCalledTimes(1)
+    const finalStat = await stat(saved.file.path)
+    expect([finalStat.ino, finalStat.mtimeMs, finalStat.size]).toEqual([initialStat.ino, initialStat.mtimeMs, initialStat.size])
+    const reloaded = new CreativeProjects(f.dir); await reloaded.init()
+    expect(reloaded.artifact(saved.projectId, artifactId)).toEqual(saved)
+    expect(reloaded.run(saved.projectId, taskId)).toMatchObject({ state: 'completed', artifactOutputIds: (receipt.value as any).artifactOutputIds })
+  })
+  it.each(['flat', 'wrapped', 'changed'] as const)('compatibly handles a legacy artifact with a batch ID: %s', async (shape) => {
+    const f = await fixture(false); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const taskId = randomUUID(), original = simpleDraft('既有成果'), final = shape === 'changed' ? simpleDraft('新的最终成果') : original
+    let saved: any
+    const spawn = vi.fn(async (spec: any) => {
+      const child = await f.child('assets', spec.childId), binding = f.coordinator.binding(child)
+      // Seed an older mixed-ID record; new save tools must never create this shape.
+      const path = join(await realpath(f.dir), 'legacy.md'), body = Buffer.from('保留旧正文及格式')
+      await writeFile(path, body, { mode: 0o600 })
+      saved = f.coordinator.creative.saveArtifact({ id: taskId, taskId, projectId: binding.projectId,
+        draft: original, sources: [], author: child.id, version: 1, status: 'draft', createdAt: 1,
+        file: { path, relativePath: 'legacy.md', bytes: body.length, sha256: hashBytes(body) } })
+      await f.coordinator.creative.persist()
+      // Reorder wire keys to ensure the compatibility match is canonical.
+      const draft = { assetIds: final.assetIds, content: final.content, dependencies: final.dependencies, title: final.title, kind: final.kind }
+      return { childId: child.id, result: Promise.resolve({ stopReason: 'completed', structured: shape === 'flat' ? draft : { result: draft } }),
+        dispose: async () => f.coordinator.unregister(child) }
+    })
+    Object.assign(f.ctx.subagents, { startActivation: spawn })
+    const args = { operationId: taskId, role: 'assets', task: '兼容旧批次成果' }
+    const completed = await f.call('canvas_specialist', args)
+    expect(completed).toMatchObject({ isError: false, value: { taskId, draft: final } })
+    const value = completed.value as any
+    if (shape === 'changed') {
+      expect(value.artifactId).not.toBe(taskId)
+      expect(value.artifactOutputIds).toEqual([taskId, value.artifactId])
+    } else {
+      expect(value).toMatchObject({ artifactId: taskId, file: saved.file, artifactOutputIds: [taskId] })
+      expect(await readdir(f.dir)).not.toContain('Agent 创作')
+    }
+    expect(await readFile(saved.file.path, 'utf8')).toBe('保留旧正文及格式')
+    expect(await f.call('canvas_specialist', args)).toMatchObject({ isError: false, value })
+    expect(spawn).toHaveBeenCalledTimes(1)
+  })
+  it('rejects a batch ID before writing and retains full UUID suffixes for long equal titles', async () => {
+    const f = await fixture(false), child = await f.child(), taskId = f.coordinator.binding(child).taskId
+    const call = (artifactId: string) => f.registry.execute({ agent: child, name: 'creative_artifact_save',
+      arguments: { artifactId, draft: simpleDraft('超长中文标题😀'.repeat(16)), sources: [] }, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })
+    expect(await call(taskId)).toMatchObject({ isError: true })
+    expect(await readdir(f.dir)).not.toContain('Agent 创作')
+    const ids = [randomUUID(), randomUUID()], files: any[] = []
+    for (const id of ids) {
+      const receipt = await call(id)
+      expect(receipt).toMatchObject({ isError: false })
+      const file = (receipt.value as any).artifact.file, filename = file.path.split('/').at(-1)!
+      expect(filename.endsWith(`-${id}.md`)).toBe(true)
+      expect(Buffer.byteLength(filename)).toBeLessThanOrEqual(140)
+      expect(filename).not.toContain('\uFFFD')
+      files.push(file)
+    }
+    expect(files[0].path).not.toBe(files[1].path)
+    expect(await call(ids[1])).toMatchObject({ isError: false, value: { artifact: { file: files[1] } } })
+  })
+  it.each(['upstream', 'foreign', 'missing', 'modified', 'cwd'] as const)('blocks invalid saved completion without extra writes or respawn: %s', async (failure) => {
+    const f = await fixture(false); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const taskId = randomUUID(), artifactId = randomUUID(), project = f.coordinator.creative.project(f.agent.id, await realpath(f.dir))
+    const upstream = failure === 'upstream' || failure === 'foreign'
+    if (upstream) {
+      const foreign = f.coordinator.creative.project('foreign-root', await realpath(f.dir))
+      const path = join(f.dir, 'input.md'), body = Buffer.from('原输入')
+      await writeFile(path, body)
+      f.coordinator.creative.saveArtifact({ id: artifactId, taskId: randomUUID(), projectId: failure === 'foreign' ? foreign.id : project.id,
+        draft: simpleDraft(), sources: [], author: 'old-child', version: 1, createdAt: 1, status: 'draft',
+        file: { path, relativePath: 'input.md', bytes: body.length, sha256: hashBytes(body) } })
+    }
+    const nextCwd = await mkdtemp(join(tmpdir(), 'canvas-handoff-cwd-'))
+    cleanup.push(() => rm(nextCwd, { recursive: true, force: true }))
+    const spawn = vi.fn(async (spec: any) => {
+      const child = await f.child('assets', spec.childId)
+      const result = (async () => {
+        if (!upstream) {
+          const receipt = await f.registry.execute({ agent: child, name: 'creative_artifact_save',
+            arguments: { artifactId, draft: simpleDraft(), sources: [] }, callId: ToolCallId(randomUUID()), signal: spec.signal })
+          expect(receipt).toMatchObject({ isError: false })
+          const file = (receipt.value as any).artifact.file
+          if (failure === 'missing') await rm(file.path)
+          if (failure === 'modified') await writeFile(file.path, '用户修改')
+          if (failure === 'cwd') f.setCwd(nextCwd)
+        }
+        return { stopReason: 'completed', structured: { result: { artifactId } } }
+      })()
+      return { childId: child.id, result, dispose: async () => f.coordinator.unregister(child) }
+    })
+    Object.assign(f.ctx.subagents, { startActivation: spawn })
+    const args = { operationId: taskId, role: 'assets', task: '核对交接范围和实际文件', artifactIds: failure === 'upstream' ? [artifactId] : [] }
+    expect(await f.call('canvas_specialist', args)).toMatchObject({ isError: true })
+    expect(f.coordinator.creative.run(project.id, taskId)).toMatchObject({ state: 'blocked', artifactOutputIds: upstream ? [] : [artifactId] })
+    f.setCwd(f.dir)
+    expect(await f.call('canvas_specialist', args)).toMatchObject({ isError: true })
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(f.coordinator.creative.summary(project.id).totals.artifacts).toBe(failure === 'foreign' ? 0 : 1)
+    expect(await readdir(nextCwd)).toEqual([])
+  })
+  it('runs an executor batch with root model selection and presentation, denies extra creative intent and proves completion from actual receipts', async () => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const model = await configureGeneration(f); await chooseGeneration(f, model)
+    const nodeId = randomUUID(), commands: ExecutionCommand[] = [
+      { tool: 'canvas_create_node', input: { operationId: nodeId, revision: 0, kind: 'image-generation', title: '单图', prompt: '中文画面', modelId: model.id } },
+      { tool: 'canvas_update_node', input: { operationId: randomUUID(), revision: 0, nodeId, patch: { title: '已调整' } } },
+    ]
+    let spawns = 0
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      spawns++; expect(spec.request.agentPreset).toBe('canvas-executor')
+      const child = await f.child('executor', spec.childId)
+      const result = (async () => {
+        const call = (tool: string, input: unknown) => f.registry.execute({ agent: child, name: tool, arguments: input, callId: ToolCallId(randomUUID()), signal: spec.signal })
+        expect(await call('canvas_create_node', { ...commands[0].input, prompt: '自行改方向' })).toMatchObject({ isError: true })
+        for (const command of commands) expect(await call(command.tool, { ...command.input, revision: f.service.store.state(f.canvasId).graphRevision })).toMatchObject({ isError: false })
+        expect(f.coordinator.presentation.current(f.canvasId)).toMatchObject({ sessionId: f.agent.id, nodeIds: [nodeId] })
+        expect(f.registry.get('ask_user_question', child)).toBeUndefined()
+        return { stopReason: 'completed', structured: { status: 'completed', summary: '清单完成' }, output: [] }
+      })()
+      return { childId: child.id, result, dispose: async () => { f.coordinator.unregister(child) } }
+    } })
+    const args = { operationId: randomUUID(), task: '单图准备并改名', commands }
+    expect(await f.call('canvas_execute', args)).toMatchObject({ isError: false, value: { completed: true, revision: 2, receipts: [{ tool: 'canvas_create_node' }, { tool: 'canvas_update_node' }] } })
+    expect(await f.call('canvas_execute', args)).toMatchObject({ isError: false, value: { completed: true } })
+    expect(spawns).toBe(1)
+    expect(f.coordinator.collaboration.task(f.agent.id, args.operationId)).toMatchObject({
+      state: 'completed', commandCount: 2, receiptIds: commands.map((command) => command.input.operationId), nodeIds: [nodeId],
+    })
+    expect(f.service.store.state(f.canvasId).graph.nodes).toMatchObject([{ id: nodeId, title: '已调整', prompt: '中文画面', modelId: model.id }])
+    expect(f.service.store.state(f.canvasId).tasks).toHaveLength(0)
+    expect(await f.rawCall('canvas_update_node', commands[1].input)).toMatchObject({ isError: true })
+  })
+  it('does not trust an executor completion claim and rejects late writes after a root takeover', async () => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const command: ExecutionCommand = { tool: 'canvas_create_node', input: { operationId: randomUUID(), revision: 0, kind: 'image-generation', title: '迟到', prompt: '' } }
+    let childAgent: Agent | undefined
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      childAgent = await f.child('executor', spec.childId)
+      return { childId: childAgent.id, result: Promise.resolve({ stopReason: 'completed', structured: { status: 'completed', summary: '虚报' } }), dispose: async () => {} }
+    } })
+    expect(await f.call('canvas_execute', { operationId: randomUUID(), task: '验证回执', commands: [command] })).toMatchObject({ isError: false, value: { completed: false, receipts: [{ receipt: null }] } })
+    await f.coordinator.takeover(f.canvasId)
+    expect(await f.registry.execute({ agent: childAgent!, name: command.tool, arguments: command.input, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })).toMatchObject({ isError: true })
+    expect(f.service.store.state(f.canvasId).graph.nodes).toHaveLength(0)
+  })
+  it('retains explicit approval on old artifacts and marks dependents for review after source/spec revisions', async () => {
+    const f = await fixture(), project = f.coordinator.creative.project(f.agent.id, await realpath(f.dir), f.canvasId, '通用制作')
+    const source = await f.coordinator.creative.import(project.id, 'workspace:brief.md', 'brief.md', Buffer.from('第一版原文'), () => {})
+    const file = { path: join(f.dir, 'artifact.md'), relativePath: 'artifact.md', bytes: 0, sha256: '' }
+    const first = f.coordinator.creative.saveArtifact({ id: randomUUID(), taskId: randomUUID(), projectId: project.id, draft: simpleDraft('视觉词典'), sources: [{ sourceId: source.id, start: 0, end: 2 }], version: 1, author: 'assets', createdAt: 1, status: 'draft', file })
+    f.coordinator.creative.decide(project.id, first.id, 'approved', '用户确认第一版')
+    const { needsReview: _review, ...saved } = first
+    const dependent = f.coordinator.creative.saveArtifact({ ...saved, id: randomUUID(), draft: simpleDraft('片段一', [first.id]), sources: [] })
+    f.coordinator.creative.saveArtifact({ ...saved, id: randomUUID(), draft: { ...simpleDraft('视觉词典'), content: '修订词典' } })
+    await f.coordinator.creative.import(project.id, 'workspace:brief.md', 'brief.md', Buffer.from('第二版原文'), () => {})
+    expect(f.coordinator.creative.artifact(project.id, first.id)).toMatchObject({ status: 'approved', needsReview: true })
+    expect(f.coordinator.creative.artifact(project.id, dependent.id)).toMatchObject({ needsReview: true })
+    expect(f.coordinator.creative.project('another-session', await realpath(f.dir), f.canvasId).id).toBe(project.id)
+  })
+})
+describe('Agent reference generation and prompt mentions', () => {
+  async function media(f: Awaited<ReturnType<typeof fixture>>, kinds: ('image' | 'audio' | 'video')[] = ['image', 'audio', 'video']) {
+    const refs = kinds.map((kind) => ({ source: randomUUID(), assetId: randomUUID(), kind }))
+    await f.service.store.update(f.canvasId, (state) => {
+      for (const ref of refs) {
+        state.graph.nodes.push(CanvasNodeSchema.parse({ id: ref.source, kind: `${ref.kind}-asset`, title: ref.kind,
+          position: { x: 0, y: 0 } }))
+      }
+    })
+    const assets = []
+    for (const ref of refs) {
+      const path = join(f.dir, `${ref.assetId}.media`), body = Buffer.alloc(100)
+      await writeFile(path, body)
+      assets.push(await f.service.store.publish(f.canvasId, { id: ref.assetId, nodeId: ref.source, taskId: null, kind: ref.kind,
+        filename: `${ref.kind}-参考`, createdAt: 1, ...(ref.kind !== 'image' ? { duration: 3 } : {}) }, await realpath(path),
+      { bytes: body.length, mime: { image: 'image/png', audio: 'audio/wav', video: 'video/mp4' }[ref.kind], fileHash: hashBytes(body) }))
+    }
+    await f.service.store.update(f.canvasId, (state) => {
+      state.assets.push(...assets)
+      for (const ref of refs) state.graph.nodes.find((node) => node.id === ref.source)!.assetId = ref.assetId
+    })
+    return refs.map(({ source, assetId }) => ({ source, assetId }))
+  }
+  async function ready(kinds?: ('image' | 'audio' | 'video')[]) {
+    const f = await fixture()
+    const model = BUILTIN_MODELS.find((model) => model.protocol === 'seedance-video' && model.model_id.includes('2-0') && providerFor(model)?.id === 'bytedance')!
+    await f.service.store.saveModel({ ...model, api_key: 'fixture-key', endpoint_id: 'ep-reference-fixture' })
+    await chooseGeneration(f, model)
+    const refs = await media(f, kinds)
+    const prompt = refs.map((ref, index) => `${assetToken(ref.assetId)}用于${['人物形象', '对白节奏', '镜头运动'][index]}`).join('，')
+    return { ...f, model, refs, prompt, revision: f.service.store.state(f.canvasId).graphRevision }
+  }
+  async function storyboard(f: Awaited<ReturnType<typeof ready>>, dependencyIndices: number[]) {
+    const image = await configureGeneration(f), originTaskId = randomUUID()
+    await f.service.store.update(f.canvasId, (state) => {
+      const node = state.graph.nodes.find((node) => node.id === f.refs[0].source)!
+      Object.assign(node, { kind: 'image-generation', assetId: null, selectedResultId: f.refs[0].assetId,
+        modelId: image.id, prompt: '已生成的分镜', params: { size: '1024x1024', n: 1 } })
+      state.tasks.push({ id: originTaskId, nodeId: node.id, workspaceId: f.canvasId, status: 'completed',
+        snapshot: { model: image, prompt: '当时的参考', params: { size: '1024x1024', n: 1 },
+          referenceIds: dependencyIndices.map((index) => f.refs[index].assetId) },
+        resultIds: [f.refs[0].assetId], createdAt: 1, updatedAt: 1 })
+    })
+    f.revision = f.service.store.state(f.canvasId).graphRevision
+    return originTaskId
+  }
+  it('reads saved storyboard inputs in a small scope even after live source edges change, without disclosing task snapshots', async () => {
+    const f = await ready(['image', 'image', 'image', 'image', 'image']), originTaskId = await storyboard(f, [1, 2, 3])
+    await f.service.store.update(f.canvasId, (state) => {
+      state.graph.edges.push({ id: randomUUID(), ...f.refs[4], target: f.refs[0].source })
+    })
+    const before = await f.service.store.snapshot(f.canvasId), control = f.coordinator.control(f.canvasId)
+    const result = await f.call('canvas_inspect', { assetIds: [f.refs[0].assetId] })
+    expect(result.isError).toBe(false)
+    expect(result.value.graph.nodes).toEqual([])
+    expect(result.value.assets.map((asset: any) => asset.id)).toEqual([f.refs[0].assetId])
+    expect(result.value.referenceDependencies).toEqual([{ assetId: f.refs[0].assetId, provenance: 'task-snapshot', originTaskId,
+      dependencies: [1, 2, 3].map((index) => ({ ...f.refs[index], available: true, kind: 'image',
+        filename: before.assets.find((asset) => asset.id === f.refs[index].assetId)!.filename, token: assetToken(f.refs[index].assetId) })) }])
+    const selected = await f.call('canvas_inspect', { nodeIds: [f.refs[0].source] })
+    expect(selected.value.graph.nodes).toHaveLength(1)
+    expect(selected.value.tasks).toHaveLength(1)
+    expect(JSON.stringify(selected.value)).not.toContain('"snapshot"')
+    expect(JSON.stringify(selected.value)).not.toContain('fixture-key')
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    expect(f.coordinator.control(f.canvasId)).toEqual(control)
+    const specialist = await f.child()
+    const binding = f.coordinator.binding(specialist)
+    f.coordinator.bind(specialist, { ...binding, nodeIds: [f.refs[0].source], assetIds: [f.refs[0].assetId, f.refs[1].assetId] })
+    const scoped = (args: unknown) => f.registry.execute({ name: 'canvas_inspect', arguments: args, agent: specialist,
+      callId: ToolCallId(randomUUID()), signal: new AbortController().signal })
+    const allowed = await scoped({ assetIds: [f.refs[0].assetId] })
+    expect(allowed.value.referenceDependencies[0]).toMatchObject({ dependencies: [{ assetId: f.refs[1].assetId }], outOfScopeCount: 2 })
+    expect(JSON.stringify(allowed.value)).not.toContain(f.refs[2].assetId)
+    expect(await scoped({ assetIds: [f.refs[2].assetId] })).toMatchObject({ isError: true })
+    expect(await scoped({ nodeIds: [f.refs[2].source] })).toMatchObject({ isError: true })
+  })
+  it('blocks storyboard-only edits and handoffs, then atomically accepts direct character, scene, prop and voice references', async () => {
+    const f = await ready(['image', 'image', 'image', 'image', 'audio', 'video'])
+    await storyboard(f, [1, 2, 3])
+    const nodeId = randomUUID(), before = await f.service.store.snapshot(f.canvasId)
+    const args = { operationId: randomUUID(), revision: f.revision, kind: 'video-generation', title: '一致性镜头',
+      prompt: `${assetToken(f.refs[0].assetId)}用于构图`, modelId: f.model.id, references: [f.refs[0]] }
+    expect(await f.call('canvas_create_node', args)).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    expect(await f.call('canvas_create_node', { ...args, operationId: nodeId, prompt: '规划', references: [] })).toMatchObject({ isError: false })
+    expect(await f.call('canvas_connect', { operationId: randomUUID(), revision: f.revision + 1, ...f.refs[0], target: nodeId })).toMatchObject({ isError: false })
+    await f.service.store.update(f.canvasId, (state) => { state.graph.nodes.find((node) => node.id === nodeId)!.prompt = args.prompt })
+    const incomplete = await f.service.store.snapshot(f.canvasId), control = f.coordinator.control(f.canvasId)
+    expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: incomplete.graphRevision, nodeIds: [nodeId] })).toMatchObject({ isError: true })
+    expect(f.coordinator.control(f.canvasId)).toEqual(control)
+    expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: incomplete.graphRevision, nodeId, patch: { title: '仍可改名' } })).toMatchObject({ isError: false })
+    const uses = ['分镜构图和站位', '人物全身外观和服装', '场景空间和灯光', '道具外观', '只参考张小强音色，不复述样例内容', '动作节奏']
+    const prompt = f.refs.map((ref, index) => `${assetToken(ref.assetId)}用于${uses[index]}`).join('；') + '；张小强说：“快关门！”'
+    const update = { operationId: randomUUID(), revision: f.service.store.state(f.canvasId).graphRevision, nodeId, patch: { prompt }, references: f.refs }
+    expect(await f.call('canvas_update_node', update)).toMatchObject({ isError: false, value: { referenceCoverage: [1, 2, 3].map((index) => ({ assetId: f.refs[index].assetId, status: 'connected' })) } })
+    const state = f.service.store.state(f.canvasId)
+    expect(state.graph.edges.filter((edge) => edge.target === nodeId)).toHaveLength(6)
+    expect(await f.call('canvas_update_node', { ...update, revision: state.graphRevision })).toMatchObject({ isError: false })
+    expect(await f.call('canvas_update_node', { ...update, referenceExclusions: [{ assetId: f.refs[1].assetId, reason: '擅自忽略角色' }] })).toMatchObject({ isError: true })
+    expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: state.graphRevision, nodeIds: [nodeId] })).toMatchObject({ isError: false, value: { submitted: false, nodes: [{ references: f.refs.map((ref) => expect.objectContaining(ref)) }] } })
+    expect(state.tasks).toHaveLength(1)
+  })
+  it('requires exact per-shot exclusion decisions again at handoff without persisting them into graph or accepting arbitrary omissions', async () => {
+    const f = await ready(['image', 'image', 'image']), nodeId = randomUUID()
+    await storyboard(f, [1, 2])
+    const referenceExclusions = [{ assetId: f.refs[2].assetId, reason: '该人物只在前镜出现，本镜画外无对白' }]
+    const input = { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '单人镜头', modelId: f.model.id,
+      references: f.refs.slice(0, 2), prompt: f.refs.slice(0, 2).map((ref) => `${assetToken(ref.assetId)}用于本镜`).join('，'), referenceExclusions }
+    const before = await f.service.store.snapshot(f.canvasId)
+    for (const exclusions of [[...referenceExclusions, ...referenceExclusions],
+      [{ assetId: randomUUID(), reason: '未知来源' }], [{ assetId: f.refs[1].assetId, reason: '已经连入' }]]) {
+      expect(await f.call('canvas_create_node', { ...input, operationId: randomUUID(), referenceExclusions: exclusions })).toMatchObject({ isError: true })
+      expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    }
+    expect(await f.call('canvas_create_node', input)).toMatchObject({ isError: false, value: { referenceCoverage: [
+      { assetId: f.refs[1].assetId, status: 'connected' }, { assetId: f.refs[2].assetId, status: 'excluded', reason: referenceExclusions[0].reason },
+    ] } })
+    const handoff = { operationId: randomUUID(), revision: f.revision + 1, nodeIds: [nodeId] }
+    expect(await f.call('canvas_handoff_generation', handoff)).toMatchObject({ isError: true })
+    for (const referenceExclusions of [
+      [{ nodeId: randomUUID(), exclusions: input.referenceExclusions }],
+      [{ nodeId, exclusions: input.referenceExclusions }, { nodeId, exclusions: input.referenceExclusions }],
+    ]) expect(await f.call('canvas_handoff_generation', { ...handoff, operationId: randomUUID(), referenceExclusions })).toMatchObject({ isError: true })
+    const graph = structuredClone(f.service.store.state(f.canvasId).graph)
+    const complete = { ...handoff, operationId: randomUUID(), referenceExclusions: [{ nodeId, exclusions: input.referenceExclusions }] }
+    const result = await f.call('canvas_handoff_generation', complete)
+    expect(result).toMatchObject({ isError: false, value: { nodes: [{ referenceCoverage: [{ status: 'connected' }, { status: 'excluded' }] }] } })
+    expect(await f.call('canvas_handoff_generation', complete)).toMatchObject({ isError: false, value: result.value })
+    expect(f.service.store.state(f.canvasId).graph).toEqual(graph)
+  })
+  it('reports missing saved inputs and keeps explicit frames exempt from reference dependency coverage', async () => {
+    const f = await ready(['image', 'image']), nodeId = randomUUID()
+    await storyboard(f, [1])
+    const missing = randomUUID()
+    await f.service.store.update(f.canvasId, (state) => { state.tasks[0].snapshot.referenceIds.push(missing) })
+    const inspected = await f.call('canvas_inspect', { assetIds: [f.refs[0].assetId] })
+    expect(inspected.value.referenceDependencies[0].dependencies).toContainEqual({ assetId: missing, available: false })
+    const before = await f.service.store.snapshot(f.canvasId)
+    const input = { operationId: randomUUID(), revision: before.graphRevision, kind: 'video-generation', title: '缺失来源', modelId: f.model.id, references: f.refs, prompt: f.prompt }
+    expect(await f.call('canvas_create_node', input)).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    const params = { size: '720p/16:9', n: 1, seconds: 5, videoMode: 'frames', firstFrameId: f.refs[0].assetId }
+    expect(await f.call('canvas_create_node', { ...input, operationId: nodeId, references: [f.refs[0]], prompt: `${assetToken(f.refs[0].assetId)}用于首帧`, params })).toMatchObject({ isError: false })
+    expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: before.graphRevision + 1, nodeIds: [nodeId] })).toMatchObject({ isError: false, value: { nodes: [{ videoMode: 'frames', referenceCoverage: [] }] } })
+  })
+  it('uses the selected Kling budget and roles, skips unsupported voice lineage, and never connects audio or dispatches TTS', async () => {
+    const f = await ready(['image', 'audio']), nodeId = randomUUID()
+    await storyboard(f, [1])
+    const model = BUILTIN_MODELS.find((model) => model.protocol === 'kling-video')!
+    await f.service.store.saveModel({ ...model, api_key: 'fixture-kling-key' })
+    await chooseGeneration(f, model, true)
+    const inspected = await f.call('canvas_inspect', { assetIds: [f.refs[0].assetId] })
+    const selected = inspected.value.models.find((entry: any) => entry.modelId === model.id)
+    expect(selected.referenceLimits).toEqual({ text: { image: 0, audio: 0, video: 0, total: 0 }, reference: { image: 10, video: 5, audio: 0, total: 15 } })
+    expect(selected.referenceRoles.image).toContainEqual({ value: 'first_frame', label: '首帧' })
+    const input = { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '无音频参考能力的镜头',
+      modelId: model.id, prompt: `${assetToken(f.refs[0].assetId)}用于构图；对白：“快关门！”`, references: [f.refs[0]] }
+    const generate = vi.spyOn(f.service, 'generate')
+    expect(await f.call('canvas_create_node', input)).toMatchObject({ isError: false, value: { referenceCoverage: [{ assetId: f.refs[1].assetId, status: 'unsupported' }] } })
+    expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: f.revision + 1, nodeIds: [nodeId] }))
+      .toMatchObject({ isError: false, value: { nodes: [{ videoMode: 'reference', referenceCoverage: [{ status: 'unsupported' }] }], submitted: false } })
+    expect(f.service.store.state(f.canvasId).graph.edges.filter((edge) => edge.target === nodeId).map((edge) => edge.assetId)).toEqual([f.refs[0].assetId])
+    expect(generate).not.toHaveBeenCalled()
+    expect(f.service.store.state(f.canvasId).tasks).toHaveLength(1)
+  })
+  it('atomically saves mixed media edges and @ tokens, resolves exact inputs, and hands off without dispatch', async () => {
+    const f = await ready(), nodeId = randomUUID(), mutation = vi.spyOn(f.service, 'mutateGraph'), generate = vi.spyOn(f.service, 'generate')
+    const inspect = await f.call('canvas_inspect', {})
+    expect(inspect.value.promptReferences).toEqual(f.refs.map((ref, index) => ({
+      ...ref, kind: ['image', 'audio', 'video'][index], filename: f.service.store.state(f.canvasId).assets.find((asset) => asset.id === ref.assetId)!.filename, token: assetToken(ref.assetId),
+    })))
+    const args = { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '参考镜头', prompt: f.prompt, modelId: f.model.id, references: f.refs }
+    expect(await f.call('canvas_create_node', args)).toMatchObject({ isError: false, value: { references: inspect.value.promptReferences } })
+    expect(mutation).toHaveBeenCalledTimes(1)
+    expect(mutation.mock.calls[0][1]).toMatchObject({ nodes: [{ value: { prompt: f.prompt, params: { videoMode: 'reference' } } }], edges: f.refs.map((ref) => ({ value: { ...ref, target: nodeId } })) })
+    const state = f.service.store.state(f.canvasId)
+    expect(state.graphRevision).toBe(f.revision + 1)
+    expect(resolvePrompt(state.graph.nodes.find((node) => node.id === nodeId)!.prompt, state.graph.edges.map((edge) => edge.assetId), state.assets))
+      .toBe('[参考图1]用于人物形象，[参考音频2]用于对白节奏，[参考视频3]用于镜头运动')
+    expect(await f.call('canvas_create_node', { ...args, revision: f.revision + 1 })).toMatchObject({ isError: false })
+    expect(mutation).toHaveBeenCalledTimes(1)
+    expect(await f.call('canvas_create_node', { ...args, prompt: `${f.prompt}改动` })).toMatchObject({ isError: true })
+    expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: f.revision + 1, nodeIds: [nodeId] }))
+      .toMatchObject({ isError: false, value: { submitted: false, nodes: [{ nodeId, videoMode: 'reference', references: inspect.value.promptReferences }] } })
+    expect(generate).not.toHaveBeenCalled()
+    expect(state.tasks).toHaveLength(0)
+  })
+  it.each(['create', 'update'] as const)('rejects invalid %s reference edits with no partial node, prompt or edge commit', async (action) => {
+    const f = await ready(['image']), nodeId = randomUUID()
+    if (action === 'update') await f.call('canvas_create_node', { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '原镜头', prompt: '原提示词', modelId: f.model.id })
+    const before = await f.service.store.snapshot(f.canvasId)
+    const bad = [
+      { references: f.refs, prompt: '参考图1中的人物' },
+      { references: [], prompt: f.prompt },
+      { references: [f.refs[0], f.refs[0]], prompt: f.prompt },
+      { references: [{ source: randomUUID(), assetId: f.refs[0].assetId }], prompt: f.prompt },
+      { references: [{ source: f.refs[0].source, assetId: randomUUID() }], prompt: f.prompt },
+    ]
+    for (const input of bad) {
+      const common = { operationId: randomUUID(), revision: before.graphRevision, references: input.references }
+      const result = action === 'create'
+        ? await f.call('canvas_create_node', { ...common, kind: 'video-generation', title: '不应保存', prompt: input.prompt, modelId: f.model.id })
+        : await f.call('canvas_update_node', { ...common, nodeId, patch: { prompt: input.prompt, title: '不应保存' } })
+      expect(result.isError).toBe(true)
+      expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    }
+  })
+  it('fills a planned node and reuses existing exact edges rather than duplicating them', async () => {
+    const f = await ready(['image', 'audio']), nodeId = randomUUID()
+    await f.call('canvas_create_node', { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '规划', prompt: '规划', modelId: f.model.id })
+    const connect = await f.call('canvas_connect', { operationId: randomUUID(), revision: f.revision + 1, target: nodeId, ...f.refs[0] })
+    expect(connect).toMatchObject({ isError: false, value: { reference: { token: assetToken(f.refs[0].assetId) } } })
+    const original = structuredClone(f.service.store.state(f.canvasId).graph.edges[0])
+    expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: f.revision + 2, nodeId, references: f.refs, patch: { prompt: f.prompt } })).toMatchObject({ isError: false })
+    const state = f.service.store.state(f.canvasId)
+    expect(state.graph.edges).toHaveLength(2)
+    expect(state.graph.edges[0]).toEqual(original)
+    expect(state.graph.nodes.find((node) => node.id === nodeId)).toMatchObject({ prompt: f.prompt, params: { videoMode: 'reference' } })
+  })
+  it.each(['no-edge', 'no-at', 'disconnected-at', 'empty-prompt', 'bad-duration', 'audio-only'] as const)('blocks %s generation handoff and retains Agent control', async (failure) => {
+    const f = await ready(failure === 'audio-only' ? ['audio'] : ['image']), nodeId = randomUUID()
+    await f.call('canvas_create_node', { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '待修正', prompt: '规划', modelId: f.model.id,
+      ...(failure === 'no-edge' ? { params: { size: '720p/16:9', n: 1, seconds: 5, videoMode: 'frames', firstFrameId: f.refs[0].assetId } } : {}) })
+    if (failure !== 'no-edge') {
+      expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: f.revision + 1, nodeId, patch: { prompt: f.prompt }, references: f.refs })).toMatchObject({ isError: false })
+      await f.service.store.update(f.canvasId, (state) => {
+        const node = state.graph.nodes.find((node) => node.id === nodeId)!
+        if (failure === 'no-at') node.prompt = '参考图1用于人物形象'
+        if (failure === 'disconnected-at') node.prompt += assetToken(randomUUID())
+        if (failure === 'empty-prompt') node.prompt = ''
+        if (failure === 'bad-duration' && node.params && !('type' in node.params)) node.params.seconds = 999
+      })
+    }
+    const before = await f.service.store.snapshot(f.canvasId), control = f.coordinator.control(f.canvasId)
+    expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: before.graphRevision, nodeIds: [nodeId] })).toMatchObject({ isError: true })
+    expect(f.coordinator.control(f.canvasId)).toEqual(control)
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    expect(before.tasks).toHaveLength(0)
+  })
+  it('keeps an explicit first/last frame choice with true edges and mentions', async () => {
+    const f = await ready(['image', 'image']), nodeId = randomUUID()
+    const params = { size: '720p/16:9', n: 1, seconds: 5, videoMode: 'frames', firstFrameId: f.refs[1].assetId, lastFrameId: f.refs[0].assetId }
+    expect(await f.call('canvas_create_node', { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '指定起止画面', prompt: f.prompt, modelId: f.model.id, references: f.refs, params })).toMatchObject({ isError: false })
+    expect(f.service.store.state(f.canvasId).graph.nodes.find((node) => node.id === nodeId)?.params).toEqual(params)
+    expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: f.revision + 1, nodeIds: [nodeId] })).toMatchObject({ isError: false, value: { nodes: [{ videoMode: 'frames' }] } })
+  })
+  it.each(['frames-audio', 'image-count', 'foreign-frame'] as const)('rejects %s before any reference mutation', async (failure) => {
+    const f = await ready(failure === 'frames-audio' ? ['image', 'audio'] : failure === 'image-count' ? Array(10).fill('image') : ['image'])
+    const before = await f.service.store.snapshot(f.canvasId)
+    const params = { size: '720p/16:9', n: 1, seconds: 5, videoMode: failure === 'image-count' ? 'reference' : 'frames',
+      ...(failure === 'foreign-frame' ? { firstFrameId: randomUUID() } : {}) }
+    expect(await f.call('canvas_create_node', { operationId: randomUUID(), revision: f.revision, kind: 'video-generation', title: '无效参考', prompt: f.prompt, modelId: f.model.id, references: f.refs, params })).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it('preserves historical outputs and rejects a cycle in an atomic update', async () => {
+    const f = await ready(['image', 'image']), nodeId = randomUUID()
+    const image = await configureGeneration(f)
+    await chooseGeneration(f, image)
+    const newerId = randomUUID(), path = join(f.dir, `${newerId}.media`), body = Buffer.alloc(100)
+    await writeFile(path, body)
+    const newer = await f.service.store.publish(f.canvasId, { id: newerId, nodeId: f.refs[0].source, taskId: null, kind: 'image',
+      filename: '新版人物', createdAt: 2 }, await realpath(path), { bytes: body.length, mime: 'image/png', fileHash: hashBytes(body) })
+    await f.service.store.update(f.canvasId, (state) => {
+      state.assets.push(newer)
+      for (const ref of f.refs) {
+        const source = state.graph.nodes.find((node) => node.id === ref.source)!
+        Object.assign(source, { kind: 'image-generation', assetId: null, modelId: image.id, params: { size: '1024x1024', n: 1 } })
+        state.tasks.push({ id: randomUUID(), nodeId: source.id, workspaceId: f.canvasId, status: 'completed',
+          snapshot: { model: image, prompt: '旧素材', params: { size: '1024x1024', n: 1 }, referenceIds: [] }, resultIds: [ref.assetId], createdAt: 1, updatedAt: 1 })
+      }
+      state.graph.edges.push({ id: randomUUID(), source: f.refs[0].source, target: f.refs[1].source, assetId: f.refs[0].assetId })
+      state.tasks.push({ ...state.tasks[0], id: randomUUID(), resultIds: [newerId], createdAt: 2, updatedAt: 2 })
+      state.graph.nodes.find((node) => node.id === f.refs[0].source)!.selectedResultId = newerId
+    })
+    const before = await f.service.store.snapshot(f.canvasId)
+    expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: before.graphRevision, nodeId: f.refs[0].source, references: [f.refs[1]],
+      patch: { prompt: `${assetToken(f.refs[1].assetId)}用于构图` } })).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    expect(await f.call('canvas_create_node', { operationId: nodeId, revision: before.graphRevision, kind: 'video-generation', title: '旧人物版本', prompt: `${assetToken(f.refs[0].assetId)}用于人物形象`, modelId: f.model.id, references: [f.refs[0]] })).toMatchObject({ isError: false })
+    expect(f.service.store.state(f.canvasId).graph.edges.find((edge) => edge.target === nodeId)?.assetId).toBe(f.refs[0].assetId)
+  })
+  it.each(['revision', 'takeover'] as const)('does not save reference edits after %s changes', async (change) => {
+    const f = await ready(['image'])
+    if (change === 'revision') await f.service.store.update(f.canvasId, (state) => { state.graph.viewport.x++ })
+    else await f.coordinator.takeover(f.canvasId)
+    const before = await f.service.store.snapshot(f.canvasId)
+    expect(await f.call('canvas_create_node', { operationId: randomUUID(), revision: f.revision, kind: 'video-generation', title: '旧清单', prompt: f.prompt, modelId: f.model.id, references: f.refs })).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it('instructs main and every specialist to prefer references and give literal tokens and their uses', () => {
+    for (const prompt of [MAIN_PROMPT, ...Object.entries(METHODS).filter(([role]) => role !== 'voice').map(([, method]) => method)]) {
+      expect(prompt).toContain('有真实素材时优先使用参考生成')
+      expect(prompt).toContain('分镜构图、人物形象（含服装）、场景空间、道具外观、人物音色')
+      expect(prompt).toContain('不能替代人物/场景/道具原始参考')
+      expect(prompt).toContain('只参考张小强的音色，不复述样例内容')
+      expect(prompt).toContain('referenceDependencies')
+      expect(prompt).toContain('不支持音频参考时跳过人物音色一致性')
+      expect(prompt).toContain('models.referenceLimits[实际模式]中的image/video/audio/total')
+      expect(prompt).toContain('不得用“分镜已含细节”“数量不足”“找不到素材”排除必要一致性')
+      expect(prompt).toContain('{{asset:实际UUID}}')
+      expect(prompt).toContain('firstFrameId/lastFrameId不是连线')
+      expect(prompt).toContain('是什么、怎么用')
+    }
+  })
+})
 describe('Manual image and video generation handoff', () => {
+  it('returns a lossless native tool receipt for presented acknowledgements without a reason', async () => {
+    const f = await fixture(), model = await configureGeneration(f)
+    await chooseGeneration(f, model)
+    const publish = f.coordinator.presentation.publish.bind(f.coordinator.presentation)
+    vi.spyOn(f.coordinator.presentation, 'publish').mockImplementation(async (...args) => {
+      const intent = await publish(...args)
+      const identity = { sessionId: intent.sessionId, canvasId: intent.canvasId, epoch: intent.epoch, viewId: 'native-visible' }
+      f.coordinator.presentation.report({ ...identity, sequence: 1, visible: true, following: true })
+      f.coordinator.presentation.ack({ ...identity, presentationId: intent.id, graphRevision: intent.graphRevision, status: 'presented' })
+      return intent
+    })
+    const nodeId = randomUUID()
+    const result = await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: 'image-generation',
+      title: '可见节点', prompt: '一只猫', modelId: model.id })
+    expect(result).toMatchObject({ isError: false, value: { nodeId, presentation: { status: 'presented' } } })
+    expect(result.value.presentation).not.toHaveProperty('reason')
+  })
   async function ready(kind: 'image' | 'video' = 'image') {
     const f = await fixture(), model = await configureGeneration(f, kind, kind === 'video' ? 'https://maas.qianwenaiapi.com/api/v1' : 'https://api.modellink.online/v1'), nodeId = randomUUID()
     await chooseGeneration(f, model)
@@ -913,7 +1554,7 @@ describe('Canvas Agent permissions and durable operations', () => {
     const result = await f.ctx.agentPresets.remoteExportList()
     expect(result.presets.map((p) => p.id)).toEqual(['standard', 'canvas-creator', 'canvas-other-plugin'])
     expect(result.presets[0]).toBe(entries[0])
-    expect(roster.presets).toHaveLength(8)
+    expect(roster.presets).toHaveLength(3 + INTERNAL_CANVAS_PRESETS.length)
     const child = await f.child()
     expect(f.registry.get('canvas_inspect', child)).toBeDefined()
     expect(f.registry.get('canvas_generate', child)).toBeUndefined()
@@ -927,7 +1568,9 @@ describe('Canvas Agent permissions and durable operations', () => {
   })
   it('uses real scoped SDK registration and hides terminal tools without affecting another Agent', async () => {
     const f = await fixture()
-    expect(f.registry.schemas(f.agent).map((s) => s.name)).toContain('canvas_create_node')
+    expect(f.registry.schemas(f.agent).map((s) => s.name)).not.toContain('canvas_create_node')
+    expect(f.registry.schemas(f.agent).map((s) => s.name)).toContain('canvas_execute')
+    expect(await f.rawCall('canvas_create_node', { operationId: randomUUID(), revision: 0, kind: 'image-generation', title: '绕过', prompt: '' })).toMatchObject({ isError: true })
     expect(f.registry.get('bash', f.agent)).toBeUndefined()
     expect(f.registry.get('bash', scopeOf(f.ctx))).toBeDefined()
     expect((await f.call('bash', {})).isError).toBe(true)

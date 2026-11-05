@@ -74,6 +74,29 @@ async function waitImport(instance: CanvasService, taskId: string) {
   throw new Error('Import did not complete')
 }
 
+it('bounds collaboration SSE to the newest pending snapshot and cleans up on cancel', async () => {
+  const instance = await service()
+  let revision = 1
+  const observers = new Set<() => void>()
+  instance.agentControl = { manual: (_request: Request, operation: () => Promise<Response>) => operation(),
+    collaboration: { get closed() { return false }, page: () => ({ revision, tasks: [], total: 0, active: 0, next: null }),
+      subscribe: (listener: () => void) => { observers.add(listener); return () => observers.delete(listener) } },
+  } as any
+  try {
+    const response = await instance.handle(request('agent-collaboration-events?sessionId=root'))
+    const reader = response.body!.getReader()
+    for (revision = 2; revision <= 100; revision++) for (const observer of observers) observer()
+    revision = 100
+    const decoder = new TextDecoder()
+    const first = decoder.decode((await reader.read()).value)
+    const latest = decoder.decode((await reader.read()).value)
+    expect(first).toContain('"revision":1')
+    expect(latest).toContain('"revision":100')
+    await reader.cancel()
+    expect(observers.size).toBe(0)
+  } finally { instance.agentControl = undefined }
+})
+
 describe('local configuration and graph writes', () => {
   it('never returns full saved keys in model lists, preserves blank edits and uses restricted files', async () => {
     const instance = await service()

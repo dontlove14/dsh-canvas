@@ -85,7 +85,7 @@ describe('submission cards and asset ports', () => {
     expect(expanded.match(/react-flow__handle-right/g)).toHaveLength(kind === 'audio' ? 2 : 3)
     expect(expanded.match(/data-task-status="generating"/g)).toHaveLength(1)
     expect(expanded).not.toContain('设为主图'); expect(expanded).not.toContain('· 主图')
-    expect(expanded.includes('react-flow__handle-left')).toBe(kind !== 'audio')
+    expect(expanded.includes('react-flow__handle-left')).toBe(true)
     await act(async () => { await Promise.resolve() })
   })
   it('rejects collapsed and forged output connections while preserving connected @ references', () => {

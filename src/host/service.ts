@@ -13,7 +13,8 @@ import { mockRecord, validateMockGeneration } from '../shared/mockModels'
 import { resolvePrompt } from '../shared/promptMentions'
 import { resolveKlingPrompt } from '../shared/kling'
 import { WaveformCache } from './media/waveforms'
-import { TtsSettingsInputSchema, TtsParamsSchema, TtsTaskSnapshotSchema, isTtsParams, validateTtsText, type AnyTaskSnapshot } from '../shared/contracts'
+import { TtsSettingsInputSchema, TtsParamsSchema, TtsTaskSnapshotSchema, isTtsParams, validateTtsText, validateTtsReferences, type AnyTaskSnapshot } from '../shared/contracts'
+import { ChatAudioHandleSchema, ChatAudioResultSchema, type ChatAudioResult } from '../shared/chatAudio'
 import { StorageInputSchema, MediaUrlsSchema, MediaVariantSchema } from '../shared/objectStorage'
 import type { StorageFactory } from './object-storage/types'
 import { DerivedAssets } from './object-storage/derived'
@@ -35,6 +36,10 @@ export interface CanvasConfig {
   maxMediaBytes: number; maxReferenceBytes: number
 }
 export const routeDefinitions = [
+  { suffix: 'agent-collaboration', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-collaboration-detail', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-collaboration-artifact', methods: ['GET'] as const, requestBody: 'buffered' as const },
+  { suffix: 'agent-collaboration-events', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'agent-reference-choices', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'agent-reference-resolve', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'agent-presentation', methods: ['GET'] as const, requestBody: 'buffered' as const },
@@ -61,6 +66,7 @@ export const routeDefinitions = [
   { suffix: 'mock-generate', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'tts-generate', methods: ['POST'] as const, requestBody: 'buffered' as const },
   { suffix: 'tts-settings', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
+  { suffix: 'audio-result', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'tasks', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'task-search', methods: ['GET'] as const, requestBody: 'buffered' as const },
   { suffix: 'task', methods: ['GET', 'POST'] as const, requestBody: 'buffered' as const },
@@ -179,11 +185,17 @@ export class CanvasService {
       let snapshot: AnyTaskSnapshot
       if (tts) {
         if (node.kind !== 'tts-generation') throw new CanvasError('请选择语音生成节点')
-        if (state.graph.edges.some((edge) => edge.target === nodeId)) throw new CanvasError('语音节点不支持输入连线')
         validateTtsText(node.prompt)
         const service = this.store.ttsService()
         const params = TtsParamsSchema.parse(node.params)
-        snapshot = TtsTaskSnapshotSchema.parse({ model: service.model, prompt: node.prompt.trim(), params: { ...params, reference_id: params.reference_id.trim() }, referenceIds: [] })
+        const referenceIds = state.graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.assetId)
+        const references = referenceIds.map((id) => {
+          const asset = state.assets.find((asset) => asset.id === id)
+          if (!asset) throw new CanvasError('参考音频不可用')
+          return asset
+        })
+        validateTtsReferences(params, references)
+        snapshot = TtsTaskSnapshotSchema.parse({ model: service.model, prompt: node.prompt.trim(), params: { ...params, reference_id: params.reference_id.trim() }, referenceIds })
         ttsCredentialRef = service.credentialRef
       } else {
         if (node.kind === 'tts-generation') throw new CanvasError('语音节点请使用语音生成接口')
@@ -217,6 +229,22 @@ export class CanvasService {
     }, beforeCommit)
     this.runtime.wake()
     return task
+  }
+  chatAudioResult(canvas: string, input: { taskId?: string; assetId?: string }): ChatAudioResult {
+    const state = this.store.state(canvas)
+    const task = input.taskId ? state.tasks.find((task) => task.id === input.taskId) : undefined
+    if (input.taskId && !task) throw new CanvasError('试听任务不存在于此画布', 404)
+    const ids = input.assetId ? [input.assetId] : task?.resultIds ?? []
+    if (input.assetId && task && !task.resultIds.includes(input.assetId)) throw new CanvasError('音频不属于指定任务', 403)
+    const assets = ids.map((id) => {
+      const asset = state.assets.find((asset) => asset.id === id)
+      if (!asset || asset.kind !== 'audio' || task && (asset.taskId !== task.id || asset.nodeId !== task.nodeId))
+        throw new CanvasError('音频成果不可用或任务归属不一致', 404)
+      return asset
+    })
+    if (task && task.snapshot.model.kind !== 'audio') throw new CanvasError('请选择语音任务', 400)
+    return ChatAudioResultSchema.parse({ status: task?.status ?? 'completed', assets, ...(task?.error ? { error: task.error } : {}),
+      ...(task && isTtsParams(task.snapshot.params) ? { text: task.snapshot.prompt, voiceId: task.snapshot.params.reference_id } : {}) })
   }
   async taskAction(canvas: string, id: string, action: TaskAction): Promise<void> {
     if (this.runtime.isActive(id)) throw new CanvasError('任务正在处理，请稍后重试', 409)
@@ -269,6 +297,49 @@ export class CanvasService {
       if (suffix.startsWith('agent-')) {
         const agent = this.agentControl
         if (!agent) throw new CanvasError('当前环境未启用画布 Agent', 503, 'AGENT_UNAVAILABLE')
+        if (suffix.startsWith('agent-collaboration') && request.method === 'GET') {
+          const sessionId = z.string().min(1).max(200).parse(url.searchParams.get('sessionId'))
+          const cursor = z.coerce.number().int().min(0).max(10000).parse(url.searchParams.get('cursor') ?? 0)
+          const limit = z.coerce.number().int().min(1).max(100).parse(url.searchParams.get('limit') ?? 30)
+          if (suffix === 'agent-collaboration') return url.searchParams.has('id') ?
+            json(agent.collaboration.task(sessionId, IdSchema.parse(url.searchParams.get('id')))) :
+            json(agent.collaboration.page(sessionId, cursor, limit, url.searchParams.has('canvas') ? WorkspaceIdSchema.parse(url.searchParams.get('canvas')) : undefined))
+          if (suffix === 'agent-collaboration-detail') return json(agent.collaboration.detail(sessionId,
+            IdSchema.parse(url.searchParams.get('id')), url.searchParams.has('before') ?
+              z.coerce.number().int().positive().parse(url.searchParams.get('before')) : undefined, limit))
+          if (suffix === 'agent-collaboration-artifact') return json(agent.collaboration.artifact(sessionId,
+            IdSchema.parse(url.searchParams.get('id')), IdSchema.parse(url.searchParams.get('artifactId'))))
+          if (suffix === 'agent-collaboration-events') {
+            let dispose = (_close = true) => {}
+            let resume = () => {}
+            const stream = new ReadableStream<Uint8Array>({
+              start(controller) {
+                const encoder = new TextEncoder()
+                let stopped = false, last = -1
+                const send = () => {
+                  if (stopped) return
+                  if (agent.collaboration.closed) { dispose(); return }
+                  const page = agent.collaboration.page(sessionId)
+                  // Latest-state stream: keep at most one queued snapshot. A slow
+                  // reader catches up on pull instead of accumulating every event.
+                  if ((controller.desiredSize ?? 0) > 0 && (page.revision !== last || page.error)) {
+                    last = page.revision; controller.enqueue(encoder.encode(`id: ${last}\ndata: ${JSON.stringify(page)}\n\n`))
+                  }
+                }
+                resume = send
+                const unsubscribe = agent.collaboration.subscribe(send)
+                const timer = setInterval(() => { if (!stopped && (controller.desiredSize ?? 0) > 0) controller.enqueue(encoder.encode(': heartbeat\n\n')) }, 15000)
+                const abort = () => dispose()
+                dispose = (close = true) => { if (stopped) return; stopped = true; clearInterval(timer); unsubscribe(); request.signal.removeEventListener('abort', abort); if (close) controller.close() }
+                request.signal.addEventListener('abort', abort, { once: true })
+                if (request.signal.aborted) dispose(); else send()
+              },
+              pull() { resume() },
+              cancel() { dispose(false) },
+            })
+            return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } })
+          }
+        }
         if (suffix === 'agent-reference-choices' && request.method === 'GET') return json(await agent.chatReferences.choices(
           z.string().min(1).max(200).parse(url.searchParams.get('sessionId')), z.string().max(1000).parse(url.searchParams.get('query') ?? ''), request.signal,
           { ...(url.searchParams.has('browse') ? z.record(z.string(), z.unknown()).parse(JSON.parse(z.string().max(1000).parse(url.searchParams.get('browse')))) : {}),
@@ -375,6 +446,13 @@ export class CanvasService {
       if (suffix === 'tts-settings') {
         if (request.method === 'GET') return json(this.store.ttsSettings())
         if (request.method === 'POST') return json(await this.store.saveTtsSettings(TtsSettingsInputSchema.parse(await request.json())))
+      }
+      if (suffix === 'audio-result' && request.method === 'GET') {
+        const canvas = await requireCanvas()
+        const handle = ChatAudioHandleSchema.parse({ canvasId: canvas, title: '音频',
+          ...(url.searchParams.has('taskId') ? { taskId: url.searchParams.get('taskId') } : {}),
+          ...(url.searchParams.has('assetId') ? { assetId: url.searchParams.get('assetId') } : {}) })
+        return json(this.chatAudioResult(canvas, handle))
       }
       if (suffix === 'model-delete' && request.method === 'POST') return json({ models: await this.store.deleteModel(IdSchema.parse(url.searchParams.get('id'))) })
       if (suffix === 'catalog') {

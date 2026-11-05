@@ -9,7 +9,6 @@ const steps: Record<string, string> = {
   canvas_update_node: '我正在调整节点的提示词或参数。',
   canvas_connect: '我正在连接真实参考素材。',
   canvas_generate: '我正在提交这一步生成任务。',
-  canvas_specialist: '我正在请专业 Agent 整理这部分草稿。',
   canvas_draft: '我正在保存创作记录到当前工作区。',
   canvas_document: '我正在分类保存文档到当前工作区。',
   canvas_export_media: '我正在把你要求的素材下载到当前工作区。',

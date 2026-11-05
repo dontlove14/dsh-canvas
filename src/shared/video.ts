@@ -1,9 +1,20 @@
 import type { Asset, CanvasGraph, GenerationParams, ModelCapabilities, ModelRecord, PublicModel } from './contracts'
-import { isMultimodalVideo, WAN_VIDEO_LIMITS, MINIMAX_VIDEO_LIMITS } from './modelCatalog'
+import { isMultimodalVideo, WAN_VIDEO_LIMITS, MINIMAX_VIDEO_LIMITS, KLING_VIDEO_LIMITS, seedanceLimits } from './modelCatalog'
 import { seedanceGenerationParams, seedanceReferenceLimit, validateSeedanceConnections, validateSeedanceInputs } from './seedance'
 import { klingGenerationParams, validateKlingConnections, validateKlingInputs } from './kling'
 
 type VideoModel = Pick<ModelRecord, 'protocol' | 'model_id'>
+/** Agent planning uses the same family limits as connection validators. No stored model fields. */
+export function videoReferenceLimits(model: Pick<PublicModel, 'protocol' | 'model_id' | 'capabilities'>) {
+  const limits = model.protocol === 'seedance-video' ? seedanceLimits(model.model_id)
+    : model.protocol === 'wan-video' ? WAN_VIDEO_LIMITS : model.protocol === 'minimax-video' ? MINIMAX_VIDEO_LIMITS
+      : model.protocol === 'kling-video' ? { ...KLING_VIDEO_LIMITS, audios: 0 }
+        : { images: model.capabilities.referenceKinds.includes('image') ? model.capabilities.maxReferences : 0, videos: 0, audios: 0 }
+  const modes = model.capabilities.videoModes?.map((mode) => mode.value) ?? ['default']
+  return Object.fromEntries(modes.map((mode) => [mode, mode === 'text' ? { image: 0, video: 0, audio: 0, total: 0 }
+    : mode === 'frames' ? { image: 2, video: 0, audio: 0, total: 2 }
+      : { image: limits.images, video: limits.videos, audio: limits.audios, total: model.capabilities.maxReferences }]))
+}
 /** Native video families share mode inference while retaining their own wire protocol. */
 export function videoGenerationParams(params: GenerationParams, ids: readonly string[], model: VideoModel): GenerationParams {
   if (model.protocol === 'kling-video') return klingGenerationParams(params, ids)

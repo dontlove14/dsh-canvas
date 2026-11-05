@@ -90,7 +90,7 @@ export const beamPauseCss = `
 }`
 
 export function NodeLoading({ task, title, mediaLoading = false, compact = false }: {
-  task?: TaskSummary; title: string; mediaLoading?: boolean; compact?: boolean
+  task?: Pick<TaskSummary, 'status' | 'progress'>; title: string; mediaLoading?: boolean; compact?: boolean
 }) {
   const media = useContext(NodeMediaContext)
   if (task && (task.status === 'failed' || task.status === 'unknown' || task.status === 'save_failed')) {
@@ -108,7 +108,7 @@ export function NodeLoading({ task, title, mediaLoading = false, compact = false
 }
 
 function TrackedNodeLoading({ phase, task, title, compact }: {
-  phase: TaskStatus | 'media-loading'; task?: TaskSummary; title: string; compact: boolean
+  phase: TaskStatus | 'media-loading'; task?: Pick<TaskSummary, 'status' | 'progress'>; title: string; compact: boolean
 }) {
   const { theme, ink, surface, paused: environmentPaused } = useContext(NodeLoadingContext)
   const frame = useRef<HTMLDivElement>(null)

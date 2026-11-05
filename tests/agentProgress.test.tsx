@@ -11,6 +11,8 @@ import * as Cordis from '@deepseek-ai/cordis'
 import * as Slots from '@deepseek-ai/dsh-client-ui-slots'
 import { z } from 'zod'
 import { canvasProgressDefinition, CanvasProgress, installAgentProgress } from '../src/client/agentProgress'
+import { canvasDispatchDefinition } from '../src/client/collaborationView'
+import { canvasAudioDefinition } from '../src/client/chatAudio'
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals() })
 function native() {
@@ -79,4 +81,44 @@ it('does not claim unrelated tool calls and restores registration through owned 
   effect.mock.calls[0][0]()
   expect(register).toHaveBeenCalledWith(canvasProgressDefinition)
   expect(slot).toHaveBeenCalledWith({ name: 'conversation.chat.node', key: 'canvas-progress' }, CanvasProgress)
+})
+it('restores the actual audio receipt as a direct chat row outside the folded tool process', () => {
+  const { conversation, chat } = native()
+  const definitions = [canvasAudioDefinition, chat.toolDefinition, chat.turnProcessDefinition]
+  const assembler = new conversation.ConversationNodeAssembler({ entries: () => definitions, fallbackEntry: () => undefined },
+    { entries: () => [chat.chatViewDefinition] }, { entries: () => [chat.processGroupDefinition], forTarget: () => chat.processGroupDefinition })
+  const audio = { canvasId: crypto.randomUUID(), taskId: crypto.randomUUID(), title: '音色试听' }
+  assembler.replaceWindow([entry(0, 'turn/start', { turn: 1 }), entry(1, 'step/start', { turn: 1, step: 1 }),
+    entry(2, 'tool/call', { turn: 1, step: 1, callId: 'audio', name: 'canvas_show_audio', arguments: '{}' }),
+    entry(3, 'tool/result', { turn: 1, step: 1, message: { id: 'audio-result', role: 'tool', source: { kind: 'tool', callId: 'audio' },
+      toolCallId: 'audio', content: [{ type: 'text', text: JSON.stringify({ audio }) }] } })], false)
+  assembler.activateTarget('chat'); assembler.flush()
+  const card = [...assembler.snapshot('chat').nodes.values()].find((node: any) => node.kind === 'canvas-audio') as any
+  expect(card.data).toEqual(audio)
+  expect(assembler.grouped('chat').entries).toContainEqual({ kind: 'node', key: card.key })
+})
+it('publishes specialist and executor dispatch cards immediately outside native folded process and retains tool rows', () => {
+  const { conversation, chat } = native()
+  const definitions = [canvasProgressDefinition, canvasDispatchDefinition, chat.toolDefinition, chat.turnProcessDefinition]
+  const assembler = new conversation.ConversationNodeAssembler({ entries: () => definitions, fallbackEntry: () => undefined },
+    { entries: () => [chat.chatViewDefinition] }, { entries: () => [chat.processGroupDefinition], forTarget: () => chat.processGroupDefinition })
+  assembler.replaceWindow([entry(0, 'turn/start', { turn: 1 }), entry(1, 'step/start', { turn: 1, step: 1 })], false)
+  assembler.activateTarget('chat')
+  for (const [index, name] of ['canvas_specialist', 'canvas_execute'].entries()) {
+    const callId = `dispatch-${index}`
+    expect(assembler.append(entry(index + 2, 'tool/call', { turn: 1, step: 1, callId, name,
+      arguments: JSON.stringify({ operationId: `task-${index}`, role: 'story', task: '授权任务' }) }))).toBe('immediate')
+  }
+  assembler.flush()
+  const nodes = [...assembler.snapshot('chat').nodes.values()] as any[]
+  const cards = nodes.filter((n) => n.kind === 'canvas-dispatch')
+  expect(cards).toHaveLength(2)
+  expect(cards.map((n) => n.data.role)).toEqual(['story', 'executor'])
+  expect(nodes.filter((n) => n.kind === 'canvas-progress')).toHaveLength(0)
+  expect(nodes.filter((n) => n.kind === 'tool-call')).toHaveLength(2)
+  for (const node of cards) expect(assembler.grouped('chat').entries).toContainEqual({ kind: 'node', key: node.key })
+  assembler.append(entry(5, 'tool/result', { turn: 1, step: 1, message: { id: 'r', role: 'tool', toolCallId: 'dispatch-1',
+    source: { kind: 'tool', callId: 'dispatch-1' }, content: [{ type: 'text', text: '{"completed":false}' }] } }))
+  assembler.flush()
+  expect([...assembler.snapshot('chat').nodes.values()].find((n: any) => n.kind === 'canvas-dispatch' && n.data.role === 'executor')).toMatchObject({ data: { phase: 'returned' } })
 })

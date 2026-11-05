@@ -1,8 +1,63 @@
 # 数据与 HTTP 接口参考
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-11-03。契约 / Schema / 路由变更时复核。
+0.2.122的[Fish契约](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)：TtsParams新增可选`reference_text`（≤32000字符，无默认字段），原reference_id / speed / volume保持；TtsTaskSnapshot.referenceIds由0份改为0–1份UUID。图保存检查音频类型/一份/ID互斥/实际来源，生成再要求非空参考原文；无需DDL迁移。TTS朗读prompt不含媒体token，references仍真实同次保存，其他生成保留@规则。
+
+| 新只读入口 | 输入与结果 |
+| --- | --- |
+| fish_voice_search（voice-only） | query≤160，pageUrl默认官网discovery；只筛选当前页标题，items≤20、可续pages≤10、totalListed与verified=false；无公开列表则unavailable及原因 |
+| fish_voice_read（voice-only） | sourceUrl≤2048，限定官网m详情；voice为真实id/title/description/sourceUrl/retrievedAt/sourceHash，verified=true，listened=false；每批最多8次网页读取 |
+| canvas_show_audio（main-only） | 实际taskId或assetId、title 1–160；限当前画布，返回audio:{canvasId,taskId?,assetId?,title}、submitted=false、autoplay=false，不提交任务 |
+| GET `/api/canvas/v2/audio-result` | canvas必填、taskId/assetId至少一个；status、assets≤10、error?、text?、voiceId?；沿Harness owner鉴权，校验任务/资产实际音频归属，不返回凭据/供应商任务ID/短期URL |
+
+音色候选audio-plan.content为JSON：`{candidates:[{...详情voice实际字段,suitability}],limitation}`，最多8项，未知/重复/跨批次/改写来源拒绝403 FISH_EVIDENCE_REQUIRED，格式错误400同码。网页读取失败502 FISH_PAGE_UNAVAILABLE，地址错误400 FISH_SOURCE_INVALID，上限409 FISH_READ_LIMIT；不得猜测结果或无界重试。audio-result错误任务/资产404，跨任务403，非音频400；查询与恢复均无生成副作用。播放器只从实际成功canvas_show_audio回执创建行，卡片忙任务每2秒只读查询，错误连续3次后可重新读取；隐藏停止。
+
+0.2.121在Agent模型目录增加`referenceLimits[模式].{image,video,audio,total}`（无模式模型用default）；Kling另有`referenceRoles.{image,video}`。限额来自实际连接校验的模型规则，不新增模型持久字段。`canvas_inspect({nodeIds?,assetIds?})`各1–100 UUID，只读小范围；空对象兼容旧完整输出。节点范围包括实际输出/直接输入/任务摘要。新增`referenceDependencies:[{assetId,provenance,originTaskId?,dependencies:[{assetId,available,source?,kind?,filename?,token?}]}]`，来源为成果当时保存的任务输入，非当前边或最新结果；专业级只返回获授依赖，其余仅outOfScopeCount。未知节点/素材404、越专业范围403 CREATIVE_SCOPE、读取修订变化409 GRAPH_CONFLICT；不返回完整任务快照或凭据。
+
+参考生视频create/update与交接核对已连接派生素材的原始依赖。create/update可选`referenceExclusions:[{assetId,reason}]`（最多100，原因1–500字符）；只能排除当前真实且未连接的依赖。交接用`referenceExclusions:[{nodeId,exclusions:[{assetId,reason}]}]`，每组须属于本轮nodeIds且不重复。排除理由绑定清单与回执，不写入图；交接需重新提供。返回`referenceCoverage:[{assetId,via,available,status,reason?}]`，status为connected/excluded/unsupported；已知音频依赖在所选模型audio上限为0时自动标unsupported，跳过音色。必要依赖未连接且无明确决策返回409 AGENT_REFERENCE_INCOMPLETE，非法排除返回409 AGENT_REFERENCE_INVALID；失败无半保存、保留控制、不提交生成。显式首尾帧、图片生成与独立改名/位置不执行参考模式依赖门禁。最小排除例：`canvas_handoff_generation({operationId,revision,nodeIds:[videoNodeId],referenceExclusions:[{nodeId:videoNodeId,exclusions:[{assetId:原分镜含有但本镜不出现的角色图ID,reason:"角色仅在前镜出现，本镜无对白"}]}]})`。见[ADR-0090](adr/0090-model-aware-video-consistency-references.md)。
+
+0.2.120给`canvas_create_node` / `canvas_update_node`增加可选`references:[{source,assetId}]`（严格对象、真实UUID、最多100项）。输入prompt或patch.prompt使用inspect.promptReferences返回的字面`{{asset:UUID}}`，每项说明用途；不是普通名称文本。节点、补充边及视频模式同次保存；已有同来源边复用，其他原边保留。输出增加references；`canvas_connect`输出增加reference（source/assetId/kind/filename/token）。inspect主级/执行级返回真实可引用素材的promptReferences，专业级仅获授素材。
+
+最小参考镜头清单：`{tool:"canvas_create_node",input:{operationId:nodeId,revision,kind:"video-generation",title:"镜头",modelId,prompt:"人物形象沿用{{asset:图片UUID}}，对白节奏参考{{asset:音频UUID}}",references:[{source:人物节点ID,assetId:图片UUID},{source:音频节点ID,assetId:音频UUID}]}}`；UUID均取实际读取回执，主级仍负责模型选择。视频有参考时默认推断reference，明确frames保留。手动生成交接现在完整核对参数与真实输入，nodes返回videoMode和references；未连接token、缺少标签或悬空首尾帧依赖拒绝，控制不释放、任务不提交。新409 AGENT_REFERENCE_INVALID及原有图/模型校验错误；改变意图使用新operationId，冲突重读，不强行重放。旧清单参数兼容，旧缺引用准备不再通过交接。无HTTP/DDL/存量迁移，见[ADR-0089](adr/0089-agent-reference-generation-and-prompt-mentions.md)。
+
+0.2.116新增协作只读路由，所有请求沿用Harness owner鉴权，必传`sessionId`（根会话）。日志和契约见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)、[collaboration](../src/shared/collaboration.ts)。
+
+| GET `/api/canvas/v2/` 路径 | 参数 | 返回 |
+| --- | --- | --- |
+| agent-collaboration | sessionId；可选cursor≥0、limit 1–100（默认30）、canvas；或id | 最近批次页、next、total、active、revision；首页另含最多100条activeTasks；id只返回该root任务元数据 |
+| agent-collaboration-detail | sessionId、id；可选before正整数、limit（默认30，客户端50） | task、按seq排序的最近过程、next向前游标 |
+| agent-collaboration-artifact | sessionId、id、artifactId | 本任务已保存成果快照title/content/version/status/needsReview/relativePath，不接受任意文件路径 |
+| agent-collaboration-events | sessionId | SSE单调revision + 最新30批次及最多100条activeTasks；连接恢复重发当前状态，15秒心跳，慢读者最多一个待消费快照，不重放操作 |
+
+0.2.124任务可选派生`activity`含seq/time/actor/kind/text/tool；只读最后一条公开事件，text最多360字符，不含data/callId/工具正文，未写入日志schema。无该字段的旧记录按task状态显示；新增字段可被旧客户端忽略，页游标仍对应原历史列表。用途见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)。
+
+跨root详情/成果404；旧无记录任务保留原生工具历史。记录故障通过page.error显示。工具摘要采用字段白名单、长度限制与凭据/链接省略，不返回原文页正文、系统提示、reasoning或模型replay。CanvasGraph/DDL不变。
+
+文档类型：参考；负责人：项目维护者；最近核对：2026-11-05。契约 / Schema / 路由变更时复核。
 
 可执行事实：[contracts](../src/shared/contracts.ts)、[v2](../src/shared/v2.ts)、[schema.sql](../src/host/persistence/schema.sql)、[service](../src/host/service.ts)。业务行为见[业务参考](business.md)，配置限额见[运行指南](operations.md)。
+
+0.2.115增加Agent工具契约，见[creative](../src/shared/creative.ts)、[execution](../src/shared/execution.ts)与[ADR-0086](adr/0086-creative-projects-and-scoped-canvas-executor.md)。没有新增HTTP路径或DDL。
+
+| 工具 | 权限与输入 | 结果 / 重试 |
+| --- | --- | --- |
+| creative_project | main；cursor默认0、limit默认50/最大100 | 来源/成果/批次摘要、totals与next；不返回全部正文 |
+| creative_source_import | main；attachmentId或当前工作区path二选一；TXT/MD，32 MiB，UTF-8 / BOM UTF-16 | sourceId、版本、哈希、章节数；同源当前内容相同复用，改变另存版本 |
+| creative_source_index | main/专业；获授sourceId，cursor/limit分页 | 候选章节标题、start/end、next；不是全文分析结论 |
+| creative_source_read | 专业；获授sourceId、start、length默认/最大12000 | 正文、start/end/next/citation；偏移单位UTF-16，持久记录已读范围 |
+| creative_artifact_read | main或获授子级；artifactId | 一份实际成果、文件/来源/依赖/认可/需复核；校验工作区文件哈希 |
+| creative_artifact_save | 专业；独立于taskId的稳定artifactId、CreativeDraft和sources范围 | 工作区Markdown与持久成果；相同内容同ID核验后复用，依赖及assetId限本批次范围，未读原文不能引用 |
+| creative_progress | 专业；progress最多2000字 | 保存批次进度；不表示完成 |
+| creative_artifact_decide | main；artifactId、approved/rejected、userDecision | 记录用户认可/拒绝；主自检不等于用户认可 |
+| canvas_specialist | main；operationId、role、task、sourceIds/artifactIds/nodeIds/assetIds各最多100 | taskId、实际artifactId、draft/sources/version/status/needsReview/file/baseRevision/stale/artifactOutputIds；已保存成果核验后交接，失败批次不自动重spawn |
+| canvas_execute | main；operationId、task、1–100项{tool,input}、artifactIds、allowTts默认false | completed、逐项实际receipts、revision、taskId；子级自报不作为完成证据 |
+
+最小长文流程：`creative_source_import({path:"原文.txt"})` → `canvas_specialist({operationId,role:"story",task:"先分析第一单元并保留未读进度",sourceIds:[sourceId]})` → `creative_artifact_read({artifactId})` → 用户认可后记录decide。工作区原生@仍由Harness处理，不新增文件候选器。
+
+0.2.118专业完成优先`structured_output({result:{artifactId,summary}})`，ID必须为本批次实际保存的最终产出；不能仅引用获授上游成果。summary可选、最多2000字符。未保存时返回result内完整CreativeDraft，宿主先精确匹配本批次已有draft，匹配复用，否则独立UUID另存。仍接收旧平铺draft；旧成果混用ID不改写。新保存使用批次ID返回409 ARTIFACT_ID_IS_TASK；缺失/修改文件返回FILE_COLLISION，切工作区返回WORKSPACE_CHANGED，不通过重新保存恢复。成功批次重试不spawn、不再写文件。主级读取或依赖使用回执artifactId，taskId仅用于批次进度。详见[ADR-0088](adr/0088-saved-artifact-handoff-and-independent-identity.md)。
+
+最小节点流程：main先canvas_open，必要时canvas_select_model；`canvas_execute({operationId,task:"准备单图",commands:[{tool:"canvas_create_node",input:{operationId:nodeId,revision,kind:"image-generation",title:"单图",prompt:"中文提示词",modelId}}]})`；确认completed及实际回执后main调用canvas_handoff_generation。create/update/connect/import/generate只在执行预设注册；create等原输入Schema/服务校验保持。子级只能更新CAS revision/note，其他意图需完全匹配主级清单。FishTTS额外要求allowTts=true，图片/视频生成仍拒绝。
+
+关键错误：403 SOURCE_FORBIDDEN / CREATIVE_SCOPE / SOURCE_UNREAD / AGENT_EXECUTION_SCOPE；409 SOURCE_STALE / REQUEST_REUSED / SPECIALIST_INCOMPLETE / AGENT_CONTROL_REVOKED / FILE_COLLISION；413 SOURCE_TOO_LARGE；415 SOURCE_FORMAT / SOURCE_ENCODING；503 CREATIVE_STATE_INVALID。缺口/中断保留实际进度，以新批次ID续作，不能重提未知付费任务。旧agent-ledger v1和存量数据保持兼容，新creative-projects v1独立保存。
 
 0.2.108内置可配置目录移除Wan Model Link两项001f / 0021，Aliyun官方0020 / 0022保持，原配置仍可由模型接口读取且configurable=false。新配置或以该网关模型新生成返回400 / MODEL_NOT_SUPPORTED，提示选择Aliyun；已有记录 / 绑定 / 任务快照与幂等回查保持，不新增端点或DDL。见[ADR-0082](adr/0082-temporary-wan-modellink-suspension.md)。
 

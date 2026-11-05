@@ -86,3 +86,25 @@
             name: dsh-canvas/agent-preset
             config:
               role: review
+    - id: preset-canvas-executor
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-executor
+        name: 画布执行（主 Agent 调用）
+        order: 206
+        plugins:
+          - id: canvas-executor
+            name: dsh-canvas/agent-preset
+            config:
+              role: executor
+    - id: preset-canvas-voice
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: canvas-voice
+        name: 音色查找（主 Agent 调用）
+        order: 207
+        plugins:
+          - id: canvas-voice
+            name: dsh-canvas/agent-preset
+            config:
+              role: voice

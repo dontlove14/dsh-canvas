@@ -168,7 +168,7 @@ describe('canvas-owned audio playback', () => {
   it('renders TTS results with only an output, preserves audio playback and keeps the text editor without model choices', async () => {
     const { container, cards, audio, click } = await setup(true)
     expect(cards[0].querySelector('.react-flow__handle.source')).toBeTruthy()
-    expect(cards[0].querySelector('.react-flow__handle.target')).toBeNull()
+    expect(cards[0].querySelector('.react-flow__handle.target')).toBeTruthy()
     click(0); expect(audio[0].paused).toBe(false)
     expect(container.querySelector('.dc-tts-editor [role="textbox"]')?.getAttribute('aria-label')).toBe('文字内容')
     expect(container.querySelector('.dc-tts-editor [role="combobox"]')).toBeNull()

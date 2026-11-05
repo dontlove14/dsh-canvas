@@ -1,5 +1,17 @@
 # 文档导航与维护约定
 
+Fish音色查找、单音频复刻、真实合成试听与对话播放器见[ADR-0091](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)；官网读取范围及失败边界、旧数据兼容和人工验收同步维护。
+
+专业成果保存与交接的身份、兼容性和恢复边界见[ADR-0088](adr/0088-saved-artifact-handoff-and-independent-identity.md)。
+
+Agent参考生成、节点@标签与真实连线的保存/交接规则见[ADR-0089](adr/0089-agent-reference-generation-and-prompt-mentions.md)。
+
+视频按所选模型规划参考数量、适用音色和原始一致性依赖见[ADR-0090](adr/0090-model-aware-video-consistency-references.md)。
+
+聊天派发卡片和只读过程见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)，当前右侧悬浮卡片、Voice Ring与真实会话委派图见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)；只读HTTP契约见[数据接口](data-api.md)，本机日志恢复见[运行指南](operations.md)，人工验收见[手动清单](manual-tests.md)。
+
+主Agent统筹、专业创作、同级执行子Agent和持久原文/成果/进度见[ADR-0086](adr/0086-creative-projects-and-scoped-canvas-executor.md)；工具参考见[数据接口](data-api.md)，新增验收见[手动清单](manual-tests.md)。
+
 文档类型：参考；负责人：项目维护者；最近核对：2026-11-03；复核周期：每次发布，最迟每月一次。
 
 本目录描述 SQLite / 多画布版本的当前实现。ADR-0001–0012 保留首版补录，0013–0017 记录存储 / Runtime 实施，0018 记录项目列表与编辑器导航；历史实现已标注替代关系。

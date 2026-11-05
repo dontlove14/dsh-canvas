@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
+import { decode } from '@msgpack/msgpack'
 import { CanvasService } from '../src/host/service'
 import { fakeFactory, initialize } from './support/objectStorage'
 import { Providers } from '../src/host/providers'
-import { CanvasNodeSchema, defaultTtsParams, emptyGraph, FISH_TTS_ENDPOINT, TtsParamsSchema, type CanvasNode, type TaskStatus } from '../src/shared/contracts'
+import { CanvasNodeSchema, defaultTtsParams, emptyGraph, FISH_TTS_ENDPOINT, TtsParamsSchema, validateGraph, validateTtsReferences, type CanvasNode, type TaskStatus } from '../src/shared/contracts'
+import { connectAssetReference } from '../src/shared/referenceConnection'
 import { hash } from '../src/host/persistence/database'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -43,6 +45,70 @@ async function wait(service: CanvasService, id: string, status: TaskStatus) {
 const url = (suffix: string) => `http://localhost/api/canvas/v2/${suffix}`
 function post(suffix: string, body: unknown) { return new Request(url(suffix), { method: 'POST', body: JSON.stringify(body) }) }
 describe('FishTTS durable generation', () => {
+  it('clones from exactly one original audio using binary MessagePack, distinct transcript, pinned snapshot and idempotent task', async () => {
+    const fetch = vi.fn(async () => new Response(wav())); vi.stubGlobal('fetch', fetch)
+    const service = await instance()
+    await service.store.saveTtsSettings({ endpoint: FISH_TTS_ENDPOINT, revision: 0, api_key: 'clone-fixture' })
+    const tts = { ...node(), params: { ...defaultTtsParams(), reference_text: '  这是参考声音的原文。  ' }, prompt: '这是新生成的试听内容。' }
+    const source = { ...node(), id: randomUUID(), kind: 'audio-asset' as const, params: null, assetId: null as string | null }
+    await service.saveGraph('w', { ...emptyGraph(), nodes: [source, tts] }, 0)
+    const bytes = wav().subarray(0, 944); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.writeUInt32LE(bytes.length - 44, 40)
+    const asset = await service.store.saveMedia(Readable.from([bytes]), { id: randomUUID(), kind: 'audio', filename: '参考.wav', createdAt: 1, nodeId: source.id, taskId: null }, 1000, 'audio')
+    await service.store.update('w', (state) => { state.assets.push(asset); state.graph.nodes[0].assetId = asset.id })
+    const current = service.store.state('w')
+    const graph = connectAssetReference(current.graph, source.id, tts.id, asset.id, current.assets, [], [])
+    const saved = await service.saveGraph('w', graph, current.graphRevision)
+    const requestId = randomUUID()
+    const task = await service.generate('w', tts.id, saved.graphRevision, requestId, false, true)
+    expect((await service.generate('w', tts.id, saved.graphRevision, requestId, false, true)).id).toBe(task.id)
+    const complete = await wait(service, task.id, 'completed')
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const init = fetch.mock.calls[0][1] as RequestInit
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/msgpack')
+    expect(new Headers(init.headers).get('model')).toBe('s1')
+    const payload = decode(init.body as Uint8Array) as any
+    expect(payload).not.toHaveProperty('reference_id')
+    expect(payload.text).toBe(tts.prompt)
+    expect(payload.references).toHaveLength(1)
+    expect(Buffer.from(payload.references[0].audio)).toEqual(bytes)
+    expect(payload.references[0].text).toBe('这是参考声音的原文。')
+    expect(complete.snapshot.referenceIds).toEqual([asset.id])
+    expect(complete.snapshot.params).toEqual(tts.params)
+    const audio = service.chatAudioResult('w', { taskId: task.id })
+    expect(audio.assets[0].id).toBe(complete.resultIds[0])
+    expect(audio.text).toBe(tts.prompt)
+    expect(() => service.chatAudioResult('w', { taskId: task.id, assetId: asset.id })).toThrow('不属于')
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+  it('permits a draft audio edge without a transcript but rejects generation, a second audio and mixed ID before submission', async () => {
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+    const service = await instance()
+    await service.store.saveTtsSettings({ endpoint: FISH_TTS_ENDPOINT, revision: 0, api_key: 'clone-fixture' })
+    const tts = { ...node(), params: defaultTtsParams() }
+    const source = { ...node(), id: randomUUID(), kind: 'audio-asset' as const, params: null, assetId: null as string | null }
+    await service.saveGraph('w', { ...emptyGraph(), nodes: [source, tts] }, 0)
+    const asset = await service.store.saveMedia(Readable.from([wav()]), { id: randomUUID(), kind: 'audio', filename: '参考.wav', createdAt: 1, nodeId: source.id, taskId: null }, 100_000, 'audio')
+    await service.store.update('w', (state) => { state.graph.nodes[0].assetId = asset.id; state.assets.push(asset) })
+    const state = service.store.state('w'), graph = connectAssetReference(state.graph, source.id, tts.id, asset.id, state.assets, [], [])
+    await service.saveGraph('w', graph, state.graphRevision)
+    await expect(service.generate('w', tts.id, service.store.state('w').graphRevision, randomUUID(), false, true)).rejects.toThrow('参考音频原文')
+    expect(() => connectAssetReference(graph, source.id, tts.id, asset.id, state.assets, [], [])).toThrow('最多连接一份')
+    expect(() => validateGraph({ ...graph, nodes: graph.nodes.map((n) => n.id === tts.id ? { ...tts, params: { ...defaultTtsParams(), reference_id: 'fixed' } } : n) }, state.assets, [])).toThrow('二选一')
+    expect(() => validateTtsReferences(defaultTtsParams(), [{ kind: 'image' }])).toThrow('只能连接音频')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(service.store.state('w').tasks).toEqual([])
+  })
+  it('checks audio bytes and total size before outbound submission', async () => {
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+    const readMedia = vi.fn(async () => Buffer.from('not audio'))
+    const provider = new Providers({ readMedia, stagePath: (name) => name }, { requestTimeoutMs: 1000, maxMediaBytes: 1000, maxReferenceBytes: 1000 }, new AbortController().signal)
+    const service = await instance()
+    await service.store.saveTtsSettings({ endpoint: FISH_TTS_ENDPOINT, revision: 0, api_key: 'test' })
+    const snapshot = { model: service.store.ttsService().model, prompt: '新内容', params: { ...defaultTtsParams(), reference_text: '参考内容' }, referenceIds: [randomUUID()] }
+    await expect(provider.prepare(snapshot, 'original-task')).rejects.toThrow('有效音频')
+    expect(readMedia).toHaveBeenCalledWith(snapshot.referenceIds[0], 1000, 'original-task')
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('queues multiple voice submissions on one node with distinct inputs and keys and recovers them without changing DDL', async () => {
     const fetch = vi.fn(async () => new Response(wav())); vi.stubGlobal('fetch', fetch)
     const service = await instance(); await service.runtime.close()
@@ -139,7 +205,7 @@ describe('FishTTS durable generation', () => {
     source.assetId = asset.id
     await service.store.update('w', (state) => { state.assets.push(asset); state.graph.nodes.find((n) => n.id === source.id)!.assetId = asset.id })
     const state = service.store.state('w')
-    await expect(service.saveGraph('w', { ...state.graph, edges: [{ id: randomUUID(), source: source.id, target: tts.id, assetId: source.assetId! }] }, state.graphRevision)).rejects.toThrow('不支持输入连线')
+    await expect(service.saveGraph('w', { ...state.graph, edges: [{ id: randomUUID(), source: source.id, target: tts.id, assetId: source.assetId! }] }, state.graphRevision)).rejects.toThrow('只能二选一')
     await service.saveGraph('w', { ...state.graph, nodes: state.graph.nodes.map((n) => n.id === tts.id ? { ...n, prompt: '(happy)' } : n) }, state.graphRevision)
     await expect(service.generate('w', tts.id, service.store.state('w').graphRevision, randomUUID(), false, true)).rejects.toThrow('朗读的文字')
     expect(service.store.state('w').tasks).toHaveLength(0); expect(fetch).not.toHaveBeenCalled()

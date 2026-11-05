@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import {
-  emptyGraph, capabilitiesFor, defaultParams, type CanvasNode, type Asset, type PublicModel,
+  emptyGraph, capabilitiesFor, defaultParams, defaultTtsParams, type CanvasNode, type Asset, type PublicModel,
 } from '../src/shared/contracts'
 import type { NodeCreationEnvironment } from '../src/client/nodeCreation'
 import { copyCanvasNodes, readCanvasNodes, pasteCanvasNodes } from '../src/client/nodeClipboard'
@@ -28,6 +28,20 @@ function fixture() {
   const packet = () => readCanvasNodes(copyCanvasNodes(graph, [source.id, target.id], 'w', 'https://local'), 'w', 'https://local')
   return { graph, env, source, external, target, asset, packet }
 }
+it('pastes TTS clone parameters with the original audio source and no new task', () => {
+  const source: CanvasNode = { id: randomUUID(), title: '原音频', kind: 'audio-asset', position: { x: 0, y: 0 },
+    assetId: randomUUID(), selectedResultId: null, modelId: null, params: null, prompt: '' }
+  const node: CanvasNode = { ...source, id: randomUUID(), assetId: null, kind: 'tts-generation', title: '复刻',
+    params: { ...defaultTtsParams(), reference_text: '原音频的原文' }, prompt: '新的对白', position: { x: 100, y: 0 } }
+  const graph = { ...emptyGraph(), nodes: [source, node], edges: [{ id: randomUUID(), source: source.id, target: node.id, assetId: source.assetId! }] }
+  const asset: Asset = { id: source.assetId!, nodeId: source.id, taskId: null, kind: 'audio', mime: 'audio/wav', filename: '原音频.wav', bytes: 1, createdAt: 1 }
+  const packet = readCanvasNodes(copyCanvasNodes(graph, [node.id], 'w', 'https://local'), 'w', 'https://local')
+  const next = pasteCanvasNodes(graph, packet, { x: 200, y: 0 }, { assets: [asset], tasks: [], models: [], expandedGroups: {} })
+  expect(next.graph.nodes.at(-1)!.params).toEqual(node.params)
+  expect(next.graph.nodes.at(-1)!.prompt).toBe(node.prompt)
+  expect(next.graph.edges.at(-1)!.source).toBe(source.id)
+  expect(next.graph.edges.at(-1)!.assetId).toBe(asset.id)
+})
 it('keeps all original sources and input order, creates drafts with new identities, and adds no outgoing wires', () => {
   const f = fixture(), original = structuredClone(f.graph), packet = f.packet()
   const result = pasteCanvasNodes(f.graph, packet, { x: 800, y: 500 }, f.env)

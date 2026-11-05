@@ -29,7 +29,7 @@ export function NodeInspection({ node, graph, assets, models, api, workspace, on
     <dl className="dc-snapshot-params">{Object.entries(node.params ?? {}).filter(([key]) => key !== 'type').map(([key, value]) =>
       <div key={key}><dt>{{ size: '尺寸', n: '生成数量', seconds: '时长（秒）', background: '背景', quality: '画质',
         videoMode: '生成模式', firstFrameId: '首帧', lastFrameId: '尾帧', generateAudio: '同步音频',
-        audio: '音频', reference_id: '音色 ID', speed: '语速', volume: '音量' }[key] ?? key}</dt>
+        audio: '音频', reference_id: '音色 ID', reference_text: '参考音频原文', speed: '语速', volume: '音量' }[key] ?? key}</dt>
         <dd data-dc-text-selectable="true">{typeof value === 'boolean' ? value ? '开启' : '关闭' : String(value)}</dd></div>)}</dl>
   </div>
 }

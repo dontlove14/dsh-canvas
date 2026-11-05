@@ -15,27 +15,43 @@ import { handoffSummary } from './handoff'
 import { AgentPresentation } from './presentation'
 import { CanvasChatReferences } from './chatReferences'
 import { AgentModelSelection } from './modelSelection'
+import { CreativeProjects } from './creative'
+import { AgentCollaboration } from './collaboration'
+import { executionIntent, type ExecutionCommand } from '../../shared/execution'
 
 declare module '@deepseek-ai/cordis' { interface Context { canvasAgent: CanvasAgentCoordinator } }
 const internalPresets = new Set(INTERNAL_CANVAS_PRESETS)
-export interface AgentMember { agent: Agent; role: 'main' | SpecialistRole; rootId: string }
+export interface AgentMember { agent: Agent; role: 'main' | 'executor' | SpecialistRole; rootId: string }
+export interface CreativeBinding { projectId: string; taskId: string; sourceIds: string[]; artifactIds: string[]; nodeIds: string[]; assetIds: string[] }
 /** All foreground writes and paid dispatch admissions share one commit queue. */
 export class CanvasAgentCoordinator extends Service {
   readonly ledger: AgentLedger
   readonly presentation: AgentPresentation
   readonly chatReferences: CanvasChatReferences
   readonly generationModels: AgentModelSelection
+  readonly creative: CreativeProjects
+  readonly collaboration: AgentCollaboration
+  private bindings = new Map<string, CreativeBinding>()
+  private executions = new Map<string, { control: CanvasControl; commands: ExecutionCommand[]; allowTts: boolean }>()
+  private prepared = new Map<string, { rootId: string; role: AgentMember['role']; binding: CreativeBinding; control?: CanvasControl; commands?: ExecutionCommand[]; allowTts: boolean }>()
   private members = new Map<string, AgentMember>()
   private queue: Promise<unknown> = Promise.resolve()
   private children = new Map<string, Set<() => Promise<void>>>()
   private revoked = new Set<string>()
   private routes = new Map<string, { provider: string; model: string }>()
   private specialistRuns = new Map<string, Promise<unknown>>()
+  private runOwners = new Map<string, string>()
   private restrictions = new Map<Agent, { preset: string; dispose: () => void }>()
   private manualInputs = new Map<string, Set<string>>()
   constructor(ctx: Context, readonly canvas: CanvasService) {
     super(ctx, 'canvasAgent')
     this.ledger = new AgentLedger(canvas.config.dataDir)
+    this.creative = new CreativeProjects(canvas.config.dataDir)
+    this.collaboration = new AgentCollaboration(canvas.config.dataDir, this.creative)
+    ctx.effect(() => this.creative.subscribe(() => this.collaboration.refresh()))
+    ctx.effect(() => ctx.root.on('session/event', (session, event) => this.collaboration.observe(session.id, event)))
+    ctx.effect(() => ctx.root.on('session/flush', () => this.collaboration.persist()))
+    ctx.effect(() => ctx.root.on('subagent/start', (info) => this.collaboration.started(info.id, info.runId)))
     this.generationModels = new AgentModelSelection(() => canvas.store.listModels())
     this.chatReferences = new CanvasChatReferences(ctx, this)
     this.presentation = new AgentPresentation(canvas.config.dataDir, (id) => this.control(id),
@@ -51,7 +67,7 @@ export class CanvasAgentCoordinator extends Service {
       }
     }))
   }
-  async init() { await this.ledger.init(); await this.presentation.init() }
+  async init() { await this.ledger.init(); await this.creative.init(); await this.collaboration.init(); await this.presentation.init() }
   serial<T>(operation: () => Promise<T>): Promise<T> {
     const work = this.queue.then(operation)
     this.queue = work.catch(() => {})
@@ -61,6 +77,12 @@ export class CanvasAgentCoordinator extends Service {
     if (role === 'main' && this.members.get(agent.id)?.agent !== agent &&
       this.ledger.controls().some((control) => control.sessionId === agent.id && control.mode === 'manual')) this.rememberManualInputs(agent)
     this.members.set(agent.id, { agent, role, rootId })
+    const prepared = this.prepared.get(agent.id)
+    if (prepared && prepared.rootId === rootId && prepared.role === role) {
+      this.bind(agent, prepared.binding)
+      if (prepared.control && prepared.commands) this.grantExecution(agent, prepared.control, prepared.commands, prepared.allowTts)
+      this.prepared.delete(agent.id)
+    }
   }
   private rememberManualInputs(agent: Agent) {
     const ids = new Set<string>()
@@ -84,6 +106,7 @@ export class CanvasAgentCoordinator extends Service {
   unregister(agent: Agent) {
     if (this.members.get(agent.id)?.agent !== agent) return
     this.members.delete(agent.id)
+    this.bindings.delete(agent.id); this.executions.delete(agent.id)
     this.generationModels.clear(agent)
     this.routes.delete(agent.id)
     this.manualInputs.delete(agent.id)
@@ -109,6 +132,33 @@ export class CanvasAgentCoordinator extends Service {
     if (!member || member.agent !== agent) throw new CanvasError('当前 Agent 没有画布权限', 403, 'AGENT_FORBIDDEN')
     return member
   }
+  rootAgent(agent: Agent) {
+    const member = this.member(agent), root = this.members.get(member.rootId)?.agent
+    if (!root || this.member(root).role !== 'main') throw new CanvasError('主 Agent 已关闭', 403, 'AGENT_FORBIDDEN')
+    return root
+  }
+  bind(agent: Agent, binding: CreativeBinding) { this.member(agent); this.bindings.set(agent.id, structuredClone(binding)) }
+  prepareChild(id: string, rootId: string, role: AgentMember['role'], binding: CreativeBinding, control?: CanvasControl, commands?: ExecutionCommand[], allowTts = false) {
+    this.prepared.set(id, { rootId, role, binding: structuredClone(binding), control, commands, allowTts })
+    return () => { this.prepared.delete(id) }
+  }
+  binding(agent: Agent) {
+    this.member(agent)
+    const binding = this.bindings.get(agent.id)
+    if (!binding) throw new CanvasError('子 Agent 未获得本批次任务授权', 403, 'AGENT_FORBIDDEN')
+    return structuredClone(binding)
+  }
+  grantExecution(agent: Agent, control: CanvasControl, commands: ExecutionCommand[], allowTts: boolean) {
+    if (this.member(agent).role !== 'executor') throw new CanvasError('只有画布执行子 Agent 可获得写授权', 403, 'AGENT_FORBIDDEN')
+    this.executions.set(agent.id, { control: structuredClone(control), commands: structuredClone(commands), allowTts })
+  }
+  assertExecution(agent: Agent, tool: string, input: unknown) {
+    const grant = this.executions.get(agent.id)
+    if (!grant || this.member(agent).role !== 'executor' ||
+      !grant.commands.some((command) => command.tool === tool && hash(executionIntent(command.input)) === hash(executionIntent(input))) ||
+      (tool === 'canvas_generate' && !grant.allowTts)) throw new CanvasError('操作超出主 Agent 的明确执行清单', 403, 'AGENT_EXECUTION_SCOPE')
+    this.assert(agent, grant.control)
+  }
   session(id: string) {
     const live = this.ctx.agents.get(id as SessionId)
     const preset = live ? this.ctx.agentPresets.composedPreset(live.ctx) : undefined
@@ -125,7 +175,12 @@ export class CanvasAgentCoordinator extends Service {
   }
   assert(agent: Agent, control: CanvasControl, writing = true) {
     const member = this.member(agent), current = this.control(control.canvasId)
-    if (writing && member.role !== 'main') throw new CanvasError('专业 Agent 只能返回草稿', 403, 'AGENT_DRAFT_ONLY')
+    if (writing && member.role !== 'main' && member.role !== 'executor') throw new CanvasError('专业 Agent 只能返回草稿', 403, 'AGENT_DRAFT_ONLY')
+    if (writing && member.role === 'executor') {
+      const grant = this.executions.get(agent.id)
+      if (!grant || grant.control.canvasId !== control.canvasId || grant.control.epoch !== control.epoch)
+        throw new CanvasError('画布执行授权已失效', 403, 'AGENT_EXECUTION_SCOPE')
+    }
     // The root may finish its reminder and inspect saved inputs after yielding;
     // all writes remain revoked, and cancelled children get no such exception.
     if (!writing && member.role === 'main' && isGenerationHandoff(current) &&
@@ -220,30 +275,37 @@ export class CanvasAgentCoordinator extends Service {
     return () => { set.delete(dispose); if (!set.size) this.children.delete(rootId) }
   }
   async specialist(agent: Agent, key: string, args: unknown, operation: () => Promise<unknown>) {
-    const c = this.attached(agent)
-    this.assert(agent, c)
+    const c = this.session(agent.id).canvas
+    const valid = () => {
+      if (this.member(agent).role !== 'main') throw new CanvasError('只有主 Agent 可以委派', 403, 'AGENT_FORBIDDEN')
+      if (c) this.assert(agent, c)
+      else if (this.session(agent.id).canvas) throw new CanvasError('委派期间画布已变化', 409, 'AGENT_REVIEW_STALE')
+    }
+    valid()
     const replay = this.ledger.receipt(key, args)
     if (replay) return replay.value
     this.ledger.receipt(`${key}:started`, args)
     const existing = this.specialistRuns.get(key)
     if (existing) return existing
+    const scopeId = c?.canvasId ?? agent.id
+    this.runOwners.set(key, scopeId)
     const work = (async () => {
       await this.serial(async () => {
-        this.assert(agent, c)
+        valid()
         if (this.ledger.receipt(`${key}:started`, args)) throw new CanvasError('上次专业委派未取得完整结果，请核对后使用新操作 ID；不会自动重提', 409, 'SPECIALIST_INCOMPLETE')
-        if ([...this.specialistRuns.keys()].filter((k) => k.startsWith(`${c.canvasId}:specialist:`)).length > 2) throw new CanvasError('专业 Agent 并发上限为 2，请等待当前草稿', 429, 'SPECIALIST_CAPACITY')
+        if ([...this.runOwners.values()].filter((id) => id === scopeId).length > 2) throw new CanvasError('子 Agent 并发上限为 2，请等待当前任务', 429, 'SPECIALIST_CAPACITY')
         this.ledger.reserveReceipts([key, `${key}:started`])
         this.ledger.remember(`${key}:started`, args, { started: true })
         await this.ledger.persist()
       })
       const value = await operation()
-      this.assert(agent, c)
+      valid()
       this.ledger.remember(key, args, value); await this.ledger.persist()
-      this.assert(agent, c)
+      valid()
       return value
     })()
     this.specialistRuns.set(key, work)
-    try { return await work } finally { if (this.specialistRuns.get(key) === work) this.specialistRuns.delete(key) }
+    try { return await work } finally { if (this.specialistRuns.get(key) === work) { this.specialistRuns.delete(key); this.runOwners.delete(key) } }
   }
   async manual(request: Request, operation: () => Promise<Response>) {
     if (request.method !== 'POST') return operation()
@@ -267,7 +329,7 @@ export class CanvasAgentCoordinator extends Service {
       return operation()
     })
   }
-  async drain() { await this.queue; await this.ledger.persist(); await this.presentation.persist() }
+  async drain() { await this.queue; await this.ledger.persist(); await this.creative.persist(); await this.collaboration.persist(); await this.presentation.persist() }
   installPresetRosterGuard() {
     const registry = this.ctx.agentPresets
     const original = registry.remoteExportList
@@ -286,7 +348,7 @@ export class CanvasAgentCoordinator extends Service {
     async function guarded(this: typeof controller, request: Parameters<typeof original>[0]) {
       const inspected = await this.inspect(request.sessionId)
       const session = coordinator.session(request.sessionId)
-      if (session.preset || ['canvas-creator', 'canvas-story', 'canvas-assets', 'canvas-shots', 'canvas-audio', 'canvas-review'].includes(inspected.meta.agentPreset ?? ''))
+      if (session.preset || ['canvas-creator', ...INTERNAL_CANVAS_PRESETS].includes(inspected.meta.agentPreset ?? ''))
         await coordinator.qualified(request.provider, request.model)
       return original.call(this, request)
     }

@@ -84,7 +84,7 @@ export function pasteCanvasNodes(graph: CanvasGraph, packet: NodeClipboardPacket
     const caps = model && videoInputCapabilities(model, params)
     if (assets.some((asset) => asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime))
       || (caps && (assets.length > caps.maxReferences || assets.some((asset) => !caps.referenceKinds.includes(asset.kind))))
-      || (!model && assets.some((asset) => asset.kind !== 'image')))
+      || (!model && node.kind !== 'tts-generation' && assets.some((asset) => asset.kind !== 'image')))
       throw new Error('复制的输入不符合当前模型要求，请重新复制')
     if (params) {
       for (const id of [params.firstFrameId, params.lastFrameId]) {

@@ -35,8 +35,8 @@ async function service(path: string) {
 it.each(BUILTIN_MODELS.filter((model) => ['wan-video', 'minimax-video'].includes(model.protocol)))('links recovered uploads with native frame constraints via $api_base ($model_id)', async (model) => {
   const api = new CanvasApi(), nodeId = randomUUID(), targetId = randomUUID()
   const input = asset('video'), source = { id: nodeId, kind: 'video-asset', assetId: input.id }
-  const target = { id: targetId, modelId: model.id, params: defaultParams(model) }
-  const state = { graph: { ...emptyGraph(), nodes: [source, target] }, assets: [input], graphRevision: 1 }
+  const target = { id: targetId, kind: 'video-generation', modelId: model.id, params: defaultParams(model) }
+  const state = { graph: { ...emptyGraph(), nodes: [source, target] }, assets: [input], tasks: [], graphRevision: 1 }
   const request = vi.spyOn(api as any, 'request').mockImplementation(async (path: unknown) => path === 'graph' ? state
     : { models: [{ ...model, capabilities: capabilitiesFor(model) }] })
   const save = vi.spyOn(api, 'save').mockResolvedValue({} as any)

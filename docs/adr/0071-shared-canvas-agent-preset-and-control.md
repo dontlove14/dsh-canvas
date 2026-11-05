@@ -5,6 +5,8 @@
 状态：已采纳
 记录日期：2026-10-30
 
+0.2.115 的[ADR-0086](0086-creative-projects-and-scoped-canvas-executor.md)部分替代本记录的“主级直接写图、专业仅返回临时草稿”：主级协调，同级执行子 Agent按清单写图，专业角色保存持久分段成果；其余控制、媒体、原Ledger兼容约束保持。
+
 0.2.90 的 [ADR-0073](0073-native-canvas-plan-detail-preview.md) 更正下述方案展示 ID：实际工具等待保留 `wait.callId`，展示 intent 不带 `callId`，使用原生临时全文预览。旧版展示 ID 会误入仅支持 `exit_plan_mode` 的原生历史索引；本次不承诺插件方案永久历史或问题跨重启恢复。
 
 0.2.89 的操作呈现、独立窗口导航、真实视野与只读输入检视由 [ADR-0072](0072-agent-presentation-navigation-and-readonly-inspection.md) 补充。以下版本历史保留；当前窗口观察不再依赖模型选择器，SSE 与回执接入仅负责呈现，不改变本 ADR 的媒体 / 控制机制。

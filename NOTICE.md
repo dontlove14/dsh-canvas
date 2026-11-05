@@ -32,6 +32,26 @@ HTML 署名写法：
 
 ## 通用创作方法参考
 
+协作悬浮入口使用 [voice-ring](https://libraries.dev/voice-ring) 0.1.2，Copyright (c) 2026 Jakub Antalik，MIT License。其许可如下，仅适用于该依赖，不替代本项目整体许可：
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 `src/host/agent/methods.ts` 是本项目维护的简短通用制作方法，参考以下 MIT 项目的资产前置、连续性与提示词生命周期经验；未整库复制、执行其脚本或安装为用户全局技能，未将其特定模型流程视为通用协议。
 
 - [kangarooking/director-skills](https://github.com/kangarooking/director-skills/tree/301e6e72199f28b8ea82cd48ff06ab9ae49d0ee5)，固定版本 `301e6e72199f28b8ea82cd48ff06ab9ae49d0ee5`，Copyright (c) 2026 kangarooking。

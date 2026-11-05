@@ -90,7 +90,7 @@ export class AgentPresentation {
       if (this.current(intent.canvasId)?.id !== intent.id) return { id: intent.id, status: 'deferred', reason: '已由更新的操作替代' }
       const view = this.view(this.control(intent.canvasId))
       const ack = view && this.acks.get(`${intent.id}:${view.viewId}`)
-      if (ack) return { id: intent.id, status: ack.status, reason: ack.reason }
+      if (ack) return { id: intent.id, status: ack.status, ...(ack.reason !== undefined ? { reason: ack.reason } : {}) }
       if (view && !view.following) return { id: intent.id, status: 'paused', reason: '用户正在自主浏览' }
       if (!this.foreground(intent.sessionId)) return { id: intent.id, status: 'deferred', reason: '当前会话无可见窗口' }
       if (Date.now() >= deadline) return { id: intent.id, status: 'deferred', reason: '等待窗口载入，返回时补呈现' }

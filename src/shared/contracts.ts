@@ -157,6 +157,7 @@ export type GenerationParams = z.infer<typeof GenerationParamsSchema>
 export const TtsParamsSchema = z.object({
   type: z.literal('tts'),
   reference_id: z.string().max(512).default(''),
+  reference_text: z.string().max(32000).optional(),
   speed: z.number().finite().positive().default(1),
   volume: z.number().finite().default(0),
 }).strict()
@@ -287,12 +288,18 @@ export const TtsTaskSnapshotSchema = z.object({
   }).strict(),
   prompt: z.string().max(32000),
   params: TtsParamsSchema,
-  referenceIds: z.array(IdSchema).length(0),
+  referenceIds: z.array(IdSchema).max(1),
 }).strict()
 export type TtsTaskSnapshot = z.infer<typeof TtsTaskSnapshotSchema>
 export type AnyTaskSnapshot = TaskSnapshot | TtsTaskSnapshot
 export function isTtsSnapshot(snapshot: AnyTaskSnapshot): snapshot is TtsTaskSnapshot { return snapshot.model.protocol === 'fish-tts' }
 export function validateTtsText(text: string): void { if (!text.trim() || !text.replace(/\([^)]*\)/g, '').trim()) throw new Error('请输入要朗读的文字') }
+export function validateTtsReferences(params: TtsParams, references: readonly Pick<Asset, 'kind'>[], requireTranscript = true): void {
+  if (references.length > 1) throw new Error('FishTTS 最多连接一份参考音频')
+  if (references.some((asset) => asset.kind !== 'audio')) throw new Error('FishTTS 只能连接音频素材')
+  if (references.length && params.reference_id.trim()) throw new Error('音色 ID 与参考音频只能二选一，请先清空音色 ID')
+  if (references.length && requireTranscript && !params.reference_text?.trim()) throw new Error('请填写参考音频原文')
+}
 export const TaskSchema = z.object({
   id: IdSchema,
   nodeId: IdSchema,
@@ -378,7 +385,14 @@ export function validateGraph(graph: CanvasGraph, assets: readonly Asset[], task
     const target = nodes.get(edge.target)
     const asset = byId.get(edge.assetId)
     if (!source || !target || !asset) throw new Error('连线引用的节点或素材不可用')
-    if (target.kind === 'tts-generation') throw new Error('语音生成节点不支持输入连线')
+    if (target.kind === 'tts-generation') {
+      if (!isTtsParams(target.params)) throw new Error('语音参数不可用')
+      validateTtsReferences(target.params, graph.edges.filter((item) => item.target === target.id).map((item) => {
+        const reference = byId.get(item.assetId)
+        if (!reference) throw new Error('引用音频不可用')
+        return reference
+      }), false)
+    }
     if (!isGeneration(target.kind) || source.id === target.id) throw new Error('连线只能连接到其他生成节点')
     const fromSource = isGeneration(source.kind)
       ? tasks.some((task) => task.nodeId === source.id && task.resultIds.includes(asset.id))

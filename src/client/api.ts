@@ -1,4 +1,4 @@
-import { isTtsParams, type ModelInput, type ModelsResponse, type PublicModel, type MediaKind, type TaskAction, type PublicTtsSettings, type TtsSettingsInput } from '../shared/contracts'
+import { type ModelInput, type ModelsResponse, type PublicModel, type MediaKind, type TaskAction, type PublicTtsSettings, type TtsSettingsInput } from '../shared/contracts'
 import { V2_ROOT, browserHash, type CanvasSnapshot, type GraphMutation, type Catalog, type TaskDetail, type TaskSummary, type TaskSearchQuery, type TaskPage } from '../shared/v2'
 import { WaveformSchema, WAVEFORM_VERSION, type AudioWaveform } from '../shared/audioWaveform'
 import type { ObjectStorageSettings, StorageInput, MediaUrl, MediaVariant } from '../shared/objectStorage'
@@ -7,8 +7,8 @@ import type { ReviewSettings, ReviewSettingsInput, ReviewProvider, ReviewPage, R
 import { ApiError, ResumableUploads, uploadCacheFor } from './resumableUploads'
 import { UploadSessionSchema, UploadStatusSchema, UploadResultSchema, type UploadStatus } from '../shared/uploads'
 import type { CachedUpload } from './uploadCache'
-import { isMultimodalVideo } from '../shared/modelCatalog'
-import { videoGenerationParams, videoInputCapabilities, validateVideoConnections } from '../shared/video'
+import { connectAssetReference } from '../shared/referenceConnection'
+import { ChatAudioResultSchema, type ChatAudioHandle, type ChatAudioResult } from '../shared/chatAudio'
 import type { CanvasControl, AgentSessionState } from '../shared/agent'
 import type { PresentationState, PresentationAck, ViewReport } from '../shared/presentation'
 import type { ChatReference, ChatReferenceChoices, ChatReferenceBrowse } from '../shared/chatReferences'
@@ -84,6 +84,10 @@ export class CanvasApi {
   ttsSettings(): Promise<PublicTtsSettings> { return this.request('tts-settings', {}) }
   saveTtsSettings(input: TtsSettingsInput): Promise<PublicTtsSettings> { return this.request('tts-settings', {}, this.json(input)) }
   taskDetail(canvas: string, id: string, signal?: AbortSignal): Promise<TaskDetail> { return this.request('task', { canvas, id }, { signal }) }
+  async audioResult(handle: ChatAudioHandle, signal: AbortSignal): Promise<ChatAudioResult> {
+    return ChatAudioResultSchema.parse(await this.request('audio-result', { canvas: handle.canvasId,
+      ...(handle.taskId ? { taskId: handle.taskId } : {}), ...(handle.assetId ? { assetId: handle.assetId } : {}) }, { signal, cache: 'no-store' }))
+  }
   searchTasks(query: Partial<TaskSearchQuery>, signal?: AbortSignal): Promise<TaskPage> {
     const params = Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))
     return this.request('task-search', params, { signal })
@@ -134,20 +138,8 @@ export class CanvasApi {
       if (snapshot.graph.edges.some((edge) => edge.source === nodeId && edge.target === job.target && edge.assetId === resource.assetId)) return
       const asset = snapshot.assets.find((item) => item.id === resource.assetId)!
       const models = await this.request<ModelsResponse>('models', {}, { signal: AbortSignal.timeout(30000) })
-      const model = models.models.find((item) => item.id === target.modelId)
       try {
-        if (asset.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime))
-          throw new Error('当前协议的参考图仅支持 PNG、JPEG 和 WebP')
-        if (!model && asset.kind !== 'image') throw new Error('请先选择支持这类素材的模型')
-        const references = snapshot.graph.edges.filter((edge) => edge.target === target.id)
-        const params = model && isMultimodalVideo(model) && target.params && !isTtsParams(target.params)
-          ? videoGenerationParams(target.params, references.map((edge) => edge.assetId), model) : target.params
-        const caps = model && videoInputCapabilities(model, !isTtsParams(params) ? params : null)
-        if (caps && (!caps.referenceKinds.includes(asset.kind) || references.length >= caps.maxReferences))
-          throw new Error('当前模型不支持这份素材，或引用数量已达上限')
-        if (model && isMultimodalVideo(model) && params && !isTtsParams(params))
-          validateVideoConnections(videoGenerationParams(params, [...references.map((edge) => edge.assetId), asset.id], model),
-            [...references.map((edge) => snapshot.assets.find((item) => item.id === edge.assetId)!), asset], model)
+        connectAssetReference(snapshot.graph, nodeId, target.id, asset.id, snapshot.assets, snapshot.tasks, models.models, job.requestId)
       } catch (error) { throw new ApiError(error instanceof Error ? error.message : '素材连接失败', 'REFERENCE_INVALID', 400) }
       const edge = { id: job.requestId, source: nodeId, target: target.id, assetId: resource.assetId }
       try {

@@ -51,11 +51,12 @@ export class AgentWorkspace {
     if (!saved || saved.bytes !== file.bytes || saved.sha256 !== file.sha256) throw new CanvasError('已交付文件已被修改或移除，请使用新操作 ID 保存', 409, 'FILE_COLLISION')
   }
   async publish(agent: Agent, project: { id: string; name: string }, parts: string[], filename: string,
-    body: Readable, limit: number, signal: AbortSignal, guard: () => void, expected?: { bytes: number; sha256: string }): Promise<WorkspaceFile> {
+    body: Readable, limit: number, signal: AbortSignal, guard: () => void, expected?: { bytes: number; sha256: string }, expectedRoot?: string): Promise<WorkspaceFile> {
     let temporary: string | undefined
     try {
       signal.throwIfAborted(); guard()
       const root = await this.root(agent, signal)
+      if (expectedRoot && root !== expectedRoot) throw new CanvasError('成果交接期间工作区已切换', 409, 'WORKSPACE_CHANGED')
       const admittedCwd = this.ctx.workingDirectory.get(agent.session)
       const components = [AGENT_FOLDER, `${safeName(project.name)}-${safeName(project.id).slice(0, 12)}`, ...parts]
       const destinationDir = await directory(root, components, true)

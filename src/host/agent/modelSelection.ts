@@ -3,6 +3,8 @@ import type { PublicModel } from '../../shared/contracts'
 import { builtinDefinition, modelConfigured, providerFor } from '../../shared/modelCatalog'
 import { CanvasError } from '../store'
 import { hash } from '../persistence/database'
+import { videoReferenceLimits } from '../../shared/video'
+import { KLING_IMAGE_ROLES, KLING_VIDEO_ROLES } from '../../shared/kling'
 
 export type GenerationModelKind = 'image' | 'video'
 export interface GenerationModelChoice {
@@ -32,7 +34,9 @@ export class AgentModelSelection {
       !!builtinDefinition(model) && model.configurable !== false && !!providerFor(model) && modelConfigured(model))
   }
   catalog() {
-    return this.models().map(({ api_key_mask: _mask, ...model }) => ({ ...model, ...choiceFor(model) }))
+    return this.models().map(({ api_key_mask: _mask, ...model }) => ({ ...model, ...choiceFor(model),
+      ...(model.kind === 'video' ? { referenceLimits: videoReferenceLimits(model),
+        ...(model.protocol === 'kling-video' ? { referenceRoles: { image: KLING_IMAGE_ROLES, video: KLING_VIDEO_ROLES } } : {}) } : {}) }))
   }
   current(agent: Agent, kind: GenerationModelKind) {
     const selected = this.approved.get(agent)?.get(kind)

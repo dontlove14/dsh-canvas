@@ -39,18 +39,26 @@ describe('creation policy shared by the dock and both canvas menus', () => {
     expect(f.graph).toEqual(before)
     const choices = nodeCreationChoices(f.graph, { x: 0, y: 0 }, f.env, f.reference)
     expect(choices.map((item) => item.kind)).toEqual(['image-generation', 'video-generation'])
-    expect(() => createCanvasNode(f.graph, 'tts-generation', { x: 0, y: 0 }, f.env, f.reference)).toThrow('不支持输入')
+    expect(() => createCanvasNode(f.graph, 'tts-generation', { x: 0, y: 0 }, f.env, f.reference)).toThrow('只能连接音频')
     expect(f.graph).toEqual(before)
   })
   it.each(['video', 'audio'] as const)('selects a compatible configured model for %s; missing models hide creation choices', (kind) => {
     const f = fixture(kind), video = model('video'), incompatible = { ...video, id: 'incompatible', capabilities: { ...video.capabilities, maxReferences: 0 } }
-    expect(nodeCreationChoices(f.graph, { x: 0, y: 0 }, f.env, f.reference)).toEqual([])
+    expect(nodeCreationChoices(f.graph, { x: 0, y: 0 }, f.env, f.reference).map((item) => item.kind)).toEqual(kind === 'audio' ? ['tts-generation'] : [])
     const environment = { ...f.env, models: [incompatible as PublicModel, video] }
-    expect(nodeCreationChoices(f.graph, { x: 0, y: 0 }, environment, f.reference).map((item) => item.kind)).toEqual(['video-generation'])
+    expect(nodeCreationChoices(f.graph, { x: 0, y: 0 }, environment, f.reference).map((item) => item.kind)).toEqual(kind === 'audio' ? ['video-generation', 'tts-generation'] : ['video-generation'])
     const result = createCanvasNode(f.graph, 'video-generation', { x: 0, y: 0 }, environment, f.reference)
     expect(result.node.modelId).toBe(video.id); expect(result.graph.edges[0].assetId).toBe(f.asset.id)
     // Audio alone may be connected before an image arrives; generate-time validation is separate.
     expect(result.node.kind).toBe('video-generation')
+  })
+  it('creates a TTS node and one original audio edge from the shared empty-space menu', () => {
+    const f = fixture('audio')
+    const next = createCanvasNode(f.graph, 'tts-generation', { x: 10, y: 20 }, f.env, f.reference)
+    expect(next.node.modelId).toBeNull()
+    expect(next.graph.edges[0]).toMatchObject({ source: f.source.id, assetId: f.asset.id, target: next.node.id })
+    expect(next.node.params).toEqual({ type: 'tts', reference_id: '', speed: 1, volume: 0 })
+    expect(f.graph.edges).toEqual([])
   })
   it('retains direct-wire duplicate, cycle, MIME and reference-count protection', () => {
     const f = fixture(), video = model('video')
