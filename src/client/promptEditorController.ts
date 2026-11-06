@@ -174,6 +174,8 @@ export class PromptEditorController<T extends PromptChoice = PromptReference> {
     this.options.onChange(entry.value); this.close()
   }
   private keydown = (event: KeyboardEvent): void => {
+    // Let ReactFlow track zoom modifiers while retaining prompt shortcut isolation.
+    if (event.key === 'Meta' || event.key === 'Control') return
     event.stopPropagation()
     if (this.composing || event.isComposing || event.keyCode === 229 || this.options.disabled) return
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); this.undo(event.shiftKey); return }

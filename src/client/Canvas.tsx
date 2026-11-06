@@ -704,7 +704,8 @@ export function FloatingEditor(props: EditorProps) {
   const basePosition = nodeEditorPosition(node.position, viewport, nodeSize)
   const position = props.readOnly ? readonlyEditorBounds(basePosition, canvasWidth || 562, canvasHeight || 700) : basePosition
   return <div className={`dc-editor nodrag nopan nowheel ${isGeneration(node.kind) ? 'dc-generation-editor' : ''} ${node.kind === 'tts-generation' ? 'dc-tts-editor' : ''}`}
-    style={position} onKeyDown={(event) => event.stopPropagation()}>
+    data-dc-canvas-wheel="true" style={position}
+    onKeyDown={(event) => { if (event.key !== 'Meta' && event.key !== 'Control') event.stopPropagation() }}>
     {props.readOnly ? <NodeInspection node={node} graph={graph} assets={props.assets} models={props.models} api={props.api} workspace={props.workspace} onOpen={props.onOpen} />
       : <FloatingEditorContent {...content} node={contentNode.current} graph={contentGraph.current} getCurrentGraph={getCurrentGraph} />}
   </div>

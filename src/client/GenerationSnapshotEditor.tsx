@@ -21,7 +21,8 @@ export function GenerationSnapshotEditor({ api, workspace, snapshot, assets = []
   const position = readOnly ? readonlyEditorBounds(basePosition, canvasWidth || 562, canvasHeight || 700) : basePosition
   const tts = snapshot && isTtsSnapshot(snapshot)
   return <div className={`dc-editor dc-generation-editor dc-snapshot-editor nodrag nopan nowheel ${tts ? 'dc-tts-editor' : ''}`}
-    style={position} onKeyDown={(event) => event.stopPropagation()}
+    data-dc-canvas-wheel="true" style={position}
+    onKeyDown={(event) => { if (event.key !== 'Meta' && event.key !== 'Control') event.stopPropagation() }}
     role="region" aria-label={restoring ? '恢复最后一次提交' : '生成记录（只读）'}>
     <div className="dc-snapshot-heading"><strong>{restoring ? '最后一次提交' : '生成记录'}</strong>
       {!restoring && <small className="dc-muted">{readOnly ? '只读 · 本次任务的提交输入' : '只读 · 收起堆叠后可编辑并生成'}</small>}</div>
