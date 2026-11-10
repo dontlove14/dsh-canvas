@@ -57,6 +57,17 @@ describe('native canvas wheel gestures', () => {
     expect(panZoom.getViewport()).toEqual({ x: -25, y: 45, zoom: 1 })
   })
 
+  it.each([1, -1])('consumes purely horizontal movement and inertia in direction %s', (direction) => {
+    const { wheel, panZoom, onEnd } = setup()
+    expect(wheel(direction * 23.5, 0).defaultPrevented).toBe(true)
+    expect(wheel(direction * 1.5, 0).defaultPrevented).toBe(true)
+    expect(panZoom.getViewport()).toEqual({ x: -direction * 25, y: 0, zoom: 1 })
+    vi.runAllTimers()
+    expect(onEnd).toHaveBeenLastCalledWith(expect.anything(), { x: -direction * 25, y: 0, zoom: 1 })
+    expect(wheel(-direction * 25, 0).defaultPrevented).toBe(true)
+    expect(panZoom.getViewport()).toEqual({ x: 0, y: 0, zoom: 1 })
+  })
+
   it('keeps Space plus wheel as vertical pan', () => {
     const { wheel, panZoom } = setup(false, true)
     wheel(0, 75)

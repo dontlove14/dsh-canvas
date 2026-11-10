@@ -1,5 +1,7 @@
 # 运行、配置与排障指南
 
+0.2.128在画布根、ReactFlow和公共画布portal作用域限制横向overscroll，避免Chrome双指左右滑动传给浏览器历史导航；原生双轴平移、卡片内部滚动和捏合保持。见[ADR-0023](adr/0023-canvas-wheel-and-trackpad-gestures.md)。沿现有web3080检查、双构建、同包安装、正常重启及存量数据核验，127包保留至128成功；实际Chrome导航手势由用户按[手动清单](manual-tests.md)验收。
+
 0.2.127修复节点浮动卡片上的双指平移 / 捏合，将实际编辑 / 只读 / 记录卡片转交所属画布原生renderer，内部滚动优先按方向消耗，Meta / Control可在提示词聚焦时激活原生缩放。见[ADR-0023](adr/0023-canvas-wheel-and-trackpad-gestures.md)。沿现有web3080检查、双构建、同包安装、正常重启及存量数据核验，126包保留至127成功；真实触摸板与页面倍率由用户按[手动清单](manual-tests.md)验收。
 
 0.2.126让协作浮层利用聊天右侧空白，按原生聊天/视口边界保留12px并随输入框/侧栏尺寸变化重算；Voice Ring约两倍速度、加大呼吸，隐藏/减少动态暂停。沿原web3080检查、双构建、同包安装、重启和原数据核验，125包保留至126成功；见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)，位置和动效由用户刷新人工验收。
