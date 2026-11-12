@@ -31,8 +31,8 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {}; disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
@@ -203,6 +203,24 @@ describe('historical generation inspection', () => {
     cards[1].results.push(...extra)
     const anchor = historyEditorAnchor(f.node, cards, f.tasks[0].requestId!, extra[1].id)!
     expect(anchor).toMatchObject({ position: { x: 700, y: 1286 }, size: { width: 320, height: 180 } })
+  })
+  it('positions the real history editor using decoded card sizes without changing stored metadata or inputs', async () => {
+    const f = await setup()
+    const before = f.save.mock.calls.length
+    const newest = f.card(1).querySelector<HTMLImageElement>('.dc-generation-media>img')!
+    const older = f.card(0).querySelector<HTMLImageElement>('.dc-generation-media>img')!
+    Object.defineProperties(newest, { naturalWidth: { value: 720, configurable: true }, naturalHeight: { value: 1280, configurable: true } })
+    Object.defineProperties(older, { naturalWidth: { value: 1024, configurable: true }, naturalHeight: { value: 1024, configurable: true } })
+    await act(async () => { newest.dispatchEvent(new Event('load')); older.dispatchEvent(new Event('load')); await Promise.resolve() })
+    await f.click(f.card(0).querySelector('[data-asset-id]')!)
+    const panel = f.container.querySelector<HTMLElement>('.dc-snapshot-editor')!
+    expect(panel.style.left).toBe('595px')
+    expect(panel.style.top).toBe('1734px')
+    expect(panel.querySelector('[role="textbox"]')?.textContent).toBe(f.inputs[0].prompt)
+    expect(f.getState().assets.every((asset) => asset.width === 320 && asset.height === 180)).toBe(true)
+    expect(f.getState().graph.nodes[0].position).toEqual({ x: 700, y: 900 })
+    expect(f.save.mock.calls.length).toBe(before)
+    expect(f.submit).not.toHaveBeenCalled(); expect(f.upload).not.toHaveBeenCalled()
   })
   it('waits for the latest pending acceptance on collapse and never restores or submits an older card', async () => {
     const f = await setup('audio')

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 780" width="1600" height="780" role="img" aria-label="Agent 空间固定视角创作办公室">
+<defs>
+  <linearGradient id="wall" x2="0" y2="1"><stop stop-color="#f5f0e5"/><stop offset="1" stop-color="#e5e2d6"/></linearGradient>
+  <linearGradient id="floor" x2=".1" y2="1"><stop stop-color="#c5b191"/><stop offset="1" stop-color="#e9d8b8"/></linearGradient>
+  <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#bfd2d9"/><stop offset="1" stop-color="#e9e9d9"/></linearGradient>
+  <linearGradient id="curtain"><stop stop-color="#536e7c"/><stop offset=".5" stop-color="#82949a"/><stop offset="1" stop-color="#496271"/></linearGradient>
+  <pattern id="grain" width="15" height="15" patternUnits="userSpaceOnUse"><path d="M2 3h1m7 5h1M5 13h1" stroke="#796a53" stroke-opacity=".06"/></pattern>
+  <g id="window"><path d="M0 245V87Q0 0 77 0t77 87v158Z" fill="#f9f6e9" stroke="#939d91" stroke-width="4"/><path d="M10 233V87Q10 12 77 12t67 75v146Z" fill="url(#sky)"/><path d="M10 196q40-23 134 3v34H10Z" fill="#a3b8a5" opacity=".4"/><path d="M77 12v221M10 120h134" stroke="#f9f5e6" stroke-width="6"/><path d="M-14 5h182" stroke="#9b865f" stroke-width="5" stroke-linecap="round"/><path d="M-12 11h24L2 218l-18 21Zm151 0h25l7 228-18-21Z" fill="url(#curtain)"/><path d="M-10 199h17m146 0h17" stroke="#bca47a" stroke-width="4"/><rect x="-7" y="244" width="168" height="8" rx="2" fill="#c0b79f"/></g>
+  <g id="plant"><path d="M-23 0h46l-6 40h-34Z" fill="#b5a082" stroke="#907c5f"/><path d="M0 0v-75m0 38-24-21m24 2 27-29" fill="none" stroke="#667a61" stroke-width="3"/><path d="M0-66q-27-35-28-12T0-45m0 0q19-37 33-28T0-19m0-1q-40-28-36-9T0 0" fill="#819e7c"/></g>
+</defs>
+<rect width="1600" height="780" fill="url(#wall)"/>
+<rect width="1600" height="14" fill="#d6cebb"/><path d="M0 24h1600" stroke="#fffaf0" stroke-width="4"/>
+<rect y="425" width="1600" height="63" fill="#49616e"/><path d="M0 426h1600M0 481h1600" stroke="#b4b299" stroke-width="3"/>
+<path d="M30 432v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42m90-42v42" stroke="#91a4a1" opacity=".3"/>
+<rect y="488" width="1600" height="292" fill="url(#floor)"/><path d="M0 516h1600M0 555h1600M0 605h1600M0 668h1600M0 747h1600" stroke="#9d896b" stroke-opacity=".28"/>
+<path d="M60 488-95 780M260 488 130 780M460 488 410 780M660 488 670 780M860 488 970 780M1060 488 1230 780M1260 488 1480 780M1460 488 1750 780" stroke="#9d896b" stroke-opacity=".25"/>
+<path d="M155 516v39m400 50v63m480-113v50m280 63v79m-1070-79v79" stroke="#9d896b" stroke-opacity=".2"/>
+<use href="#window" x="60" y="75"/><use href="#window" x="515" y="75"/><use href="#window" x="1030" y="75"/>
+<path d="m70 315 420 465h395L205 315Z" fill="#fff3cb" opacity=".13"/>
+<rect x="274" y="180" width="169" height="99" rx="4" fill="#f6f2e7" stroke="#afac99" stroke-width="3"/>
+<path d="M291 202h104m-104 18h78m-78 18h109m-109 18h65" stroke="#a2b1ab" stroke-width="3"/><circle cx="305" cy="179" r="4" fill="#b79b68"/>
+<rect x="745" y="186" width="211" height="11" fill="#826349"/><path d="M764 198v20m172-20v20" stroke="#b9a37f" stroke-width="4"/>
+<path d="M764 132h20v53h-20m24-42h15v42h-15m19-50h23v50h-23m11-47h17v47h-17" fill="#72848a"/>
+<path d="M854 162h72v8h-72m6 1h64v7h-64m-3 1h66v7h-66" fill="#cbb991"/>
+<rect x="1288" y="171" width="171" height="119" rx="4" fill="#eeeadc" stroke="#a9ad9c" stroke-width="3"/>
+<rect x="1304" y="189" width="46" height="58" fill="#d3ddd6"/><rect x="1360" y="190" width="82" height="82" fill="#fbf7e9"/><path d="M1370 205h63m-63 16h48m-48 16h56m-56 16h36" stroke="#a9b8ac" stroke-width="3"/>
+<use href="#plant" x="74" y="493"/><use href="#plant" x="1545" y="491"/>
+<ellipse cx="179" cy="663" rx="102" ry="19" fill="#b8a987" opacity=".27"/>
+<rect x="99" y="666" width="164" height="8" rx="4" fill="#d5c6a6" opacity=".5"/>
+<text x="181" y="706" text-anchor="middle" fill="#6d715f" font-size="16" font-family="sans-serif" letter-spacing="3">主级协调</text>
+<rect width="1600" height="780" fill="url(#grain)"/>
+</svg>

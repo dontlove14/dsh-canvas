@@ -78,7 +78,9 @@ export const AudioPlayer = memo(function AudioPlayer({ asset, api, workspace, la
   const media = useMediaUrl(api, workspace, asset.id)
   const pending = !media.error && state.error !== 'unavailable' && (readyAsset !== asset.id || (!waveform && !waveError))
   const inNode = useNodeMediaLoading(pending)
-  useRefreshingSource(audio, media.url)
+  const source = useRefreshingSource(audio, media.url, false, `${workspace}:${asset.id}`, media.revision)
+  const operation = useRef(0)
+  useEffect(() => () => { operation.current++ }, [api, workspace, asset.id])
   useEffect(() => {
     const controller = new AbortController()
     setWaveform(null); setWaveError(false)
@@ -92,27 +94,34 @@ export const AudioPlayer = memo(function AudioPlayer({ asset, api, workspace, la
     playback.current = instance
     return () => { instance.destroy(); playback.current = null }
   }, [api, workspace, asset.id])
-  useEffect(() => { if (!active) playback.current?.pause() }, [active])
+  useEffect(() => { if (!active) { operation.current++; source.pause() } }, [active, source.pause])
   const duration = state.duration || waveform?.duration || asset.duration || 0
   const time = Math.min(state.time, duration || state.time)
+  const withFreshSource = (action: () => void) => {
+    const token = ++operation.current, controller = playback.current
+    if (media.isFresh() && audio.current?.getAttribute('src') === media.url && source.isReady()) { action(); return }
+    void (async () => {
+      const url = await media.ensure()
+      if (url && token === operation.current && await source.prepare(url) && token === operation.current && controller === playback.current) action()
+    })()
+  }
   const toggle = () => {
-    void media.ensure()
-    if (state.paused) { onPlay?.(); void playback.current?.play() }
-    else { playback.current?.pause(); onStop?.() }
+    if (audio.current && !audio.current.paused) { operation.current++; source.pause(); onStop?.() }
+    else { onPlay?.(); withFreshSource(() => { void playback.current?.play() }) }
   }
   return <div className="dc-audio-player nopan" onDoubleClick={(event) => event.stopPropagation()}
     onKeyDown={(event) => { if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation() }}>
     <audio ref={audio} preload="metadata" aria-label={label} onEnded={onStop} onError={() => media.retry()}
-      onLoadedMetadata={() => setReadyAsset(asset.id)} />
+      onLoadedMetadata={() => { setReadyAsset(asset.id); media.loaded() }} />
     <div className="dc-audio-wave-area">
-      {waveform ? <AudioWaveform peaks={waveform.peaks} time={time} duration={duration} media={audio} onSeek={(value) => playback.current?.seek(value)} onToggle={toggle} />
+      {waveform ? <AudioWaveform peaks={waveform.peaks} time={time} duration={duration} media={audio} onSeek={(value) => withFreshSource(() => playback.current?.seek(value))} onToggle={toggle} />
         : <div className="dc-audio-wave-message" role={waveError ? 'status' : undefined}>{waveError ? '波形暂不可用，仍可播放' : <span className="dc-sr-only">正在读取音频波形</span>}</div>}
     </div>
     <div className="dc-audio-controls" role="group" aria-label="音频播放控制">
       <span>{audioTime(time)}</span>
       <UiButton className="dc-audio-toggle nodrag nopan" aria-label={state.paused ? '播放音频' : '暂停音频'}
         onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); toggle() }}
-        onDoubleClick={(event) => event.stopPropagation()} disabled={state.error === 'unavailable'}>
+        onDoubleClick={(event) => event.stopPropagation()}>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           {state.paused ? <path d="M7 3v18l15-9z" /> : <path d="M6 3h4v18H6zm8 0h4v18h-4z" />}
         </svg>

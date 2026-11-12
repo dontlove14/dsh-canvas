@@ -223,6 +223,10 @@ promptFeedback明确blockReason或候选明确安全 / 无图finishReason映射f
 
 所有协议请求使用宿主终止信号和可配置超时；提交 / 查询禁止重定向。非成功响应错误 JSON 最多读取 64 KiB；成功 JSON 上限为 `ceil(maxMediaBytes × 1.4) + 1 MiB`。
 
+0.2.130起，GPT Image、Seedream和Nano Banana的文生图 / 图生图请求使用`imageRequestTimeoutMs`，默认600000ms（600秒），范围1000–600000ms，覆盖发送至JSON响应体读取完成；未显式设置的新旧宿主配置均使用此默认值。图片任务lease按图片 / 通用超时较大值乘8设置，保持原占用策略。视频提交 / 查询、FishTTS及输出URL下载继续使用`requestTimeoutMs`，默认120000ms。宿主停止仍立即取消等待；本地600秒不保证网关 / 模型服务等待同样时长，也不是任务整体耗时上限。没有新增重试或供应商请求。
+
+生图请求通过固定版本`undici`的dispatcher组合接口，将headersTimeout / bodyTimeout同步为图片期限，避免Node内置fetch默认300秒等待限制。组合沿用宿主全局dispatcher与连接 / 代理策略，只作用于本次图片请求，不替换全局dispatcher；总等待仍由AbortSignal限制。通用请求不传此组合。
+
 HTTP 4xx 除 408 / 409 / 429 外为明确拒绝；超时、网络、5xx、上述三种 4xx，以及无法识别的成功响应仍无法证明远端副作用。首次提交无结果 / 可查询ID时统一结束为本地failed并解锁节点，不自动重提。视频已有 ID 时临时错误继续轮询，明确查询错误暂停为 unknown，可以恢复原 ID 查询。此分类不代表供应商计费语义保证，见ADR-0054。
 
 输出描述在下载前保存。恢复保存使用同一描述 / ID / objectKey；已发布对象核验后跳过，存在暂存时只重试OSS发布，不重新下载过期输出。尚未得到暂存时仍依赖原供应商链接；已有视频ID且无描述可重新查询content路径，已有描述不自动刷新供应商URL。图片无通用服务任务查询或幂等协议。

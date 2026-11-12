@@ -1,15 +1,19 @@
 import { build } from 'esbuild'
-import { mkdir, writeFile, readFile, copyFile, rm } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, copyFile, cp, rm } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { ensureThinkingOrbsPatch } from './patch-thinking-orbs.mjs'
+import { imgFxSourceDir, verifyImgFxSource } from './img-fx-source.mjs'
+import { buildAgentSpaceAssets } from './agent-space-assets.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 process.chdir(root)
 await ensureThinkingOrbsPatch()
+await verifyImgFxSource()
 await rm('lib', { recursive: true, force: true })
 await mkdir('lib', { recursive: true })
+await buildAgentSpaceAssets(root, JSON.parse(await readFile('package.json', 'utf8')).version)
 const shared = ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', 'zod', '@deepseek-ai/dsh-client-ui-primitives']
 const result = await build({
   entryPoints: ['src/client/index.tsx'], bundle: true, write: false, platform: 'browser', format: 'cjs',
@@ -59,6 +63,9 @@ await copyFile('src/host/review/vendor/LICENSE', 'lib/volcengine-signer-LICENSE'
 await copyFile('src/host/review/vendor/source.json', 'lib/volcengine-signer-source.json')
 await mkdir('lib/vendor', { recursive: true })
 await copyFile('src/host/review/vendor/volcengine-signer.cjs', 'lib/vendor/volcengine-signer.cjs')
+// Bundle the same fixed source into the client and retain its MIT/source identity
+// in the distributable; installation has no GitHub or temporary file dependency.
+await cp(imgFxSourceDir, 'lib/vendor/img-fx', { recursive: true })
 for (const [config, outDir, rootDir] of [
   ['tsconfig.host.json', 'lib/types', 'src'],
   ['tsconfig.client.json', 'lib/types', 'src'],

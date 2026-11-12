@@ -1,14 +1,34 @@
 # 运行、配置与排障指南
 
+0.2.140落实左上悬浮：移除138–139左侧分栏和正文宽度 / 控制柄覆写；卡片绝对定位，尺寸仅作用于自建seat，正文及输入框恢复原生宽度，无整行或整列占位。139的主级正面待机兜底、原动画及按钮保持。沿已授权web / 3080检查、双构建、同包安装 / 重启、HTTP与原数据核验交付，成功前保留139回退包；用户手验[429–433](manual-tests.md)，规则见[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)。
+
+0.2.139修正已停止 / 异常 / 未知会话缩小后只剩按钮：无实际工作者时保留主级单人M09正面待机1.0倍，原状态保持；恢复运行按实际工作角色展示。沿用138正文左右并排和原生输入框 / 滚动区，原动作不重新处理。按已授权web / 3080全量check、双构建、整包 / 安装hash、HTTP及原数据核验交付，成功前保留138回退包；手验[431](manual-tests.md)，规则见[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)。
+
+0.2.138修正Agent 空间右侧整行空白：卡片改为左侧独立区域，原生正文从右侧开始并保留完整滚动高度，缩小占宽随实际工作人数变化。输入框、草稿、原宽度偏好和滚动区身份保持；仅资源就绪且卡片显示时避让，切预设 / 会话、失败或卸载恢复原布局。保留137无白框、右上跨边按钮及原M09待机1.0倍循环。沿已授权web / 3080流程全量检查、同包安装、正常重启和实际加载核验，成功前保留137回退包；手验[429–433](manual-tests.md)，边界见[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)。
+
+0.2.136接入Agent 空间UI及用户认可的9项正面素材：左上纯动作卡片、正面工作站台、根最终回复后主级单人正面待机，选择无限画布先确认再预加载，取消恢复原预设 / 真实默认项。用户已授权本轮安装 / 重启web / 3080；按原check、双构建、包内身份核验、既有profile备份、同一包安装、正常重启与HTTP实际加载核验交付。成功前保留已安装134包用于回退，成功后根目录只保留136包；135继续为未安装候选。人工验收见[427–433](manual-tests.md)，实现及恢复边界见[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)。
+
+0.2.134将历史堆叠尺寸改为最上层图片 / 视频尺寸，解码后与单张采用相同mediaFrame上限，取消额外320最小宽限制；展开卡片、React Flow边界和只读历史编辑锚点同步，尺寸仅按节点 / assetId临时保存。提交顺序、叠层效果、音频、原素材 / 参数 / 两库与任务保持。沿原web / 3080检查、双构建、同包安装、正常重启和数据核验，133包保留至134成功；用户按[清单](manual-tests.md)423–426对比截图，见[ADR-0097](adr/0097-stack-size-from-top-media.md)。
+
+0.2.133统一可见性观察：按当前元素时间最新的记录处理同批离屏 / 入屏，忽略旧批次与断开后的回调；资源、生成结果、历史音频、图片、Loading和浮动容器共用规则。修复代码级复现中的随机占位，保留原rootMargin、换签、播放、动画与数据结构。沿原web / 3080检查、双构建、同包安装、正常重启和数据核验，132包保留至133成功；真实拖动由用户按[清单](manual-tests.md)419–422验收，见[ADR-0096](adr/0096-latest-element-visibility-notifications.md)。
+
+0.2.132补齐长时间停留画布的媒体换签恢复：可见资源提前5分钟检查，进入视口和页面 / 网络恢复即时检查；加载失败共享每轮一次强制换签，保留订阅和旧图片，播放 / seek等待有效源并恢复进度。1小时签名、数据库和原任务保持。沿原web / 3080检查、双构建、同包安装、正常重启与原数据核验，131包保留至132成功；人工验收见[清单](manual-tests.md)414–418和[ADR-0095](adr/0095-long-lived-media-url-recovery.md)。
+
+0.2.131 保留 ImageGeneration 的 pixels-organic 黑白动画，切换到固定 img-fx v0.6.0 原源码，使用上游按效果编译与格点两步渲染修复。源码 / MIT / 哈希随包包含，客户安装无需访问 GitHub；构建先检查固定源码身份。沿原 web / 3080 完成检查、双构建、同包安装、正常重启和原数据核验，130包保留至131成功。无数据迁移或模型调用；Windows Chrome / 桌面上传图片、重开画布是否仍卡顿，由用户按[手动清单](manual-tests.md)411–413验收。若仍卡顿记录实际版本、操作和GPU，不把自动测试当作Windows驱动通过，也不修改浏览器flags。详见[ADR-0094](adr/0094-fixed-img-fx-source-and-specialized-media-shaders.md)。
+
+0.2.130将GPT Image、Seedream、Nano Banana各渠道的文生图 / 图生图单次请求默认超时改为600秒（`imageRequestTimeoutMs: 600000`）；等待覆盖发送及响应体读取，任务占用期限同步覆盖较长请求。视频提交 / 查询、FishTTS和结果下载继续使用原`requestTimeoutMs`；网关或供应商仍可能更早结束。超时无可用结果仍本地失败，不自动重提。沿既有web3080检查、双构建、同包安装、重启及原数据核验，129包保留至130成功；无数据迁移，真实模型等待时长由用户按[手动清单](manual-tests.md)验收。
+
+0.2.129按用户决定将智能体运行与协作可视化功能正式命名为“Agent 空间”，定义与对接边界见[ADR-0093](adr/0093-agent-space-name-and-integration-boundaries.md)；0087/0092及相关文档统一名称。本轮为文档与术语更新，现有UI行为、collaboration路由/机器键、日志v1和数据结构沿用；沿既有web3080检查、双构建、同包安装、重启和原数据核验，128包保留至129成功。历史截图和界面文字按0093对照，不据此重提任何任务。
+
 0.2.128在画布根、ReactFlow和公共画布portal作用域限制横向overscroll，避免Chrome双指左右滑动传给浏览器历史导航；原生双轴平移、卡片内部滚动和捏合保持。见[ADR-0023](adr/0023-canvas-wheel-and-trackpad-gestures.md)。沿现有web3080检查、双构建、同包安装、正常重启及存量数据核验，127包保留至128成功；实际Chrome导航手势由用户按[手动清单](manual-tests.md)验收。
 
 0.2.127修复节点浮动卡片上的双指平移 / 捏合，将实际编辑 / 只读 / 记录卡片转交所属画布原生renderer，内部滚动优先按方向消耗，Meta / Control可在提示词聚焦时激活原生缩放。见[ADR-0023](adr/0023-canvas-wheel-and-trackpad-gestures.md)。沿现有web3080检查、双构建、同包安装、正常重启及存量数据核验，126包保留至127成功；真实触摸板与页面倍率由用户按[手动清单](manual-tests.md)验收。
 
-0.2.126让协作浮层利用聊天右侧空白，按原生聊天/视口边界保留12px并随输入框/侧栏尺寸变化重算；Voice Ring约两倍速度、加大呼吸，隐藏/减少动态暂停。沿原web3080检查、双构建、同包安装、重启和原数据核验，125包保留至126成功；见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)，位置和动效由用户刷新人工验收。
+0.2.126让Agent 空间利用聊天右侧空白，按原生聊天/视口边界保留12px并随输入框/侧栏尺寸变化重算；Voice Ring约两倍速度、加大呼吸，隐藏/减少动态暂停。沿原web3080检查、双构建、同包安装、重启和原数据核验，125包保留至126成功；见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)，位置和动效由用户刷新人工验收。
 
-0.2.125按用户截图将协作浮层整体移至输入框上方右侧，气泡与入口右对齐；见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)。沿原web3080完成check、双构建、同包安装、正常重启与存量数据核验，124包保留至125核验成功；位置和动效由用户刷新人工验收。
+0.2.125按用户截图将Agent 空间整体移至输入框上方右侧，气泡与入口右对齐；见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)。沿原web3080完成check、双构建、同包安装、正常重启与存量数据核验，124包保留至125核验成功；位置和动效由用户刷新人工验收。
 
-0.2.124将协作页签改为输入框上方左侧悬浮卡片，见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)。Voice Ring随包编译，不依赖用户电脑访问libraries.dev；activity仅为公开读取投影，无数据迁移。沿原web3080冷备份/检查/同包安装/正常重启，123包保留至124加载与数据核验成功。缩小仍保持共享元数据订阅，详情按需读；故障读原记录，不重复执行。当前界面人工验收见[手动清单](manual-tests.md)。
+0.2.124将Agent 空间的页签改为输入框上方左侧悬浮容器，见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)。Voice Ring随包编译，不依赖用户电脑访问libraries.dev；activity仅为公开读取投影，无数据迁移。沿原web3080冷备份/检查/同包安装/正常重启，123包保留至124加载与数据核验成功。缩小仍保持共享元数据订阅，详情按需读；故障读原记录，不重复执行。当前界面人工验收见[手动清单](manual-tests.md)。
 
 0.2.122接入音色查找子级、单音频复刻及聊天试听，见[ADR-0091](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)。沿既有web3080完成核验与安装；121包在122加载/原数据核验成功前保留。音色查找只读取官网公开页面，超时/动态页/访问限制返回真实缺口，可由用户提供ID或官网详情链接；不额外初始化账户或转发官网样例。试听用原任务，失败核对原记录，不默认再合成；保存失败只重试保存。新复刻需要一份已就绪音频和实际参考原文，不执行转写。使用reference_text/新TTS音频边后不能覆盖回退到不识别它们的121，应前向修复；全部原文、成果、认可、模型/凭据/任务身份仍按现有冷备份保留。官网实时读取、Model Link实际音色兼容及浏览器/听觉验收尚待用户执行。
 
@@ -22,7 +42,7 @@
 
 0.2.117保留并强化聊天卡片的过程按钮，新增原生输入框overlay中的活动协作悬浮入口；无活动批次隐藏，和卡片/面板共享现有订阅。沿web3080更新，保留116包直到117安装/加载核验成功。入口驻留、明暗主题与窄窗口由用户按[手动清单](manual-tests.md)验收。
 
-0.2.116新增私有`agent-collaboration.json` v1，随现有dataDir冷备份；只读监控，未结束批次重启标interrupted，已有成果/实际回执由原仓储继续保存。每任务最近500条过程，整日志最大64 MiB；保存失败/损坏/容量满在协作面板显示，维护者核对并恢复外部备份或归档，不清空dataDir、不自动重放。0.2.115可忽略该sidecar回退；旧批次没有新日志时查看原生工具记录。更新沿web3080：保留115包直到116同包安装/加载/数据核验成功，随后根目录只留116。详见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)及[手动清单](manual-tests.md)。
+0.2.116新增Agent 空间的私有`agent-collaboration.json` v1，随现有dataDir冷备份；只读观察，未结束批次重启标interrupted，已有成果/实际回执由原仓储继续保存。每任务最近500条过程，整日志最大64 MiB；保存失败/损坏/容量满在Agent 空间显示，维护者核对并恢复外部备份或归档，不清空dataDir、不自动重放。0.2.115可忽略该sidecar回退；旧批次没有新日志时查看原生工具记录。更新沿web3080：保留115包直到116同包安装/加载/数据核验成功，随后根目录只留116。详见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)及[手动清单](manual-tests.md)。
 
 0.2.115新增私有`creative-projects.json`和`creative-sources/`，随现有dataDir/profile一起备份；保留旧agent-ledger、两库、对象存储、模型、凭据和任务身份。新创作sidecar不改变CanvasGraph/DDL。重启把running批次转interrupted，已有成果/读取范围保留，不自动启动子Agent或重提任务；通过creative_project核对并按新批次续作。SOURCE_STALE/CREATIVE_STATE_INVALID需恢复备份或核对资料，不能清空整个dataDir。原文快照与工作区成果不自动清理，容量满时先备份整理。
 
@@ -269,7 +289,8 @@ TTS也通过“配置模型”选择FishTTS / Model Link配置独立API Key，�
 | `dataDir` | `~/.dsh-canvas` | string | SQLite、公开配置、未完成恢复暂存；只允许一个写者，无永久本机媒体库 |
 | `maxConcurrentTasks` | 2 | 整数 1–8 | 同时网络 / 保存步骤；不是远端总任务数上限 |
 | `pollIntervalMs` | 3000 | 整数 500–60000 | 宿主视频查询 / 临时故障等待间隔；Seedance下限3秒，浏览器读状态另为2秒 |
-| `requestTimeoutMs` | 120000 | 整数 1000–600000 | 单次供应商请求 / 下载超时，单位 ms；不是整项生成总时长 |
+| `requestTimeoutMs` | 120000 | 整数 1000–600000 | 视频提交 / 查询、FishTTS及结果下载的单次超时，单位 ms；不是整项生成总时长 |
+| `imageRequestTimeoutMs` | 600000 | 整数 1000–600000 | 生图单次请求超时，单位 ms；包含发送与响应体读取，各图片协议 / 渠道及参考图模式统一生效 |
 | `maxMediaBytes` | 209715200（200 MiB） | 整数 1024–1073741824 | 单个导入 / 输出文件上限；不是总磁盘或内存上限 |
 | `maxReferenceBytes` | 20971520（20 MiB） | 整数 1024–104857600 | 图片字节协议参考总量；Seedance流式参考按单媒体和型号限制 |
 
@@ -281,6 +302,7 @@ config:
   maxConcurrentTasks: 2
   pollIntervalMs: 3000
   requestTimeoutMs: 120000
+  imageRequestTimeoutMs: 600000
   maxMediaBytes: 209715200
   maxReferenceBytes: 20971520
 ```

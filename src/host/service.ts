@@ -32,7 +32,7 @@ import { AgentControlCommandSchema } from '../shared/agent'
 import { PresenceSchema, ViewReportSchema, PresentationAckSchema } from '../shared/presentation'
 
 export interface CanvasConfig {
-  dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number
+  dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; imageRequestTimeoutMs?: number
   maxMediaBytes: number; maxReferenceBytes: number
 }
 export const routeDefinitions = [

@@ -18,6 +18,7 @@ import { useGpuCapability } from './useGpu'
 import { useViewportCompositing } from './useViewportCompositing'
 import { CanvasSettings, type SettingsTab } from './Settings'
 import { SignedImage } from './SignedMedia'
+import { observeVisibility } from './observeVisibility'
 import { MediaIcon } from './MediaIcon'
 import { ProjectList } from './ProjectList'
 import { ResourceNode } from './ResourceNode'
@@ -48,7 +49,7 @@ import { RelationshipEdge, relationshipEdges, type RelationshipFlowEdge } from '
 import { NodeLoading, NodeLoadingContext, useNodeLoadingEnvironment } from './NodeLoading'
 import { createLoadingResolutionStore, LoadingResolutionContext } from './loadingResolution'
 import { HistoryNode } from './HistoryNode'
-import { generationHistory, historyFrame, historyEditorAnchor, resultHandle, type GenerationCard } from './generationHistory'
+import { generationHistory, historyFrame, historyEditorAnchor, resultHandle, EMPTY_HISTORY_DIMENSIONS, type GenerationCard, type HistoryDimensions } from './generationHistory'
 import { useGenerationSubmission } from './useGenerationSubmission'
 import { useHistoryInspection, type HistoryInspection } from './useHistoryInspection'
 import { GenerationSnapshotEditor } from './GenerationSnapshotEditor'
@@ -131,17 +132,10 @@ interface MediaProps { asset: Asset; api: CanvasApi; workspace: string; onOpen?:
 const Media = memo(function Media({ asset, api, workspace, onOpen, compact }: MediaProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
-  const [missing, setMissing] = useState(false)
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '160px' })
-    if (ref.current) observer.observe(ref.current)
-    return () => observer.disconnect()
-  }, [])
-  useEffect(() => { setMissing(false) }, [asset.id])
+  useEffect(() => observeVisibility(ref.current, setVisible, { rootMargin: '160px' }), [])
   return <div className={`dc-media ${asset.kind} nodrag nopan ${compact ? 'compact' : ''}`} ref={ref}>
-    {missing ? <div className="dc-missing">媒体暂不可用<br /><small>可重新导入或恢复原结果</small></div>
-      : visible ? asset.kind === 'image'
-        ? <button className="dc-image-button" aria-label="查看大图" onClick={() => onOpen?.(asset)}><SignedImage api={api} canvas={workspace} assetId={asset.id} variant="original" alt={asset.filename} loading="lazy" draggable={false} onError={() => setMissing(true)} /></button>
+    {visible ? asset.kind === 'image'
+        ? <button className="dc-image-button" aria-label="查看大图" onClick={() => onOpen?.(asset)}><SignedImage api={api} canvas={workspace} assetId={asset.id} variant="original" alt={asset.filename} loading="lazy" draggable={false} /></button>
         : asset.kind === 'video'
           ? <VideoPlayer src={api.media(workspace, asset.id)} api={api} canvas={workspace} assetId={asset.id} label={asset.filename} />
           : <AudioPlayer asset={asset} api={api} workspace={workspace} label={asset.filename} />
@@ -151,6 +145,8 @@ const Media = memo(function Media({ asset, api, workspace, onOpen, compact }: Me
 interface NodeData extends Record<string, unknown> {
   node: CanvasNode; asset?: Asset; task?: TaskSummary; results: Asset[]; modelName?: string
   cards: GenerationCard[]; connectedAssets: string[]
+  historyDimensions: HistoryDimensions
+  onHistoryDimensions: (nodeId: string, assetId: string, width: number, height: number) => void
   agentFocused: boolean
   api: CanvasApi; workspace: string; onOpen: (asset: Asset) => void; onResult: (id: string, assetId: string) => void
   rotation: number; playing: boolean; onRename: (id: string, title: string) => void
@@ -170,7 +166,7 @@ function MediaNodeContent({ data, selected }: Pick<NodeProps<FlowNode>, 'data' |
   if (generation && data.cards.length > 1) return <HistoryNode node={node} cards={data.cards} connectedAssets={data.connectedAssets}
     selected={!!selected} expanded={data.expanded} api={api} workspace={workspace} playing={data.playing}
     onPlay={data.onPlay} onStop={data.onStop} onRename={data.onRename} onExpand={data.onExpand} onOpen={onOpen} onSize={data.onSize}
-    onInspect={data.onInspect} inspection={data.inspection} />
+    onInspect={data.onInspect} inspection={data.inspection} dimensions={data.historyDimensions} onDimensions={data.onHistoryDimensions} />
   if (node.kind === 'tts-generation' && !asset) return <TtsNode node={node} task={task} selected={!!selected} onRename={data.onRename} onSize={data.onSize} />
   if (generation && node.kind !== 'tts-generation') return <GenerationNode node={node} asset={asset} results={results} task={task} selected={!!selected} api={api} workspace={workspace}
     expanded={data.expanded} playing={data.playing} onRename={data.onRename} onResult={onResult} onExpand={data.onExpand}
@@ -254,6 +250,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
   const [playingNode, setPlayingNode] = useState<string | null>(null)
   const [rotations, setRotations] = useState<Record<string, { assetId: string; angle: number }>>({})
   const [mediaSizes, setMediaSizes] = useState<Record<string, { width: number; height: number; layoutKey: string }>>({})
+  const [historyDimensions, setHistoryDimensions] = useState<Record<string, HistoryDimensions>>({})
   const mediaSizeKeys = useRef<Record<string, string>>({})
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [panning, setPanning] = useState(false)
@@ -335,6 +332,14 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     return current[id]?.width === width && current[id]?.height === height && current[id]?.layoutKey === layoutKey
       ? current : { ...current, [id]: { width, height, layoutKey } }
   }), [])
+  const onHistoryDimensions = useCallback((nodeId: string, assetId: string, width: number, height: number) => {
+    if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) return
+    setHistoryDimensions((current) => {
+      const dimensions = current[nodeId] ?? EMPTY_HISTORY_DIMENSIONS
+      if (dimensions[assetId]?.width === width && dimensions[assetId]?.height === height) return current
+      return { ...current, [nodeId]: { ...dimensions, [assetId]: { width, height } } }
+    })
+  }, [])
   useEffect(() => { if (playingNode && !selected.includes(playingNode)) setPlayingNode(null) }, [playingNode, selected])
   const assets = state?.assets ?? EMPTY_ASSETS
   const { tasks, submitting, generate } = useGenerationSubmission({
@@ -369,7 +374,8 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     if (!expandedGroups[id] && tasks.filter((task) => task.nodeId === id).length > 1) history.beginEditing(id)
   }, [history.beginEditing])
   const inspectionAnchor = activeNode && history.inspection ? historyEditorAnchor(activeNode,
-    generationHistory(activeNode.id, tasks, assets), history.inspection.identity, history.inspection.assetId) : undefined
+    generationHistory(activeNode.id, tasks, assets), history.inspection.identity, history.inspection.assetId,
+    historyDimensions[activeNode.id]) : undefined
   const previewFor = (node: CanvasNode): Asset | undefined => {
     if (!isGeneration(node.kind)) return projection.assetById.get(node.assetId ?? '')
     const results = projection.byNode.get(node.id)?.results ?? EMPTY_ASSETS
@@ -392,14 +398,19 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     const cards = isGeneration(node.kind) ? projected.cards : EMPTY_CARDS
     const asset = previewFor(node)
     const rotation = rotations[node.id]?.assetId === asset?.id ? rotations[node.id]?.angle ?? 0 : 0
-    const layoutKey = `${asset?.id ?? ''}:${rotation}:${!!expandedGroups[node.id]}:${results.length}:${cards.map((card) => `${card.task.id}:${card.results.map((item) => item.id).join(',')}`).join(';')}`
+    const dimensions = historyDimensions[node.id] ?? EMPTY_HISTORY_DIMENSIONS
+    const layoutKey = `${asset?.id ?? ''}:${rotation}:${!!expandedGroups[node.id]}:${results.length}:${cards.map((card) => {
+      const top = card.results[0], measured = top && dimensions[top.id]
+      return `${card.task.id}:${card.results.map((item) => item.id).join(',')}:${measured?.width ?? top?.width ?? ''}:${measured?.height ?? top?.height ?? ''}`
+    }).join(';')}`
     mediaSizeKeys.current[node.id] = layoutKey
     const cached = mediaSizes[node.id]
-    const size = cached?.layoutKey === layoutKey ? cached : (cards.length > 1 ? historyFrame(cards, node.kind === 'tts-generation', !!expandedGroups[node.id])
+    const size = cached?.layoutKey === layoutKey ? cached : (cards.length > 1 ? historyFrame(cards, node.kind === 'tts-generation', !!expandedGroups[node.id], dimensions)
       : asset?.kind === 'audio' ? { width: 360, height: 180 }
       : isGeneration(node.kind) ? generationFrame(asset, results.length, !!expandedGroups[node.id])
         : asset ? mediaFrame(asset.width ?? 16, asset.height ?? 9, rotation) : { width: 320, height: 265 })
-    const data: NodeData = { node, results, cards, connectedAssets, task, asset, agentFocused: agentPresentation.highlighted.has(node.id), modelName: models.find((model) => model.id === node.modelId)?.name, api, workspace, onOpen, onResult,
+    const data: NodeData = { node, results, cards, connectedAssets, task, asset, historyDimensions: dimensions, onHistoryDimensions,
+      agentFocused: agentPresentation.highlighted.has(node.id), modelName: models.find((model) => model.id === node.modelId)?.name, api, workspace, onOpen, onResult,
       rotation, playing: active && playingNode === node.id, expanded: !!expandedGroups[node.id], onExpand, onInspect,
       inspection: history.inspection?.nodeId === node.id ? history.inspection : undefined, onRename, onRotate, onPlay, onStop, onFocus, onSize }
     const old = nodeCache.current.get(node.id)
@@ -412,7 +423,8 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     })
     nodeCache.current = new Map(next.map((node) => [node.id, node]))
     return next
-  }, [graph.nodes, projection, models, selected, api, workspace, onOpen, onResult, rotations, playingNode, active, expandedGroups, mediaSizes, onExpand, onInspect, history.inspection, onRename, onRotate, onPlay, onStop, onFocus, onSize, agentPresentation.highlighted])
+  }, [graph.nodes, projection, models, selected, api, workspace, onOpen, onResult, rotations, playingNode, active, expandedGroups, mediaSizes,
+    historyDimensions, onHistoryDimensions, onExpand, onInspect, history.inspection, onRename, onRotate, onPlay, onStop, onFocus, onSize, agentPresentation.highlighted])
   const edgeCache = useRef<RelationshipFlowEdge[]>([])
   const baseEdges = useMemo<RelationshipFlowEdge[]>(() => {
     const previous = new Map(edgeCache.current.map((edge) => [edge.id, edge]))

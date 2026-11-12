@@ -29,8 +29,8 @@ it('registers real XYFlow handles per result, preserves old edges with invisible
     unobserve() {}; disconnect() {}
   })
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
   vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1 })
   const bounds = function (this: HTMLElement) {

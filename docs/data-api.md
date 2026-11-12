@@ -19,7 +19,9 @@
 
 最小参考镜头清单：`{tool:"canvas_create_node",input:{operationId:nodeId,revision,kind:"video-generation",title:"镜头",modelId,prompt:"人物形象沿用{{asset:图片UUID}}，对白节奏参考{{asset:音频UUID}}",references:[{source:人物节点ID,assetId:图片UUID},{source:音频节点ID,assetId:音频UUID}]}}`；UUID均取实际读取回执，主级仍负责模型选择。视频有参考时默认推断reference，明确frames保留。手动生成交接现在完整核对参数与真实输入，nodes返回videoMode和references；未连接token、缺少标签或悬空首尾帧依赖拒绝，控制不释放、任务不提交。新409 AGENT_REFERENCE_INVALID及原有图/模型校验错误；改变意图使用新operationId，冲突重读，不强行重放。旧清单参数兼容，旧缺引用准备不再通过交接。无HTTP/DDL/存量迁移，见[ADR-0089](adr/0089-agent-reference-generation-and-prompt-mentions.md)。
 
-0.2.116新增协作只读路由，所有请求沿用Harness owner鉴权，必传`sessionId`（根会话）。日志和契约见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)、[collaboration](../src/shared/collaboration.ts)。
+0.2.116新增Agent 空间的只读路由，所有请求沿用Harness owner鉴权，必传`sessionId`（根会话）。正式名称与对接边界见[ADR-0093](adr/0093-agent-space-name-and-integration-boundaries.md)，日志和契约见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)、[collaboration](../src/shared/collaboration.ts)。命名不更改下表HTTP路径、参数和返回字段。
+
+0.2.135候选增加包内资源路由 `GET /api/canvas/v2/agent-space-assets`，同源鉴权但不属于会话日志，因此无需sessionId。不传file返回版本、动作 / 角色 / 倍速与文件hash / 字节清单（no-store）；传`file`和匹配`hash`只返回包内白名单文件，固定MIME、Content-Length、hash ETag和private immutable缓存，未知文件404、暂不可读503。该路由不能读取任意路径、不能写画布 / 任务，详见[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)。
 
 | GET `/api/canvas/v2/` 路径 | 参数 | 返回 |
 | --- | --- | --- |
@@ -28,11 +30,11 @@
 | agent-collaboration-artifact | sessionId、id、artifactId | 本任务已保存成果快照title/content/version/status/needsReview/relativePath，不接受任意文件路径 |
 | agent-collaboration-events | sessionId | SSE单调revision + 最新30批次及最多100条activeTasks；连接恢复重发当前状态，15秒心跳，慢读者最多一个待消费快照，不重放操作 |
 
-0.2.124任务可选派生`activity`含seq/time/actor/kind/text/tool；只读最后一条公开事件，text最多360字符，不含data/callId/工具正文，未写入日志schema。无该字段的旧记录按task状态显示；新增字段可被旧客户端忽略，页游标仍对应原历史列表。用途见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)。
+0.2.124任务可选派生`activity`含seq/time/actor/kind/text/tool，供Agent 空间展示；只读最后一条公开事件，text最多360字符，不含data/callId/工具正文，未写入日志schema。无该字段的旧记录按task状态显示；新增字段可被旧客户端忽略，页游标仍对应原历史列表。用途见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)。
 
 跨root详情/成果404；旧无记录任务保留原生工具历史。记录故障通过page.error显示。工具摘要采用字段白名单、长度限制与凭据/链接省略，不返回原文页正文、系统提示、reasoning或模型replay。CanvasGraph/DDL不变。
 
-文档类型：参考；负责人：项目维护者；最近核对：2026-11-05。契约 / Schema / 路由变更时复核。
+文档类型：参考；负责人：项目维护者；最近核对：2026-11-10。契约 / Schema / 路由变更时复核。
 
 可执行事实：[contracts](../src/shared/contracts.ts)、[v2](../src/shared/v2.ts)、[schema.sql](../src/host/persistence/schema.sql)、[service](../src/host/service.ts)。业务行为见[业务参考](business.md)，配置限额见[运行指南](operations.md)。
 
@@ -293,6 +295,8 @@ Mock模型来自[固定共享定义](../src/shared/mockModels.ts)，不写入mod
 上传为streaming，默认4MiB分块，按实际字节、SHA-256及最终格式检查，不以MIME / 声明长度跳过检查。独立staging/<UUID>.resume.json记录size、offset、块hash与文件身份，fsync字节后原子提交日志；不修改两库DDL。中断 / 5xx / 不明回执先GET进度再重试，旧无size上传不支持续传。202表示导入任务持久接受，不代表OSS保存成功；见[ADR-0063](adr/0063-resumable-uploads-and-progress-capsules.md)。0.2.65浏览器共享管理器最多五个并发流程，前五枚与其余+N仅为Client投影；不改变HTTP契约或后台OSS导入并发，见[ADR-0064](adr/0064-bounded-upload-capsules-and-five-transfers.md)。
 
 media-urls校验当前画布素材归属，不接受任意key。Host缓存最多2048项，签名方法 / 用途 / 版本 / 凭据纳入身份；默认GET 3600秒，剩余不足300秒刷新；force绕开缓存。graph读取不签名，JSON与307均no-store。HEAD独立签名；下载携带UTF-8 Content-Disposition签名参数。OSS应配置私有Bucket、CORS GET / HEAD和Range所需头；真实响应行为需用户验收。
+
+Client按可见资源共享批量签名与每轮一次失败换签；页面 / 网络恢复或重新进入视口可重新检查。失败图片继续订阅；换签保留同素材旧图，音视频恢复进度与状态。内部加载revision仅在内存中存在，不改变上述DTO或CanvasGraph。见[ADR-0095](adr/0095-long-lived-media-url-recovery.md)。
 
 preview仅图片 / 视频，image/webp；waveform仅音频，JSON为 `{version:1,duration:实际解码秒数,peaks:96项0–1幅度}`。独立串行解码队列最多32身份，30秒失败冷却，临时解码后发布OSS并登记asset_variants；失败不影响原文件 / 付费任务。waveform通过认证Host读取云端JSON，校验bytes / SHA / schema，最多8192字节；内存2048项 / 1小时TTL，同身份合并，32不同身份读取上限、128项失败 / 30秒冷却。GET / HEAD为200、Content-Type / Length、nosniff且no-store，HEAD无正文；不要求浏览器fetch跨域OSS。见[ADR-0045](adr/0045-same-origin-waveforms-and-ratio-order.md)，算法仍见[ADR-0028](adr/0028-audio-waveforms-and-compact-prompts.md)。
 

@@ -31,8 +31,8 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resizeCallbacks.push(callback) }; observe() {}; disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
 })
 afterEach(() => { act(() => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })

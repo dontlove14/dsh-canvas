@@ -8,6 +8,7 @@ import { CanvasApi } from './api'
 import { AudioPlayer } from './AudioPlayer'
 import { NodeLoading, NodeLoadingContext, useNodeLoadingEnvironment } from './NodeLoading'
 import { UiButton } from './ui'
+import { observeVisibility } from './observeVisibility'
 
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap { 'canvas-audio': ChatAudioHandle }
@@ -52,12 +53,11 @@ export function ChatAudioCard({ node, api }: Pick<ChatNodeViewProps<'canvas-audi
   useEffect(() => {
     let intersecting = true
     const update = () => { setVisible(intersecting && !document.hidden); if (!intersecting || document.hidden) setPlaying(null) }
-    const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([entry]) => { intersecting = entry.isIntersecting; update() })
-    if (frame.current) observer?.observe(frame.current)
+    const stopVisibility = observeVisibility(frame.current, (visible) => { intersecting = visible; update() })
     document.addEventListener('visibilitychange', update)
     const otherPlayed = (event: Event) => { if ((event as CustomEvent).detail !== playerId) setPlaying(null) }
     document.addEventListener(PLAY_EVENT, otherPlayed)
-    return () => { observer?.disconnect(); document.removeEventListener('visibilitychange', update); document.removeEventListener(PLAY_EVENT, otherPlayed) }
+    return () => { stopVisibility(); document.removeEventListener('visibilitychange', update); document.removeEventListener(PLAY_EVENT, otherPlayed) }
   }, [playerId])
   useEffect(() => {
     if (!visible) return

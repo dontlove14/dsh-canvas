@@ -55,8 +55,8 @@ async function fixture() {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {}; disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
@@ -167,6 +167,31 @@ it('updates only the owner for old-task progress and new outputs; remeasures cha
   await f.poll()
   expect([...probe.changes.keys()]).toEqual([owner])
   expect(probe.measures.has(owner)).toBe(true)
+})
+
+it('shares decoded stack dimensions with canvas geometry while updating only that node and never saving display measurements', async () => {
+  const f = await fixture()
+  const before = f.getState(), owner = before.graph.nodes[0].id
+  f.update({ ...before, assets: before.assets.map((asset) => asset.nodeId === owner
+    ? { ...asset, width: undefined, height: undefined } : asset) })
+  await f.poll()
+  f.reset()
+  const latest = f.getState().tasks.filter((task) => task.nodeId === owner).at(-1)!
+  const card = f.host.querySelector<HTMLElement>(`[data-task-id="${latest.id}"]`)!
+  const image = card.querySelector<HTMLImageElement>('.dc-generation-media>img')!
+  Object.defineProperties(image, { naturalWidth: { value: 720, configurable: true }, naturalHeight: { value: 1280, configurable: true } })
+  await act(async () => { image.dispatchEvent(new Event('load')); await Promise.resolve() })
+  const stack = card.closest<HTMLElement>('.dc-history-node')!
+  expect([stack.style.width, stack.style.height]).toEqual(['270px', '480px'])
+  expect([...probe.changes.keys()]).toEqual([owner])
+  expect([...probe.bodies.keys()]).toEqual([owner])
+  expect([...probe.measures.keys()]).toEqual([owner])
+  expect((probe.data.get(owner) as any).historyDimensions[latest.resultIds[0]]).toEqual({ width: 720, height: 1280 })
+  expect(f.getState().assets.find((asset) => asset.id === latest.resultIds[0])?.width).toBeUndefined()
+  expect(f.save).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+  f.reset()
+  await act(async () => { image.dispatchEvent(new Event('load')); await Promise.resolve() })
+  expect(probe.changes.size).toBe(0); expect(probe.bodies.size).toBe(0); expect(probe.measures.size).toBe(0)
 })
 
 it('inserts a prompt reference using live positions after dragging, and ignores duplicate coordinates', async () => {

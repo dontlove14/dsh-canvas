@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { encode } from '@msgpack/msgpack'
+import { getGlobalDispatcher, type Dispatcher } from 'undici'
 import { CanvasError, detectMedia, type Output } from './store'
 import { FISH_TTS_MODEL, isTtsSnapshot, validateGeneration, validateTtsReferences, type Asset, type AnyTaskSnapshot, type TtsTaskSnapshot, type TaskSnapshot } from '../shared/contracts'
 import { isGptImage25, builtinDefinition, bananaSizePresets, providerFor, seedreamSizePresets, seedreamRequiresEndpoint, seedanceRequiresEndpoint, isMultimodalVideo } from '../shared/modelCatalog'
@@ -13,7 +14,8 @@ export class ProviderFailure extends Error {
   constructor(message: string, readonly definitive: boolean) { super(message) }
 }
 export interface ProviderResult { id?: string; status: 'queued' | 'generating' | 'completed' | 'failed'; progress?: number; outputs?: Output[]; error?: string; errorCode?: string }
-export interface ProviderOptions { requestTimeoutMs: number; maxMediaBytes: number; maxReferenceBytes: number }
+export const DEFAULT_IMAGE_REQUEST_TIMEOUT_MS = 600000
+export interface ProviderOptions { requestTimeoutMs: number; imageRequestTimeoutMs?: number; maxMediaBytes: number; maxReferenceBytes: number }
 export interface MediaReader {
   readMedia(id: string, limit: number, taskId?: string): Promise<Buffer>; stagePath(name: string): string
   inspectReference?(taskId: string, assetId: string, signal: AbortSignal, protocol?: string): Promise<Asset>
@@ -45,11 +47,20 @@ async function jsonResponse(response: Response, limit: number): Promise<Record<s
 
 export class Providers {
   constructor(private store: MediaReader, private options: ProviderOptions, private signal: AbortSignal, private reviewReferences?: ReviewReferenceResolver) {}
-  private async request(url: string, key: string, init: RequestInit = {}, auth: 'bearer' | 'google' = 'bearer'): Promise<Record<string, any>> {
+  private get imageRequestTimeoutMs(): number { return this.options.imageRequestTimeoutMs ?? DEFAULT_IMAGE_REQUEST_TIMEOUT_MS }
+  private imageRequest(url: string, key: string, init: RequestInit, auth: 'bearer' | 'google' = 'bearer'): Promise<Record<string, any>> {
+    const timeoutMs = this.imageRequestTimeoutMs
+    // Node fetch otherwise stops waiting for headers/body after 300 seconds.
+    // Compose per request to retain the host's dispatcher, proxy and connection policy.
+    const dispatcher = getGlobalDispatcher().compose((dispatch) => (options, handler) =>
+      dispatch({ ...options, headersTimeout: timeoutMs, bodyTimeout: timeoutMs }, handler))
+    return this.request(url, key, { ...init, dispatcher }, auth, timeoutMs)
+  }
+  private async request(url: string, key: string, init: RequestInit & { dispatcher?: Dispatcher } = {}, auth: 'bearer' | 'google' = 'bearer', timeoutMs = this.options.requestTimeoutMs): Promise<Record<string, any>> {
     const response = await fetch(url, {
       ...init, headers: { ...init.headers, ...(key ? auth === 'google' ? { 'x-goog-api-key': key } : { Authorization: `Bearer ${key}` } : {}) },
       redirect: 'error',
-      signal: AbortSignal.any([this.signal, AbortSignal.timeout(this.options.requestTimeoutMs)]),
+      signal: AbortSignal.any([this.signal, AbortSignal.timeout(timeoutMs)]),
     })
     if (!response.ok) {
       const body: Record<string, any> = await jsonResponse(response, 64 * 1024).catch(() => ({}))
@@ -151,7 +162,7 @@ export class Providers {
       const payload = { model: model.model_id, prompt, size: params.size, n: params.n, ...imageOptions, ...(model.protocol !== 'openai-image' ? { response_format: 'b64_json' } : {}) }
       init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
     }
-    const body = await this.request(endpoint(model.api_base, path), key, init)
+    const body = await this.imageRequest(endpoint(model.api_base, path), key, init)
     if (!Array.isArray(body.data) || !body.data.length || body.data.length > 10) throw new ProviderFailure('模型没有返回有效的图片结果，提交结果需要确认', false)
     const outputs: Output[] = []
     for (const item of body.data) {
@@ -364,7 +375,7 @@ export class Providers {
       } catch { throw new ProviderFailure('Seedream 参考图宽高需大于14像素，总像素不超过3600万，宽高比在1:16至16:1之间', true) }
       images.push(`data:${mime};base64,${bytes.toString('base64')}`)
     }
-    const body = await this.request(endpoint(model.api_base, 'images/generations'), key, {
+    const body = await this.imageRequest(endpoint(model.api_base, 'images/generations'), key, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         model: needsEndpoint ? model.endpoint_id : model.model_id, prompt, size: params.size,
         response_format: 'b64_json', output_format: 'png',
@@ -424,7 +435,7 @@ export class Providers {
     const imageSize = preset.resolution === '0.5K' ? '512' : preset.resolution
     let images: Array<{ data?: unknown; mime_type?: unknown }>
     if (providerFor(model)?.id === 'model-link') {
-      const body = await this.request(endpoint(model.api_base, `v1/models/${encodeURIComponent(model.model_id)}:generateContent`), key, {
+      const body = await this.imageRequest(endpoint(model.api_base, `v1/models/${encodeURIComponent(model.model_id)}:generateContent`), key, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: input.map((part) => part.type === 'text' ? { text: part.text }
@@ -454,7 +465,7 @@ export class Providers {
         return { data: image?.data, mime_type: image?.mimeType ?? image?.mime_type }
       }).filter((image) => image.data !== undefined)
     } else {
-      const body = await this.request(endpoint(model.api_base, 'v1beta/interactions'), key, {
+      const body = await this.imageRequest(endpoint(model.api_base, 'v1beta/interactions'), key, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model.model_id, input, store: false,

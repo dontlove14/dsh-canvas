@@ -35,8 +35,8 @@ afterEach(() => {
 async function setup(tts = false, history = false) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
   vi.stubGlobal('ResizeObserver', class { observe() {}; disconnect() {} })
   const paused = new WeakMap<HTMLMediaElement, boolean>()
@@ -66,6 +66,9 @@ async function setup(tts = false, history = false) {
   if (history) snapshot.tasks.push({ id: crypto.randomUUID(), nodeId: nodes[0].id, workspaceId: 'w', status: 'completed',
     resultIds: [assets[2].id], createdAt: 2, updatedAt: 2 })
   const api = new CanvasApi()
+  vi.spyOn(api, 'mediaUrls').mockImplementation(async (_canvas, items) => ({
+    items: items.map((item) => ({ ...item, url: `https://assets.example/${item.assetId}`, expiresAt: Date.now() + 3600000 })),
+  }))
   vi.spyOn(api, 'state').mockResolvedValue(snapshot)
   vi.spyOn(api, 'models').mockResolvedValue([])
   vi.spyOn(api, 'ttsSettings').mockResolvedValue({ endpoint: FISH_TTS_ENDPOINT, revision: 0, configured: false, has_api_key: false, api_key_mask: '' })
@@ -97,7 +100,7 @@ describe('canvas-owned audio playback', () => {
   it('plays one expanded TTS history result at a time and stops on collapse or hiding without losing historical audio', async () => {
     const { container, cards, click, show } = await setup(true, true)
     click(0)
-    act(() => cards[0].querySelector<HTMLButtonElement>('button[title="展开提交记录"]')!.click())
+    await act(async () => cards[0].querySelector<HTMLButtonElement>('button[title="展开提交记录"]')!.click())
     const audio = [...cards[0].querySelectorAll<HTMLAudioElement>('audio')]
     expect(audio).toHaveLength(2)
     act(() => {

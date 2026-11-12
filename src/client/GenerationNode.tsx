@@ -10,6 +10,7 @@ import { UiButton } from './ui'
 import { VideoPlayer } from './VideoPlayer'
 import { useNodeActions } from './CanvasSelection'
 import { SignedImage } from './SignedMedia'
+import { observeVisibility } from './observeVisibility'
 import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
 import { ReviewButton } from './ReviewControls'
 
@@ -86,13 +87,8 @@ function download(api: CanvasApi, workspace: string, asset: Asset) {
 export function ResultMedia({ asset, api, workspace, playing, onPlay, onStop, onOpen, onDimensions }: { asset: Asset; api: CanvasApi; workspace: string; playing: boolean; onPlay: () => void; onStop: () => void; onOpen: () => void; onDimensions: (width: number, height: number) => void }) {
   const frame = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
-  const [missing, setMissing] = useState(false)
-  useNodeMediaLoading(!visible && !missing)
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '160px' })
-    if (frame.current) observer.observe(frame.current)
-    return () => observer.disconnect()
-  }, [])
+  useNodeMediaLoading(!visible)
+  useEffect(() => observeVisibility(frame.current, setVisible, { rootMargin: '160px' }), [])
   useEffect(() => { if (!visible && playing) onStop() }, [visible, playing, onStop])
   useEffect(() => {
     const hide = () => { if (document.hidden) onStop() }
@@ -101,8 +97,8 @@ export function ResultMedia({ asset, api, workspace, playing, onPlay, onStop, on
   }, [onStop])
   return <div ref={frame} className="dc-generation-media" onClick={() => { if (asset.kind === 'video') onPlay() }}
     onDoubleClick={(event) => { if ((event.target as Element).closest('.dc-video-controls')) return; event.preventDefault(); event.stopPropagation(); onOpen() }}>
-    {visible && (missing ? <div className="dc-missing">封面暂不可用</div> : <SignedImage api={api} canvas={workspace} assetId={asset.id} alt={asset.filename} draggable={false} loading="lazy" decoding="async" onError={() => setMissing(true)}
-      onLoad={(event) => onDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />)}
+    {visible && <SignedImage api={api} canvas={workspace} assetId={asset.id} alt={asset.filename} draggable={false} loading="lazy" decoding="async"
+      onLoad={(event) => onDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />}
     {visible && playing && asset.kind === 'video' && <VideoPlayer key={asset.id} src={api.media(workspace, asset.id)} api={api} canvas={workspace} assetId={asset.id} autoPlay label={`播放 ${asset.filename}`} />}
   </div>
 }

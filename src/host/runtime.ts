@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { Store } from './store'
-import { Providers, ProviderFailure, type ProviderResult, type ReviewReferenceResolver } from './providers'
+import { Providers, ProviderFailure, DEFAULT_IMAGE_REQUEST_TIMEOUT_MS, type ProviderResult, type ReviewReferenceResolver } from './providers'
 import { BUSY_STATUSES, TRACKED_STATUSES, isTtsSnapshot, type Task, type TaskStatus } from '../shared/contracts'
 import { sql, type Statement } from './persistence/database'
 import { Uploads } from './media/uploads'
@@ -9,7 +9,7 @@ import { isMockModel } from '../shared/mockModels'
 import { renderMock } from './mockGeneration'
 import { isBananaImage, isSeedreamImage, isMultimodalVideo } from '../shared/modelCatalog'
 
-export interface RuntimeConfig { maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; maxMediaBytes: number; maxReferenceBytes: number }
+export interface RuntimeConfig { maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; imageRequestTimeoutMs?: number; maxMediaBytes: number; maxReferenceBytes: number }
 /** Long-lived host lifecycle. Neither a request signal nor a Peer owns this controller. */
 export class CanvasRuntime {
   dispatchGate?: <T>(taskId: string, operation: () => Promise<T>) => Promise<T>
@@ -112,7 +112,11 @@ export class CanvasRuntime {
     }
   }
   private async execute(task: Task): Promise<void> {
-    await this.store.db.batch([sql('UPDATE task_details SET lease_owner=?,lease_until=? WHERE task_id=? AND (lease_owner IS NULL OR lease_until<?)', [this.store.db.token, Date.now() + this.config.requestTimeoutMs * 8, task.id, Date.now()], 'run', 1)])
+    // Image submissions can outlive the generic download/video deadline.
+    const requestTimeoutMs = task.snapshot.model.kind === 'image'
+      ? Math.max(this.config.requestTimeoutMs, this.config.imageRequestTimeoutMs ?? DEFAULT_IMAGE_REQUEST_TIMEOUT_MS)
+      : this.config.requestTimeoutMs
+    await this.store.db.batch([sql('UPDATE task_details SET lease_owner=?,lease_until=? WHERE task_id=? AND (lease_owner IS NULL OR lease_until<?)', [this.store.db.token, Date.now() + requestTimeoutMs * 8, task.id, Date.now()], 'run', 1)])
     let data = await this.store.taskPrivate(task.id)
     let result: ProviderResult
     if (!data.outputs) {

@@ -5,6 +5,7 @@ import { TRACKED_STATUSES, TaskStatusLabels, type TaskStatus } from '../shared/c
 import type { TaskSummary } from '../shared/v2'
 import { useLoadingPixelRatio } from './loadingResolution'
 import { MediaLoadingEffect } from './MediaLoadingEffect'
+import { observeVisibility } from './observeVisibility'
 
 type Environment = { theme: 'dark' | 'light'; ink: string; surface?: string; paused: boolean }
 const useDomEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
@@ -122,10 +123,7 @@ function TrackedNodeLoading({ phase, task, title, compact }: {
       const value = parseFloat(getComputedStyle(element.closest('.dc-node') ?? element).borderTopLeftRadius)
       if (Number.isFinite(value)) setRadius(value)
     }
-    if (typeof IntersectionObserver === 'undefined') { setVisible(true); return }
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting))
-    if (frame.current) observer.observe(frame.current)
-    return () => observer.disconnect()
+    return observeVisibility(element, setVisible)
   }, [])
   const paused = environmentPaused || !visible
   const preset = phase === 'generating' ? 'md' : phase === 'saving' ? 'pulse-outside' : 'pulse-inner'

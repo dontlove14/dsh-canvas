@@ -21,12 +21,15 @@ it.each([['audio-asset', 1], ['tts-generation', 2]] as const)(
   async (kind, zoom) => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-      observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+      constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+      observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
     })
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
     const api = new CanvasApi()
+    vi.spyOn(api, 'mediaUrls').mockImplementation(async (_canvas, items) => ({
+      items: items.map((item) => ({ ...item, url: `https://assets.example/${item.assetId}`, expiresAt: Date.now() + 3600000 })),
+    }))
     let resolveWave!: (value: AudioWaveform) => void
     vi.spyOn(api, 'waveform').mockReturnValue(new Promise((resolve) => { resolveWave = resolve }))
     const asset: Asset = { id: crypto.randomUUID(), kind: 'audio', mime: 'audio/wav', filename: 'test.wav', bytes: 100, duration: 6, createdAt: 0, nodeId: null, taskId: null }
@@ -75,6 +78,7 @@ it.each([['audio-asset', 1], ['tts-generation', 2]] as const)(
     expect(internal.position).toEqual({ x: 40 / zoom, y: 20 / zoom })
     await act(async () => { resolveWave({ version: 1, duration: 6, peaks: Array(96).fill(.5) }) })
     const audio = pane.querySelector('audio')!
+    act(() => audio.dispatchEvent(new Event('loadedmetadata')))
     Object.defineProperty(audio, 'currentTime', { value: 3, writable: true, configurable: true })
     for (const target of [pane.querySelector('.dc-audio-controls')!, pane.querySelector('.dc-audio-controls>span:last-child')!]) drag(target)
     expect(internal.position).toEqual({ x: 120 / zoom, y: 60 / zoom })

@@ -3,6 +3,8 @@ import type { TaskSummary } from '../shared/v2'
 import { generationFrame } from './generationLayout'
 
 export interface GenerationCard { task: TaskSummary; results: Asset[] }
+export type HistoryDimensions = Readonly<Record<string, { width: number; height: number }>>
+export const EMPTY_HISTORY_DIMENSIONS: HistoryDimensions = Object.freeze({})
 
 /** Acceptance order breaks equal timestamps; completion never changes position. */
 export function generationHistory(nodeId: string, tasks: readonly TaskSummary[], assets: readonly Asset[]): GenerationCard[] {
@@ -22,10 +24,11 @@ export const resultHandle = (assetId: string) => `result:${assetId}`
 export const submissionIdentity = (task: TaskSummary) => task.requestId ?? task.id
 
 /** The inspected output, including its row, keeps the editor in canvas coordinates. */
-export function historyEditorAnchor(node: CanvasNode, cards: readonly GenerationCard[], identity: string, assetId?: string) {
+export function historyEditorAnchor(node: CanvasNode, cards: readonly GenerationCard[], identity: string, assetId?: string,
+  dimensions: HistoryDimensions = EMPTY_HISTORY_DIMENSIONS) {
   const index = cards.findIndex((card) => submissionIdentity(card.task) === identity)
   if (index < 0) return undefined
-  const { frames } = historyFrame(cards, node.kind === 'tts-generation', true)
+  const { frames } = historyFrame(cards, node.kind === 'tts-generation', true, dimensions)
   const frame = frames[index]
   const result = Math.max(0, cards[index].results.findIndex((asset) => asset.id === assetId))
   const offsetY = frames.slice(0, index).reduce((sum, item) => sum + item.height + 16, 0)
@@ -36,12 +39,14 @@ export function historyEditorAnchor(node: CanvasNode, cards: readonly Generation
   }
 }
 
-export function historyFrame(cards: readonly GenerationCard[], audio: boolean, expanded: boolean) {
+export function historyFrame(cards: readonly GenerationCard[], audio: boolean, expanded: boolean,
+  dimensions: HistoryDimensions = EMPTY_HISTORY_DIMENSIONS) {
   const frames = (expanded ? cards : cards.slice(0, 1)).map((card) => {
     if (audio) return { cell: { width: 360, height: 180 }, columns: 1, width: 360, height: 180 }
-    return generationFrame(card.results[0], card.results.length, expanded)
+    const asset = card.results[0], measured = asset && dimensions[asset.id]
+    return generationFrame(asset && measured ? { ...asset, ...measured } : asset, card.results.length, expanded)
   })
-  return { frames, width: Math.max(320, ...frames.map((frame) => frame.width)),
+  return { frames, width: frames.length ? Math.max(...frames.map((frame) => frame.width)) : 320,
     height: frames.reduce((sum, frame) => sum + frame.height, 0) + Math.max(0, frames.length - 1) * 16 }
 }
 

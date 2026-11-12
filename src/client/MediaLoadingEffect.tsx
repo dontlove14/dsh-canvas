@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react'
-import { ImageGeneration } from 'img-fx'
+import { ImageGeneration } from './vendor/img-fx/upstream'
 
 /** Dependency renders only a loading mosaic; media readiness owns its lifetime. */
 export function MediaLoadingEffect({ theme, surface, paused, radius }: {

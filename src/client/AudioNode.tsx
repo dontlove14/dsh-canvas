@@ -12,6 +12,7 @@ import { useNodeActions } from './CanvasSelection'
 import { NODE_OVERLAY_STYLE } from './nodeOverlayLayout'
 import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
 import { ReviewButton } from './ReviewControls'
+import { observeVisibility } from './observeVisibility'
 
 export const AudioNode = memo((props: Parameters<typeof AudioNodeBody>[0]) =>
   <NodeLoadingBoundary><AudioNodeBody {...props} /></NodeLoadingBoundary>)
@@ -27,11 +28,7 @@ function AudioNodeBody({ node, asset, api, workspace, selected, playing, task, o
   useNodeMediaLoading(!visible)
   const updateInternals = useUpdateNodeInternals()
   const acceptsAudio = node.kind === 'tts-generation' && isTtsParams(node.params) && !node.params.reference_id.trim()
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '160px' })
-    if (frame.current) observer.observe(frame.current)
-    return () => observer.disconnect()
-  }, [])
+  useEffect(() => observeVisibility(frame.current, setVisible, { rootMargin: '160px' }), [])
   useEffect(() => { onSize(node.id, 360, 180); updateInternals(node.id) }, [node.id, onSize, updateInternals, acceptsAudio])
   useEffect(() => { if (!visible && playing) onStop(node.id) }, [visible, playing, node.id, onStop])
   useEffect(() => {

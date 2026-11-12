@@ -21,8 +21,8 @@ it.each([['video-asset', 'ctrlKey'], ['video-generation', 'metaKey']] as const)(
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     vi.stubGlobal('navigator', { maxTouchPoints: 0, userAgent: 'Macintosh', platform: 'MacIntel' })
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-      observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+      constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+      observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
     })
     const paused = new WeakMap<HTMLMediaElement, boolean>()
     vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function () { return paused.get(this) ?? true })

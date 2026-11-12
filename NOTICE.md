@@ -32,6 +32,8 @@ HTML 署名写法：
 
 ## 通用创作方法参考
 
+媒体加载使用 [img-fx](https://github.com/Jakubantalik/img-fx) v0.6.0，固定提交 `2098279964046e23bad86d9f42f41a3b06dca735`，Copyright (c) 2026 Jakub Antalik，MIT License。上游源码未经修改，编入客户端；完整许可和来源 / 哈希清单随包保留于 `lib/vendor/img-fx/LICENSE` 与 `lib/vendor/img-fx/source.json`。该第三方源码仅适用自身 MIT 许可，不替代本项目整体许可。
+
 协作悬浮入口使用 [voice-ring](https://libraries.dev/voice-ring) 0.1.2，Copyright (c) 2026 Jakub Antalik，MIT License。其许可如下，仅适用于该依赖，不替代本项目整体许可：
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

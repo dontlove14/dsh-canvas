@@ -7,6 +7,7 @@ import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import flowCss from '@xyflow/react/dist/style.css?inline'
 import css from './styles.css?inline'
 import agentCss from './agent.css?inline'
+import agentSpaceCss from './agentSpace.css?inline'
 import { CanvasApi } from './api'
 import { CanvasApp } from './Canvas'
 import { CanvasSettings } from './Settings'
@@ -30,6 +31,9 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 import { useRef, useState, useEffect } from 'react'
 import { CollaborationClient } from './collaboration'
 import { CollaborationLauncher, DispatchCard, installCollaborationDispatch } from './collaborationView'
+import { createRoot } from 'react-dom/client'
+import { AgentSpaceResources } from './agentSpaceResources'
+import { AgentSpaceGate, AgentSpaceGateOverlay, installAgentSpacePresetGate } from './agentSpaceGate'
 
 declare module '@deepseek-ai/dsh-client-ui-sidebar-right/client' {
   interface SidebarRightTabParamsMap { 'dsh-canvas': { canvasId?: string; nodeId?: string } }
@@ -90,11 +94,24 @@ export function apply(ctx: Context): void {
   const api = new CanvasApi()
   installChatAudio(ctx, api, (props) => <HarnessUiProvider components={components}><ChatAudioCard {...props} /></HarnessUiProvider>)
   const face: Face = { api, presentation: new CanvasPresentationClient(), collaboration: new CollaborationClient(api) }
+  const spaceResources = new AgentSpaceResources(api), spaceGate = new AgentSpaceGate(spaceResources)
+  ctx.effect(() => {
+    const element = document.createElement('div')
+    element.dataset.dcAgentSpaceGate = ''; document.body.append(element)
+    const root = createRoot(element)
+    root.render(<HarnessUiProvider components={components}><AgentSpaceGateOverlay gate={spaceGate} /></HarnessUiProvider>)
+    return () => { root.unmount(); element.remove(); spaceGate.dispose(); spaceResources.dispose() }
+  })
+  ctx.effect(() => installAgentSpacePresetGate({
+    entries: (key) => ctx.slots.entries(key as Parameters<typeof ctx.slots.entries>[0]),
+    onMutate: (listener) => ctx.on('slots/changed', listener),
+  }, spaceGate))
   ctx.effect(() => () => face.collaboration.close())
-  ctx.inject(['sidebarRight', 'connection'], (scope) => {
+  ctx.inject(['sidebarRight', 'connection', 'sessions'], (scope) => {
     installCollaborationDispatch(scope, { client: face.collaboration, locate: (canvasId, nodeId) => openCanvasTab(scope.sidebarRight, canvasId, nodeId) }, (props) =>
       <HarnessUiProvider components={components}><DispatchCard {...props} /></HarnessUiProvider>, (props) =>
-      <HarnessUiProvider components={components}><CollaborationLauncher {...props} /></HarnessUiProvider>)
+      <HarnessUiProvider components={components}><CollaborationLauncher {...props} resources={spaceResources} gate={spaceGate}
+        getBinding={(id) => scope.sessions.binding(id as Parameters<typeof scope.sessions.binding>[0])} /></HarnessUiProvider>)
     scope.effect(() => scope.on('connection/reset', () => face.collaboration.reset()))
   })
   ctx.inject(['inputTriggers', 'sessions'], (scope) => {
@@ -107,7 +124,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.plugin = name
-    style.textContent = `${flowCss}\n${css}\n${agentCss}`
+    style.textContent = `${flowCss}\n${css}\n${agentCss}\n${agentSpaceCss}`
     document.head.appendChild(style)
     return () => style.remove()
   })

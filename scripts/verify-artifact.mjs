@@ -6,13 +6,18 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
+import { verifyImgFxSource } from './img-fx-source.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 process.chdir(root)
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
-async function files(directory) {
+async function files(directory, optional = false) {
   const result = []
-  for (const item of await readdir(directory, { withFileTypes: true })) {
+  const entries = await readdir(directory, { withFileTypes: true }).catch((error) => {
+    if (optional && error.code === 'ENOENT') return []
+    throw error
+  })
+  for (const item of entries) {
     const path = join(directory, item.name)
     if (item.isDirectory()) result.push(...await files(path))
     else result.push(path)
@@ -25,6 +30,9 @@ const checkDir = process.env.CANVAS_ARTIFACT_CHECK_DIR ?? join(tmpdir(), `${pkg.
 await mkdir(checkDir, { recursive: true })
 const lib = await hashes(await files('lib'))
 const clientSource = await readFile('lib/client.js', 'utf8')
+const imgFxSource = await verifyImgFxSource(new URL('../lib/vendor/img-fx/', import.meta.url))
+assert(clientSource.includes('IMGFX_PASS') && clientSource.includes('const int u_effect = '), 'Client must bundle img-fx per-effect/two-pass fixes')
+assert(!/\brequire\(["']img-fx["']\)/.test(clientSource), 'Client must not load the old registry img-fx')
 assert(clientSource.includes('data-dc-plugin-version') && clientSource.includes(JSON.stringify(pkg.version)), 'Project header must display the packaged plugin version')
 for (const name of ['lib/index.js', 'lib/client.js', 'lib/agent-preset.js', 'lib/worker.mjs', 'lib/schema.sql', 'lib/review-worker.mjs',
   'lib/review-schema.sql', 'lib/vendor/volcengine-signer.cjs', 'lib/volcengine-signer-LICENSE', 'lib/volcengine-signer-source.json']) assert(lib[name], `missing ${name}`)
@@ -92,7 +100,25 @@ if (process.argv[2] === 'record') {
     const { id } = await configuredCreate.json()
     const graph = await routes.get('/api/canvas/v2/graph').fetch(new Request(`http://localhost/api/canvas/v2/graph?canvas=${id}`))
     assert.equal(graph.status, 200); assert.equal((await graph.json()).graphRevision, 0)
-    assert.equal(routes.size, 45)
+    assert.equal(routes.size, 46)
+    const spaceRoute = routes.get('/api/canvas/v2/agent-space-assets')
+    const spaceResponse = await spaceRoute.fetch(new Request('http://localhost/api/canvas/v2/agent-space-assets'))
+    assert.equal(spaceResponse.status, 200)
+    const space = await spaceResponse.json()
+    assert.equal(space.version, pkg.version)
+    assert(space.actions.length >= 87 && space.files.length >= 177)
+    assert.equal(space.actions.find((entry) => entry.role === 'main' && entry.action === 'idle-front')?.code, 'M09')
+    for (const role of space.roles) {
+      const front = space.actions.find((entry) => entry.role === role.id && entry.action === 'work-front')
+      assert(front?.loop && front.duration > 0, `Missing delivered frontal loop for ${role.id}`)
+      assert(space.files.some((entry) => entry.file === front.video), `Missing frontal video for ${role.id}`)
+      assert(space.files.some((entry) => entry.file === front.poster), `Missing frontal poster for ${role.id}`)
+    }
+    for (const entry of space.files) assert.equal(lib[`lib/agent-space/${entry.file}`], entry.sha256)
+    assert.equal((await spaceRoute.fetch(new Request('http://localhost/api/canvas/v2/agent-space-assets?file=../schema.sql'))).status, 404)
+    const clip = space.files.find((entry) => entry.mime === 'video/webm')
+    const loadedClip = await spaceRoute.fetch(new Request(`http://localhost/api/canvas/v2/agent-space-assets?file=${clip.file}&hash=${clip.sha256}`))
+    assert.equal(digest(Buffer.from(await loadedClip.arrayBuffer())), clip.sha256)
     const chatAudioRoute = routes.get('/api/canvas/v2/audio-result')
     assert(chatAudioRoute && chatAudioRoute.methods.length === 1 && chatAudioRoute.methods[0] === 'GET')
     assert.equal((await chatAudioRoute.fetch(new Request(`http://localhost/api/canvas/v2/audio-result?canvas=${id}`))).status, 400)
@@ -360,9 +386,9 @@ if (process.argv[2] === 'record') {
     assert.equal(waveform.headers.get('location'), null)
     const original = await routes.get('/api/canvas/v2/media').fetch(new Request(`http://localhost/api/canvas/v2/media?canvas=${id}&id=${audioId}`))
     assert.equal(original.status, 307)
-    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), ...await files('designs'), 'README.md', 'LICENSE', 'NOTICE.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'vitest.config.ts', 'cordis.patch.yml']
+    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), ...await files('designs', true), 'README.md', 'LICENSE', 'NOTICE.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'vitest.config.ts', 'cordis.patch.yml']
     const source = await hashes(sourcePaths)
-    const manifest = { name: pkg.name, version: pkg.version, node: process.version, npm: execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim(), source, sourceHash: digest(JSON.stringify(source)), lib, libHash: digest(JSON.stringify(lib)), reproducible: true, compiledHostSmoke: 'passed' }
+    const manifest = { name: pkg.name, version: pkg.version, node: process.version, npm: execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim(), source, sourceHash: digest(JSON.stringify(source)), lib, libHash: digest(JSON.stringify(lib)), reproducible: true, compiledHostSmoke: 'passed', imgFxSource }
     await writeFile(`${pkg.name}-${pkg.version}.manifest.json`, JSON.stringify(manifest, null, 2))
     console.log(`Reproducible lib ${manifest.libHash}; compiled Host/Worker/schema startup passed`)
   } finally {

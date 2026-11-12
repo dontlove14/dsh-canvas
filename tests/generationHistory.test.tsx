@@ -4,8 +4,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { ReactFlowProvider } from '@xyflow/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HistoryNode } from '../src/client/HistoryNode'
-import { generationHistory, historyFrame, resultHandle } from '../src/client/generationHistory'
+import { GenerationNode } from '../src/client/GenerationNode'
+import { generationHistory, historyFrame, historyEditorAnchor, resultHandle } from '../src/client/generationHistory'
 import { connectionAsset } from '../src/client/generationLayout'
+import { mediaFrame } from '../src/client/mediaLayout'
 import { promptCandidates } from '../src/client/promptReferences'
 import { useGenerationSubmission } from '../src/client/useGenerationSubmission'
 import { ApiError, CanvasApi } from '../src/client/api'
@@ -18,8 +20,8 @@ const noop = () => {}
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(noop)
 })
@@ -56,6 +58,65 @@ function deferred<T>() {
 }
 
 describe('submission cards and asset ports', () => {
+  it('sizes a collapsed stack from its newest result, without a landscape minimum or older-card dimensions', () => {
+    const { node, tasks, assets } = fixture()
+    tasks[2].status = 'completed'; tasks[2].resultIds = [assets[1].id]
+    const portrait = assets.map((asset, index) => ({ ...asset, width: index === 1 ? 720 : 1920, height: index === 1 ? 1280 : 1080 }))
+    const cards = generationHistory(node.id, tasks, portrait)
+    const size = historyFrame(cards, false, false)
+    expect(size).toMatchObject({ width: 270, height: 480 })
+    expect(size.frames[0].cell).toMatchObject(mediaFrame(720, 1280))
+    const square = cards.map((card, index) => index ? card : { ...card, results: [{ ...card.results[0], width: 1024, height: 1024 }] })
+    expect(historyFrame(square, false, false)).toMatchObject({ width: 320, height: 320 })
+    expect(historyFrame(cards, true, false)).toMatchObject({ width: 360, height: 180 })
+  })
+  it('uses decoded per-card dimensions for expanded history and the inspected output anchor', () => {
+    const { node, tasks, assets } = fixture()
+    tasks[2].status = 'completed'; tasks[2].resultIds = [assets[0].id]
+    tasks[1].resultIds = [assets[1].id]
+    const unknown = assets.map((asset) => ({ ...asset, width: undefined, height: undefined }))
+    const cards = generationHistory(node.id, tasks, unknown)
+    const dimensions = { [assets[0].id]: { width: 720, height: 1280 }, [assets[1].id]: { width: 1024, height: 1024 } }
+    const size = historyFrame(cards, false, true, dimensions)
+    expect(size.frames[0]).toMatchObject({ width: 270, height: 480 })
+    expect(size.frames[1]).toMatchObject({ width: 320, height: 320 })
+    expect(historyEditorAnchor(node, cards, tasks[1].requestId!, assets[1].id, dimensions)).toMatchObject({
+      position: { x: node.position.x, y: node.position.y + 480 + 16 }, size: { width: 320, height: 320 },
+    })
+    expect(unknown.every((asset) => asset.width === undefined && asset.height === undefined)).toBe(true)
+  })
+  it.each(['image', 'video'] as const)('matches a single %s after decoding missing stack dimensions and follows the next top asset', async (kind) => {
+    const values = props(kind), top = { ...values.assets[0], id: crypto.randomUUID(), width: undefined, height: undefined }
+    values.tasks[2].status = 'completed'; values.tasks[2].resultIds = [top.id]
+    values.assets.push(top); values.cards = generationHistory(values.node.id, values.tasks, values.assets)
+    vi.spyOn(values.api, 'mediaUrls').mockImplementation(async (_canvas, items) => ({ items: items.map((item) => ({
+      ...item, url: `https://test.invalid/${item.assetId}`, expiresAt: Date.now() + 3600000,
+    })) }))
+    const view = () => <ReactFlowProvider><div data-stack><HistoryNode {...values} /></div>
+      <div data-single><GenerationNode {...values} asset={top} results={[top]} task={values.tasks[2]} onResult={noop} /></div></ReactFlowProvider>
+    const { container, root } = mount(view())
+    await act(async () => { await Promise.resolve() })
+    const stack = container.querySelector<HTMLElement>('[data-stack] .dc-history-node')!
+    const single = container.querySelector<HTMLElement>('[data-single] .dc-generation-node')!
+    const stackImage = stack.querySelector<HTMLImageElement>('.dc-history-card .dc-generation-media>img')!
+    const singleImage = single.querySelector<HTMLImageElement>('.dc-generation-media>img')!
+    for (const image of [stackImage, singleImage]) Object.defineProperties(image, {
+      naturalWidth: { value: 720, configurable: true }, naturalHeight: { value: 1280, configurable: true },
+    })
+    await act(async () => { stackImage.dispatchEvent(new Event('load')); singleImage.dispatchEvent(new Event('load')); await Promise.resolve() })
+    expect([stack.style.width, stack.style.height]).toEqual([single.style.width, single.style.height])
+    expect([stack.style.width, stack.style.height]).toEqual(['270px', '480px'])
+    const card = stack.querySelector<HTMLElement>('.dc-history-card')!
+    expect([card.style.width, card.style.height]).toEqual(['270px', '480px'])
+    expect(stack.querySelectorAll('.dc-result-layer')).toHaveLength(2)
+    expect(top.width).toBeUndefined(); expect(top.height).toBeUndefined()
+    const next = { ...top, id: crypto.randomUUID(), width: 1024, height: 1024 }
+    values.assets.push(next); values.tasks[2].resultIds = [next.id]
+    values.cards = generationHistory(values.node.id, values.tasks, values.assets)
+    await act(async () => { root.render(view()); await Promise.resolve() })
+    expect([stack.style.width, stack.style.height]).toEqual(['320px', '320px'])
+    expect(stack.querySelector('.dc-history-card')).toBe(card)
+  })
   it('orders equal timestamps by acceptance, ignores completion order and preserves failed/empty submissions', () => {
     const { node, tasks, assets } = fixture()
     tasks[2].status = 'failed'; tasks[2].createdAt = tasks[1].createdAt

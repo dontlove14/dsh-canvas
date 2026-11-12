@@ -1,39 +1,40 @@
-# ADR-0087：聊天派发卡片与持久协作过程
+# ADR-0087：Agent 空间的派发卡片与持久协作日志
 
-文档类型：架构决策记录；负责人：项目维护者 / 开发执行者；最近核对：2026-11-05。
+文档类型：架构决策记录；负责人：项目维护者 / 开发执行者；最近核对：2026-11-10。
 
 状态：已采纳
-UI入口在0.2.124由[ADR-0092](0092-floating-agent-collaboration-network.md)部分替代；下述0.2.116/117页签和按钮为历史决策，日志及权限边界延续。
+功能正式名称自2026-11-10统一为“Agent 空间”，定义与对接边界见[ADR-0093](0093-agent-space-name-and-integration-boundaries.md)；原编号、路径与技术决策保留。
+Agent 空间的UI入口在0.2.124由[ADR-0092](0092-floating-agent-collaboration-network.md)部分替代；下述0.2.116/117页签和按钮为历史决策，日志及权限边界延续。
 记录日期：2026-11-05
 实施版本：0.2.116；延续 [ADR-0086](0086-creative-projects-and-scoped-canvas-executor.md) 的角色与权限边界。
 
 ## 背景与驱动因素
 
 1. 用户需要直接看到主级派发、子级公开过程、工具返回、成果和主级接续；仅最后一条回复不能解释当前进展。
-2. 卡片和面板必须使用同一真实来源，刷新或重启可读，并避免监控动作触发运行、付费、控制权变更或修改存量图。
+2. Agent 空间的卡片和容器必须使用同一真实来源，刷新或重启可读，并避免观察动作触发运行、付费、控制权变更或修改存量图。
 
 ## 决策
 
-采用独立宿主协作日志、聊天派发投影与原生右侧“协作过程”页签。默认不自动打开；聊天卡片点击或原生右侧入口打开，页签及任务可收起。创建画布前也可监控专业任务。
+Agent 空间采用独立宿主协作日志、聊天派发投影与原生右侧页签（0.2.116历史形态）。默认不自动打开；聊天卡片点击或原生右侧入口打开，页签及任务可收起。创建画布前也可查看专业任务。
 
-0.2.117保留卡片内“查看协作过程”按钮，并使用主题强调色实心样式。原生`conversation.input.overlay`增加“Agent 协作”悬浮入口：当前root的active批次数大于0才显示，固定在输入框上方右侧，随原生sticky composer驻留，不进入消息流、不占输入空间、不修改宿主滚动。点击打开最新可见的活动批次；活动批次在列表分页之外时打开过程目录。完成、受阻或中断且没有其他活动批次时隐藏；历史仍从原卡片/页签读取。入口与卡片/面板共享现有GET/SSE，没有新轮询、执行或自动打开。
+0.2.117保留卡片内的Agent 空间入口按钮，并使用主题强调色实心样式。原生`conversation.input.overlay`增加Agent 空间悬浮入口：当前root的active批次数大于0才显示，固定在输入框上方右侧，随原生sticky composer驻留，不进入消息流、不占输入空间、不修改宿主滚动。点击打开最新可见的活动批次；活动批次在列表分页之外时打开过程目录。完成、受阻或中断且没有其他活动批次时隐藏；历史仍从原卡片/页签读取。入口与卡片/容器共享现有GET/SSE，没有新轮询、执行或自动打开。此处使用正式功能名称描述历史入口，旧版按钮字面文案按ADR-0093对照。
 
 0.2.119在无限画布主/专业/执行预设内，仅装饰原生顶部`agent-team`和`subagent-catalog`插槽组件的会话列表读取：共享中文角色映射转换团队成员name与子级目录label，历史英文名称通过稳定缓存的展示副本读取，宿主快照、水位、状态、导航与身份不变；未知自定义名称保持。新专业spawn的label使用同一中文映射，role/preset/task仍使用原机器键。支持原生插槽晚注册与卸载还原，不改写历史、全局语言或其他预设。
 
-依赖：共享契约 → 宿主协作日志 / 客户端订阅；创作资料提供成果索引，执行 ledger 提供实际回执。协作日志没有 spawn、图写入、任务生成或重新委派权限。故障边界为本机已有单宿主；损坏、容量或保存错误仅使监控显示故障，不撤销已提交的成果和执行回执。
+Agent 空间依赖：共享契约 → 宿主协作日志 / 客户端订阅；创作资料提供成果索引，执行 ledger 提供实际回执。协作日志没有 spawn、图写入、任务生成或重新委派权限。故障边界为本机已有单宿主；损坏、容量或保存错误仅使Agent 空间显示故障，不撤销已提交的成果和执行回执。
 
 | 来源 / 生产者 | 消费者 | 契约与时机 | 责任 |
 | --- | --- | --- | --- |
 | delegation | 协作日志 | spawn 前绑定 root、任务、父 call、预留 child；记录完整任务和来源版本 | 首步不会漏关联；相同批次不会另开日志 |
 | 原生 session/event | 协作日志 | 已提交 seq；子级公开 text、tool/call、tool/result；主级回传后的公开接续 | 不读取 snapshotEvents，不捕获 reasoning、系统提示、开发消息、provider replay |
 | 原生 subagent/start | 协作日志 | 预留 child → 原生 runId | 补充启动事实，避免以专业角色名关联另一会话 |
-| creative.persist | 协作日志 | 实际已保存成果、版本、状态、相对文件路径和进度 | 自报进度独立标签，来源正文和绝对路径不送入监控 |
+| creative.persist | 协作日志 | 实际已保存成果、版本、状态、相对文件路径和进度 | 自报进度独立标签，来源正文和绝对路径不送入Agent 空间 |
 | ledger.persist | 协作日志 | 每项实际执行 operationId 回执 | 去重计数；模型自报 completed 不构成执行完成 |
-| 只读 GET / SSE | 卡片和面板 | rootSessionId + taskId；单调 revision 的最新状态 | 同会话共享一个 EventSource；断连恢复读取状态，不重放执行 |
+| 只读 GET / SSE | Agent 空间的卡片和容器 | 根会话sessionId + 任务id；单调 revision 的最新状态 | 同会话共享一个 EventSource；断连恢复读取状态，不重放执行 |
 
-日志为 dataDir/agent-collaboration.json v1，原子替换、0600；目录沿用0700和已有Store锁。字段由 schema 校验。CanvasGraph、SQL DDL、agent-ledger 和 creative-projects 格式不变。旧批次没有新日志时保留原生工具记录，不伪造历史。
+Agent 空间日志为 dataDir/agent-collaboration.json v1，原子替换、0600；目录沿用0700和已有Store锁。字段由 schema 校验。CanvasGraph、SQL DDL、agent-ledger 和 creative-projects 格式不变。旧批次没有新日志时保留原生工具记录，不伪造历史。
 
-## 状态与监控语义
+## Agent 空间的状态与观察语义
 
 状态为 dispatched/running/completed/blocked/interrupted。专业 completed 指有效成果已保存并回传；executor completed 仅在所有 commands 都有实际回执时成立。工具正常返回与工具错误分开显示。所有成果的 draft/approved/rejected/needsReview 仍来自创作项目，不以子级结束或主级接续推定认可。
 
@@ -41,7 +42,7 @@ UI入口在0.2.124由[ADR-0092](0092-floating-agent-collaboration-network.md)部
 
 | 边界 | 默认值 / 上限 | 过载、失败与恢复 |
 | --- | --- | --- |
-| 活动 Agent | 延用每命名空间最多2个批次与原写队列 | 监控不扩并发 |
+| 活动 Agent | 延用每命名空间最多2个批次与原写队列 | Agent 空间不扩并发 |
 | 批次 | 最多10000；任务文本24000字符 | 记录容量失败可见，不影响权威回执 |
 | 过程事件 | 每任务最近500条；文本4000字符、结构化摘要8000字符、递归4层/每数组30项 | 截断明确显示；原生历史仍保留 |
 | 整份日志 | 最大64 MiB，拒绝超大或符号链接文件 | 原文件保留，提示归档/备份恢复；不自动删除用户历史 |
@@ -50,7 +51,7 @@ UI入口在0.2.124由[ADR-0092](0092-floating-agent-collaboration-network.md)部
 
 事件按每任务 seq 排序；原生 session seq 去重并忽略迟到旧 seq。工具调用与返回按 callId 关联，回执按 operationId 去重。宿主重启将未结束任务标为 interrupted，记录恢复不执行任务。
 
-客户端接收低 revision 时忽略；连接重置关闭旧流、清空订阅快照并重新GET/SSE，generation 隔离迟到响应。EventSource 使用浏览器原生重连，监控无业务重试或死信队列；坏记录提示可见并保留文件，由维护者恢复外部备份。所谓重放仅是重读最近状态 / 历史，不重新spawn，不重新生成。日志是监控投影，不是操作事务真相。
+Agent 空间客户端接收低 revision 时忽略；连接重置关闭旧流、清空订阅快照并重新GET/SSE，generation 隔离迟到响应。EventSource 使用浏览器原生重连，Agent 空间无业务重试或死信队列；坏记录提示可见并保留文件，由维护者恢复外部备份。所谓重放仅是重读最近状态 / 历史，不重新spawn，不重新生成。日志是Agent 空间的观察投影，不是操作事务真相。
 
 只捕获公开文本和结构化允许字段；源文页 text、draft.content、完整图、模型 replay、认证字段、媒体数据不进入过程摘要。公共文本中的链接和常见凭据片段省略。成果正文只能通过本任务的已保存artifactId读取快照；跨root或任意文件路径拒绝。既有 Harness owner 鉴权不变。
 
@@ -63,7 +64,7 @@ UI入口在0.2.124由[ADR-0092](0092-floating-agent-collaboration-network.md)部
 | 仅依靠主级回复或原生折叠工具行 | 不采用 | 派发无法立即呈现，成果和实际回执分散 |
 | 嵌入全部子会话 / 模型 replay | 不采用 | 内容过量、泄漏隐藏上下文，难区分进度与事实 |
 | 独立只读日志 + 卡片 + 原生可收起页签 | 采用 | 可解释、可持久恢复、无额外执行权限 |
-| 新增调度工作流或修改CanvasGraph | 不采用 | 监控不能成为执行或存量迁移入口 |
+| 新增调度工作流或修改CanvasGraph | 不采用 | Agent 空间不能成为执行或存量迁移入口 |
 
 ## 后果
 
@@ -78,7 +79,7 @@ UI入口在0.2.124由[ADR-0092](0092-floating-agent-collaboration-network.md)部
 
 ## 验证与证据
 
-实现：[日志](../../src/host/agent/collaboration.ts)、[契约](../../src/shared/collaboration.ts)、[客户端订阅](../../src/client/collaboration.ts)、[卡片和面板](../../src/client/collaborationView.tsx)。
+实现：[Agent 空间日志](../../src/host/agent/collaboration.ts)、[契约](../../src/shared/collaboration.ts)、[客户端订阅](../../src/client/collaboration.ts)、[Agent 空间卡片和容器](../../src/client/collaborationView.tsx)。
 测试：[投影/恢复](../../tests/collaboration.test.ts)、[共享订阅/迟到/展开/滚动](../../tests/collaborationClient.test.tsx)、[原生行投影](../../tests/agentProgress.test.tsx)、[批次执行链路](../../tests/agent.test.ts)、[编译产物owner路由](../../scripts/verify-artifact.mjs)。
 
 发布门槛：docs check、host/client typecheck、全部vitest、双构建逐文件一致、同包安装身份、HTTP/native预设加载、存量数据库/会话/模型/凭据和资料保留核验。阻断项失败先修复，不安装失败候选；不调用真实LLM或付费接口。

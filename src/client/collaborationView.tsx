@@ -1,16 +1,12 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { UseSessionStatus } from '@deepseek-ai/dsh-client-ui-session/client'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ChatNodeViewProps, ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { collaborationRole, collaborationStatus, type CollaborationTask, type CollaborationDetail } from '../shared/collaboration'
-import { VoiceRing } from 'voice-ring'
-import { CollaborationClient, useCollaboration, useCollaborationTask, useCollaborationView } from './collaboration'
-import { collaborationGraph, collaborationMessage, RETURN_FLOW_MS } from './collaborationGraph'
-import { collaborationOutset, collaborationRingMotion } from './collaborationLayout'
-import { useNodeLoadingEnvironment } from './NodeLoading'
+import { CollaborationClient, useCollaboration, useCollaborationTask } from './collaboration'
 import { UiButton, UiModal } from './ui'
+import { AgentSpaceLauncher, type AgentSpaceProps } from './AgentSpaceView'
 
 interface Dispatch { id: string; callId: string; role: string; title: string; phase: 'running' | 'returned' | 'failed' }
 declare module '@deepseek-ai/dsh-client-ui-chat/client' { interface ChatNodeDataMap { 'canvas-dispatch': Dispatch } }
@@ -45,132 +41,23 @@ function TaskSummary({ task }: { task: CollaborationTask }) {
   </div>
 }
 interface ViewProps { client: CollaborationClient; sessionId: string; locate?: (canvasId: string, nodeId: string) => void }
-type LauncherProps = Omit<ViewProps, 'sessionId'> & { sessionId?: string; useSessionStatus?: UseSessionStatus }
-/** The native composer overlay stays above the input while the transcript scrolls. */
+type LauncherProps = Omit<ViewProps, 'sessionId'> & AgentSpaceProps & { useSessionStatus?: UseSessionStatus }
+/** The resident native slot supplies session sources; the card occupies the chat's upper-left seat. */
 export function CollaborationLauncher(props: LauncherProps) {
-  return props.useSessionStatus ? <NativeCollaborationLauncher {...props} useSessionStatus={props.useSessionStatus} /> : <FloatingCollaboration {...props} />
-}
-function NativeCollaborationLauncher({ useSessionStatus, ...props }: LauncherProps & { useSessionStatus: UseSessionStatus }) {
-  const running = useSessionStatus((status) => props.sessionId ? status.get(props.sessionId as SessionId)?.running : undefined)
-  return <FloatingCollaboration {...props} mainRunning={running} />
-}
-function FloatingCollaboration(props: LauncherProps & { mainRunning?: boolean }) {
-  const page = useCollaboration(props.client, props.sessionId)
-  const view = useCollaborationView(props.client, props.sessionId)
-  if (!props.sessionId || (!page.tasks.length && !view.expanded)) return null
-  return <CollaborationFloat key={props.sessionId} {...props} sessionId={props.sessionId} page={page} />
-}
-function CollaborationFloat({ client, sessionId, mainRunning, locate, page }: ViewProps & {
-  mainRunning?: boolean; page: ReturnType<typeof useCollaboration>
-}) {
-  const view = useCollaborationView(client, sessionId), frame = useRef<HTMLDivElement>(null), panelId = useId(), markerId = useId()
-  const [visible, setVisible] = useState(!document.hidden), [layout, setLayout] = useState({ room: undefined as number | undefined, outset: 0 }), [now, setNow] = useState(Date.now())
-  const environment = useNodeLoadingEnvironment(frame, visible)
-  const [canvasSupported] = useState(() => {
-    if (typeof CanvasRenderingContext2D === 'undefined') return false
-    try { return !!document.createElement('canvas').getContext('2d') } catch { return false }
-  })
-  useEffect(() => {
-    let intersecting = true
-    const refresh = () => {
-      setVisible(intersecting && !document.hidden)
-      const element = frame.current
-      if (!element) return
-      const anchor = element.closest<HTMLElement>('[data-composer-overlay]') ?? element.parentElement
-      const bounds = element.closest<HTMLElement>('[data-conversation-content]')
-      const anchorRect = anchor?.getBoundingClientRect(), bottom = element.getBoundingClientRect().bottom
-      const outset = anchorRect ? collaborationOutset(anchorRect, bounds?.getBoundingClientRect(),
-        document.documentElement.clientWidth || window.innerWidth) : 0
-      const room = bottom > 80 ? Math.max(80, bottom - 12) : undefined
-      setLayout((old) => old.room === room && old.outset === outset ? old : { room, outset })
-    }
-    const observer = typeof IntersectionObserver === 'undefined' ? undefined : new IntersectionObserver(([entry]) => {
-      intersecting = entry.isIntersecting; refresh()
-    })
-    if (frame.current) observer?.observe(frame.current)
-    const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(refresh)
-    // The overlay itself has zero height; measure the card/seat/chat as well
-    // so growing the composer or resizing the sidebar recalculates the gutter.
-    for (let ancestor = frame.current?.parentElement; ancestor && ancestor !== document.body; ancestor = ancestor.parentElement) {
-      resize?.observe(ancestor)
-      if (ancestor.hasAttribute('data-conversation-content')) break
-    }
-    refresh(); document.addEventListener('visibilitychange', refresh); window.addEventListener('resize', refresh)
-    return () => { observer?.disconnect(); resize?.disconnect(); document.removeEventListener('visibilitychange', refresh); window.removeEventListener('resize', refresh) }
-  }, [])
-  useEffect(() => {
-    const time = Date.now(); setNow(time)
-    const expiries = new Set(page.tasks.map((task) => task.activity?.kind === 'returned' ? task.activity.time + RETURN_FLOW_MS : 0)
-      .filter((value) => value > time))
-    const timers = [...expiries].map((expiry) => setTimeout(() => setNow(Date.now()), expiry - time + 1))
-    return () => timers.forEach(clearTimeout)
-  }, [page.revision])
-  const graph = collaborationGraph(page, page.tasks[0]?.rootId ?? sessionId, mainRunning, view.taskId, now)
-  const message = page.error ? '连接中断，当前显示已保存的协作状态' : collaborationMessage(page)
-  const busy = page.active > 0 || mainRunning === true
-  const collapse = () => {
-    client.collapse(sessionId)
-    // Return keyboard focus to the resident launcher, never move the composer's caret.
-    window.requestAnimationFrame?.(() => frame.current?.querySelector<HTMLButtonElement>('.dc-collaboration-compact')?.focus())
-  }
-  return <div ref={frame} className="dc-collaboration-launcher" data-expanded={view.expanded} data-motion-paused={environment.paused}
-    style={{ '--dc-collaboration-outset': `${layout.outset}px`,
-      ...(layout.room ? { '--dc-collaboration-room': `${layout.room}px` } : {}) } as CSSProperties}
-    onKeyDown={(event) => { if (event.key === 'Escape' && view.expanded) { event.preventDefault(); event.stopPropagation(); collapse() } }}>
-    {!view.expanded ? <>
-      <div className="dc-collaboration-bubble" role="status" aria-live="polite" aria-atomic="true">
-        <span className="dc-collaboration-bubble-indicator" data-working={busy} aria-hidden="true" />
-        <p key={message} title={message}>{message}</p>
-      </div>
-      <button type="button" className="dc-collaboration-compact" aria-label={`展开智能体协作，${page.active} 个批次执行中`}
-        aria-expanded={false} aria-controls={panelId} onClick={() => client.open(sessionId)}>
-        <span className="dc-collaboration-ring" aria-hidden="true">
-          {canvasSupported ? <VoiceRing size={58} theme={environment.theme} color={environment.ink} state={busy ? 'processing' : 'idle'}
-            {...collaborationRingMotion} paused={environment.paused} dots={.65} /> : <span className="dc-collaboration-ring-fallback" />}
-        </span>
-        <span>智能体协作<small>{busy ? `${page.active} 个批次执行中` : '查看协作过程'}</small></span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg>
-      </button>
-    </> : <section id={panelId} className="dc-collaboration-float" aria-label="智能体协作" tabIndex={-1}>
-      <header className="dc-collaboration-heading"><div><strong>智能体协作</strong><small>{page.total} 个批次 · {page.active} 个执行中</small></div>
-        <UiButton aria-label="缩小智能体协作" onClick={collapse}>缩小 ↘</UiButton></header>
-      <div className="dc-collaboration-live-message" role="status" aria-live="polite" aria-atomic="true"><p key={message}>{message}</p></div>
-      <div className="dc-collaboration-scroll">
-        <div className="dc-collaboration-network" aria-label="智能体委派关系">
-          <svg viewBox="0 0 480 330" aria-hidden="true" className="dc-collaboration-curves">
-            <defs><marker id={markerId} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
-              <path d="M 0 0 L 6 3 L 0 6" fill="var(--dc-collaboration-accent)" /></marker></defs>
-            {graph.links.map((link) => <g key={link.taskId} data-direction={link.direction} data-source={link.source} data-target={link.target}>
-              <path className="dc-collaboration-curve" d={link.path} markerEnd={`url(#${markerId})`} />
-              {link.flowing && <g className="dc-collaboration-flow"><path className="dc-edge-flow-glow" d={link.path} pathLength={100} />
-                <path className="dc-edge-flow-trail" d={link.path} pathLength={100} /><path className="dc-edge-flow-core" d={link.path} pathLength={100} /></g>}
-            </g>)}
-          </svg>
-          {graph.dots.map((dot) => <button key={dot.id} type="button" className="dc-collaboration-agent"
-            style={{ left: `${dot.x / 480 * 100}%`, top: `${dot.y / 330 * 100}%` }}
-            data-agent-id={dot.id} data-working={dot.working} data-selected={!!dot.taskId && view.taskId === dot.taskId}
-            aria-label={`${dot.label}，${dot.status}${dot.taskId ? '，查看任务' : ''}`}
-            onClick={() => dot.taskId && client.open(sessionId, dot.taskId)}>
-            <span className="dc-collaboration-dot" aria-hidden="true" /><strong>{dot.label}</strong><small>{dot.status}</small>
-          </button>)}
-        </div>
-        <div className="dc-collaboration-legend"><span>● 呼吸：处理中</span><span>● 灰色：未工作</span><span>箭头 / 流光：委派或回传方向</span></div>
-        {(graph.omitted > 0 || graph.missingActive > 0) && <small className="dc-collaboration-network-note">
-          {graph.omitted > 0 && `另有 ${graph.omitted} 个智能体，任务见下方。`}
-          {graph.missingActive > 0 && `另有 ${graph.missingActive} 个活动批次尚未载入。`}
-        </small>}
-        <CollaborationPanel client={client} sessionId={sessionId} requestedTask={view.taskId} navigationRevision={view.revision} locate={locate} />
-      </div>
-    </section>}
-  </div>
+  return <AgentSpaceLauncher {...props} />
 }
 export function DispatchCard({ node, client, sessionId }: Pick<ChatNodeViewProps<'canvas-dispatch'>, 'node'> & Omit<ViewProps, 'locate'>) {
   const { task, error } = useCollaborationTask(client, sessionId, node.data.id)
+  const [open, setOpen] = useState(false)
+  useEffect(() => setOpen(false), [sessionId, node.data.id])
   return <article className="dc-dispatch-card" data-dc-dispatch={task?.state ?? node.data.phase}>
     <header><span className="dc-collaboration-role">{collaborationRole[task?.role ?? node.data.role] ?? '子 Agent'}</span><span>主 Agent → 子 Agent</span></header>
     <p>{task?.title ?? node.data.title}</p>
     {task ? <TaskSummary task={task} /> : <small>{error ?? (node.data.phase === 'running' ? '派发中' : '该批次未记录协作详情，可查看原生工具返回')}</small>}
-    <UiButton variant="primary" className="dc-collaboration-open" onClick={() => client.open(sessionId, node.data.id)}>查看协作过程</UiButton>
+    <UiButton variant="primary" className="dc-collaboration-open" aria-expanded={open} onClick={() => {
+      setOpen((value) => !value); client.open(sessionId, node.data.id)
+    }}>{open ? '收起协作过程' : '查看协作过程'}</UiButton>
+    {open && task && <TaskDetail task={task} client={client} sessionId={sessionId} />}
   </article>
 }
 function TaskDetail({ task, client, sessionId, locate }: { task: CollaborationTask } & ViewProps) {
@@ -278,6 +165,6 @@ export function installCollaborationDispatch(ctx: Context, face: { client: Colla
       inject: () => face }, wrap))
     scope.slots.inject('conversation.input.overlay', () => scope.slots.register({
       name: 'conversation.input.overlay', id: 'dsh-canvas-collaboration', order: 70,
-    }, (props) => wrapLauncher({ ...face, sessionId: props.sessionId, useSessionStatus: props.useSessionStatus })))
+    }, (props) => wrapLauncher({ ...face, sessionId: props.sessionId, useSessionStatus: props.useSessionStatus, useProjection: props.useProjection })))
   })
 }

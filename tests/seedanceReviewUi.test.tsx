@@ -174,8 +174,8 @@ it('changes only the relevant badges, keeps media DOM and node geometry, and dis
 it('provides the audio toolbar entry and leaves the audio node mounted on review changes', async () => {
   const f = fixtures('audio')
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
   vi.spyOn(f.api, 'waveform').mockResolvedValue({ version: 1, duration: 10, peaks: Array(96).fill(.5) })
   vi.spyOn(f.api, 'mediaUrls').mockImplementation(async (_canvas, items) => ({ items: items.map((item) => ({

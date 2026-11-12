@@ -1,12 +1,14 @@
 # 当前架构与执行流程
 
+Agent 空间命名与对接边界见[ADR-0093](adr/0093-agent-space-name-and-integration-boundaries.md)：现有collaboration模块、路由、日志v1及机器身份继续沿用。0.2.135候选按[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)改为左上纯动作卡片与工作站台，替换旧气泡 / 关系图入口；原派发消息保留任务成果详情。根生命周期只读原生sessions.binding，子级只读共享GET/SSE；独立预设确认与资源库不写任务或画布。候选尚未安装 / 重启。
+
 0.2.122的[Fish流程](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)沿原分工：voiceTools只供voice专业子级读取限定官网页面，候选成果在保存/交接时核对本批次实际来源；主级选择/授权，执行级精确写入与原TTS队列合成。TTS共用真实边，params仅可选新增reference_text；Providers在issued前准备固定音频，用@msgpack/msgpack二进制序列化。chatAudio将只读canvas_show_audio回执投影为原生直接聊天行，audio-result读取原任务/成果元数据，复用签名媒体和AudioPlayer；隐藏/卸载停止播放/查询。两库DDL、CanvasGraph版本与已有sidecar结构不变。
 
 0.2.121的[模型预算与原始一致性依赖](adr/0090-model-aware-video-consistency-references.md)由video的现有限额、Agent模型目录、references的只读保存来源投影和preset原子写入/交接共同执行。来源取实际成果任务snapshot.referenceIds，任务摘要仍脱敏；不读源节点最新结果替代旧身份。主级规划五类用途及明确排除，执行子级不猜语义，不支持音频时宿主标unsupported。CanvasGraph/DDL/sidecar版本保持。
 
-0.2.116新增[只读协作日志](adr/0087-visible-agent-collaboration-journal.md)：delegation在spawn前记录批次与预留childId，原生session/event记录公开步骤，creative提供成果快照索引，ledger持久后提供实际回执。0.2.124按[ADR-0092](adr/0092-floating-agent-collaboration-network.md)改为原生输入框上方悬浮卡片，0.2.125按用户截图改为右侧；缩小用指定Voice Ring，展开按实际root/childId圆点和曲线显示，不注册协作页签。临时activity/activeTasks仅来自公开日志投影，原v1 sidecar、CanvasGraph与DDL不变；同root共享一个GET/SSE，慢读者至多排队一个最新快照，详情按需读取。查看/重连/定位不触发执行。
+0.2.116新增[Agent 空间的只读日志](adr/0087-visible-agent-collaboration-journal.md)：delegation在spawn前记录批次与预留childId，原生session/event记录公开步骤，creative提供成果快照索引，ledger持久后提供实际回执。0.2.124按[ADR-0092](adr/0092-floating-agent-collaboration-network.md)将Agent 空间改为原生输入框上方悬浮容器，0.2.125按用户截图改为右侧，0.2.126继续靠近聊天边缘；缩小用指定Voice Ring，展开按实际root/childId圆点和曲线显示，不注册协作页签。临时activity/activeTasks仅来自公开日志投影，原v1 sidecar、CanvasGraph与DDL不变；同root共享一个GET/SSE，慢读者至多排队一个最新快照，详情按需读取。查看/重连/定位不触发执行。
 
-文档类型：解释；负责人：项目维护者；最近核对：2026-11-05。每次模块 / SDK / 存储边界变化时复核。
+文档类型：解释；负责人：项目维护者；最近核对：2026-11-10。每次模块 / SDK / 存储边界变化时复核。
 
 当前是单个 Harness 插件中的模块化实现。决定和取舍见 [ADR](adr/index.md)，精确接口见[数据参考](data-api.md)。
 
@@ -64,7 +66,7 @@ Seedance复用相同配置、任务队列和OSS结果发布边界。Client与Hos
 
 0.2.49按[ADR-0054](adr/0054-no-result-submission-failure-and-seedream-id-correction.md)将无可用结果 / 外部ID的提交错误标为本地failed；启动修正符合条件的历史unknown而不重提。模型配置原子更正Lite ID，保留UUID / EP / Vault及历史快照；Client失败分支优先显示静态红色感叹号。
 
-节点任务和媒体加载共用[NodeLoading](../src/client/NodeLoading.tsx)：任务组合`border-beam@1.4.1` / `thinking-orbs@0.3.2`，文件加载直接用`img-fx@0.5.1` ImageGeneration 像素效果与`three@0.186.1`共享GPU。NodeLoadingBoundary汇总内部媒体就绪，不嵌套重复Loading；SignedImage等当前链接 / decode，VideoPlayer等首帧，AudioPlayer等元数据 / 波形结束。工作区单份主题订阅向依赖传Harness显式主题 / 表面色与隐藏状态，离屏 / 减少动态效果暂停，最后一个媒体实例释放GPU；无WebGL2或初始化失败时静态单色提示。动画为装饰，status仅供屏幕阅读器；任务与媒体阶段见[ADR-0046](adr/0046-dependency-backed-whole-node-loading.md)、[ADR-0061](adr/0061-dependency-backed-media-pixel-loading.md)。
+节点任务和媒体加载共用[NodeLoading](../src/client/NodeLoading.tsx)：任务组合`border-beam@1.4.1` / `thinking-orbs@0.3.2`，文件加载直接用固定上游`img-fx v0.6.0`源码中的 ImageGeneration 像素效果与`three@0.186.1`共享GPU。源码与MIT许可随包分发，构建前核对哈希；程序按效果裁剪，像素格先计算再合成，见[ADR-0094](adr/0094-fixed-img-fx-source-and-specialized-media-shaders.md)。NodeLoadingBoundary汇总内部媒体就绪，不嵌套重复Loading；SignedImage等当前链接 / decode，VideoPlayer等首帧，AudioPlayer等元数据 / 波形结束。工作区单份主题订阅向依赖传Harness显式主题 / 表面色与隐藏状态，离屏 / 减少动态效果暂停，最后一个媒体实例释放GPU；无WebGL2或初始化失败时静态单色提示。动画为装饰，status仅供屏幕阅读器；任务与媒体阶段见[ADR-0046](adr/0046-dependency-backed-whole-node-loading.md)、[ADR-0061](adr/0061-dependency-backed-media-pixel-loading.md)。
 
 ## 组件与职责
 
@@ -101,7 +103,8 @@ flowchart LR
 | [CanvasApp](../src/client/Canvas.tsx) / [ProjectList](../src/client/ProjectList.tsx) | 默认项目列表、一级目录管理、点击进入编辑器；页面内保留文件夹筛选 |
 | [CanvasWorkspace](../src/client/Canvas.tsx) / [Settings](../src/client/Settings.tsx) | React Flow、保存后返回列表、上传 / 拖拽、资源 / 生成名称、任务详情、共用对象存储 / 模型 / TTS设置 |
 | [canvasTextSelection](../src/client/canvasTextSelection.tsx) / [CSS](../src/client/styles.css) | 画布及owned portal默认禁止文字选中，原生输入 / 可编辑 / 显式复制区域开放；公共Menu由context传作用域，画布外不受影响，见ADR-0060 |
-| [ObjectStorageSettings](../src/client/ObjectStorageSettings.tsx) / [mediaUrlCache](../src/client/mediaUrlCache.ts) / [SignedMedia](../src/client/SignedMedia.tsx) | 单活动目标与配置脱敏、100项共享批量缓存、过期刷新与播放位置恢复；不持有AK |
+| [ObjectStorageSettings](../src/client/ObjectStorageSettings.tsx) / [mediaUrlCache](../src/client/mediaUrlCache.ts) / [SignedMedia](../src/client/SignedMedia.tsx) | 单活动目标与配置脱敏、100项共享批量缓存、可见资源换签、每轮失败恢复与旧图 / 播放状态保留；不持有AK。长时生命周期按[ADR-0095](adr/0095-long-lived-media-url-recovery.md) |
+| [observeVisibility](../src/client/observeVisibility.ts) | 媒体、Loading与浮动容器共用可见性观察；按目标元素 / 最新时间处理批次，忽略旧通知与清理后的回调，不测量布局。按[ADR-0096](adr/0096-latest-element-visibility-notifications.md) |
 | [RelationshipEdge](../src/client/RelationshipEdge.tsx) | BaseEdge保留Bezier / 标签 / 热区，仅单选直接入出边叠加CSS流光；浏览器投影，不进入持久图 |
 | [TaskDialog](../src/client/TaskDialog.tsx) / [UiDateTimeRangePicker](../src/client/UiDateTimeRangePicker.tsx) / [UiPagination](../src/client/UiPagination.tsx) | 显式联合查询、目录表格、保留列表的详情返回、取消过期请求；通用本地时区双月日期范围与受控分页 |
 | [useCanvas](../src/client/useCanvas.ts) / [api](../src/client/api.ts) | 草稿与基线、对象 hash / 变更批次、重试 identity、冲突、状态读取；隐藏侧栏暂停轮询但保留自动保存，不直连模型 |
@@ -124,6 +127,7 @@ flowchart LR
 | [mockModels](../src/shared/mockModels.ts) / [mockGeneration](../src/host/mockGeneration.ts) | 固定 Mock 能力 / 严格快照身份；本地渲染暂存文件，复用同一Runtime发布 / 恢复，不读取Key或调用模型网络 |
 | [GenerationNode](../src/client/GenerationNode.tsx) / [GenerationParameters](../src/client/GenerationParameters.tsx) | 最小空态、媒体无父外框、分组仅主图端点、固定收起 / 展开隐藏编辑、动态参数弹层；只改变显示，旧边assetId保持 |
 | [generationHistory](../src/client/generationHistory.ts) / [HistoryNode](../src/client/HistoryNode.tsx) / [useGenerationSubmission](../src/client/useGenerationSubmission.ts) | 既有任务派生提交顺序、立即临时卡片和确切requestId核对；逐卡片Loading / 媒体，展开逐素材端点；不向图持久化卡片或handle |
+| [HistoryNode](../src/client/HistoryNode.tsx) / [Canvas](../src/client/Canvas.tsx) 的历史尺寸缓存 | 最上层媒体与单张共用mediaFrame，缺少元数据时按解码结果修正；按节点 / assetId共享显示尺寸，同步React Flow边界与历史编辑锚点，不修改持久资产。按[ADR-0097](adr/0097-stack-size-from-top-media.md) |
 | [dev/server](../src/dev/server.ts) | 回环会话认证和 Vite；复用同一应用 / Runtime |
 
 提案中的 application / TaskCommands 独立目录目前收敛在 Service / Store 方法，没有建立所有拟议类。SQL由Service / Uploads与Store协调；OSS探测、上传和Copy在串行写队列外，提交使用CAS。启动投影仍载入全部画布 / 资产 / 生成历史，增量SQL不等于端到端只遍历增量。

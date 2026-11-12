@@ -57,11 +57,15 @@ describe('audio controls and compact generation editor', () => {
   it('uses real metadata/custom controls, pauses on deactivation and ignores waveform results after unmount', async () => {
     let resolveWave!: (value: any) => void
     const api = new CanvasApi()
+    vi.spyOn(api, 'mediaUrls').mockImplementation(async (_canvas, items) => ({
+      items: items.map((item) => ({ ...item, url: `https://assets.example/${item.assetId}`, expiresAt: Date.now() + 3600000 })),
+    }))
     const load = vi.spyOn(api, 'waveform').mockReturnValue(new Promise((resolve) => { resolveWave = resolve }))
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
     const onPlay = vi.fn()
     const { root, container } = render(<AudioPlayer asset={asset} api={api} workspace="w" label="音乐" active onPlay={onPlay} />)
+    await act(async () => { await Promise.resolve() })
     const audio = container.querySelector('audio')!
     expect(audio.hasAttribute('controls')).toBe(false)
     Object.defineProperties(audio, { duration: { value: 6, configurable: true }, currentTime: { value: 1, configurable: true, writable: true } })
@@ -78,8 +82,8 @@ describe('audio controls and compact generation editor', () => {
   })
   it('mounts the waveform audio card with one output and updates its fixed geometry', async () => {
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-      observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+      constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+      observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
     })
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
     const api = new CanvasApi()

@@ -1,0 +1,30 @@
+{
+  "name": "img-fx",
+  "version": "0.6.0",
+  "repository": "https://github.com/Jakubantalik/img-fx",
+  "tag": "v0.6.0",
+  "commit": "2098279964046e23bad86d9f42f41a3b06dca735",
+  "archive": "https://codeload.github.com/Jakubantalik/img-fx/tar.gz/2098279964046e23bad86d9f42f41a3b06dca735",
+  "archiveSha256": "eb4d913f8a1f1d19ea3350fc61b9552b794255190695cf29f10e50fc85a92280",
+  "license": "MIT",
+  "localModifications": [],
+  "files": {
+    "LICENSE": "915a283980628a0ca9e7b423ebafc6f3a0fa1e630ff17d34e59034808d92011c",
+    "upstream/ImageGeneration.tsx": "a5331e26e9b2d7037c9c99012d57b6f9fb1e8e1ef2254ac6055abf33d347b9d2",
+    "upstream/engine/cycle.ts": "227140268d08ad9b996d1be8fb5af37b843c461c0f9cb7115a8c486858a85712",
+    "upstream/engine/index.ts": "b54ca938bdd18e5846fd2da9d66165ece3f2db1b80022f8b8872f3f696c3e670",
+    "upstream/engine/palette.ts": "1cd3ba1d14f9ed543a20ee037a0fdbb27cc064006e9bc0d2cf14b426c7dba0c3",
+    "upstream/engine/renderer.ts": "860a212b74a7dad99442823718a54ffc668376800c3f87fc0eb00c0c72b26bee",
+    "upstream/engine/reveal.ts": "78db8715625759ffb5abaa03322d3e1b9c94e14d2b7c91099a5987a5da624626",
+    "upstream/engine/shaders.ts": "3ad11d17236b528a62c6cbe23c7e1428f1edf466577b2231e7e292367793ce53",
+    "upstream/engine/tween.ts": "461b1cd1958dcc579bae5a53e15215a6ce15dc9eb83f349de32e5b59807830f1",
+    "upstream/index.ts": "5b35ac1325540cfa03cfd979b9fa3118f76a6606281e7eb13cf8994bcecb9227",
+    "upstream/presets/index.ts": "d7bd23408aa23245121f9ed53ba902759fc7bd55d4d10aaac9d2406aa5460f88",
+    "upstream/presets/pixels-mechanic.ts": "04ae001b43b8fad0ff62fe617d84150895c64e2fe50e37f0eaf22a7d25d35d50",
+    "upstream/presets/pixels-organic.ts": "01970ed7d52dfbc858aa50fa6c3a39ba17cb3d5dc0218b0c2dac23d7f81fae65",
+    "upstream/presets/sweep-gradient.ts": "b7165c7117fb33c66ec7f29fb04440f80c91988aae2ed430b1b43340448a571d",
+    "upstream/styles.ts": "e28b3337332b0a27750630f0cd663493412920c4f40c8612199be40e307f780f",
+    "upstream/types.ts": "52e12a22e200ebfd3c1581c1f98ff3833dc3c2af0cd55cc3f15b4ca1f368b558",
+    "upstream-package.json": "8395b3adea8d4e2aec0f0b3c3496646dc6886b3b0b0e27e140e8f6dba1975df3"
+  }
+}

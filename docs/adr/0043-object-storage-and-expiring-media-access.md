@@ -4,6 +4,8 @@
 
 waveform读取部分由[ADR-0045](0045-same-origin-waveforms-and-ratio-order.md)替代，其他规则保持。
 
+Client长时间停留与失败恢复生命周期由[ADR-0095](0095-long-lived-media-url-recovery.md)补充，签名时限、定位、鉴权与任务规则保持。
+
 文档类型：解释；负责人：项目维护者 / 开发执行者；最近核对：2026-10-28。
 记录日期：2026-10-28。用户批准[实施方案](../proposals/object-storage-oss-v0.1.md)。替代 [ADR-0015](0015-named-media-and-durable-moves.md) 的本地持久媒体、路径设置和发布实现；替代 [ADR-0013](0013-sqlite-deltas-and-migration.md) 的旧源自动导入部分，保留 SQLite、增量事务及任务身份规则。
 

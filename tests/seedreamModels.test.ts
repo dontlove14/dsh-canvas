@@ -29,9 +29,9 @@ async function provider(index = 0, reference?: Buffer) {
     { requestTimeoutMs: 2000, maxMediaBytes: 100000, maxReferenceBytes: 20000 }, new AbortController().signal)
   return { instance, input: snapshot(index), read }
 }
-async function service(root?: string) {
+async function service(root?: string, imageRequestTimeoutMs?: number) {
   if (!root) { root = await mkdtemp(join(tmpdir(), 'seedream-service-')); const path = root; cleanup.push(() => rm(path, { recursive: true, force: true })) }
-  const instance = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 25, requestTimeoutMs: 1000,
+  const instance = new CanvasService({ dataDir: root, maxConcurrentTasks: 1, pollIntervalMs: 25, requestTimeoutMs: 1000, imageRequestTimeoutMs,
     maxMediaBytes: 100000, maxReferenceBytes: 20000 }, undefined, fakeFactory(root))
   await initialize(instance, true); cleanup.push(() => instance.close()); return instance
 }
@@ -247,10 +247,10 @@ describe('Seedream durable tasks and OSS', () => {
       init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
     }))
     vi.stubGlobal('fetch', fetch)
-    const instance = await service(), node = await generator(instance)
+    const instance = await service(undefined, 1000), node = await generator(instance)
     const failed = await wait(instance, (await instance.generate('w', node.id, 1)).id, 'failed')
     await instance.close()
-    const reopened = await service(instance.config.dataDir)
+    const reopened = await service(instance.config.dataDir, 1000)
     expect(reopened.store.state('w').tasks[0]).toEqual(failed); expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

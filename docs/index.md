@@ -1,5 +1,13 @@
 # 文档导航与维护约定
 
+堆叠按最上层媒体定尺寸、临时测量与节点 / 历史编辑锚点一致见[ADR-0097](adr/0097-stack-size-from-top-media.md)；0.2.134人工验收423–426。
+
+整排节点移出 / 移入视野的通知顺序、共享观察函数和回归见[ADR-0096](adr/0096-latest-element-visibility-notifications.md)；0.2.133人工验收419–422。
+
+长时间停留、视口切换和网络恢复时的资源换签规则见[ADR-0095](adr/0095-long-lived-media-url-recovery.md)；0.2.132复用原数据与1小时签名，人工验收414–418。
+
+媒体 Loading 的固定 img-fx v0.6.0 源码、上游着色器修复和 Windows 验收边界见[ADR-0094](adr/0094-fixed-img-fx-source-and-specialized-media-shaders.md)；原媒体生命周期继续按0061。
+
 Fish音色查找、单音频复刻、真实合成试听与对话播放器见[ADR-0091](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)；官网读取范围及失败边界、旧数据兼容和人工验收同步维护。
 
 专业成果保存与交接的身份、兼容性和恢复边界见[ADR-0088](adr/0088-saved-artifact-handoff-and-independent-identity.md)。
@@ -8,7 +16,7 @@ Agent参考生成、节点@标签与真实连线的保存/交接规则见[ADR-00
 
 视频按所选模型规划参考数量、适用音色和原始一致性依赖见[ADR-0090](adr/0090-model-aware-video-consistency-references.md)。
 
-聊天派发卡片和只读过程见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)，当前右侧悬浮卡片、Voice Ring与真实会话委派图见[ADR-0092](adr/0092-floating-agent-collaboration-network.md)；只读HTTP契约见[数据接口](data-api.md)，本机日志恢复见[运行指南](operations.md)，人工验收见[手动清单](manual-tests.md)。
+Agent 空间命名与权限见[ADR-0093](adr/0093-agent-space-name-and-integration-boundaries.md)，派发卡片和只读日志见[ADR-0087](adr/0087-visible-agent-collaboration-journal.md)。0.2.140按[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)落实真正左上悬浮，移除分栏与正文宽度覆写，无整行 / 整列占位；保留原生输入框 / 滚动、139停止后主级M09待机、无白框、右上按钮、预设确认和已认可素材。替代旧[右侧入口](adr/0092-floating-agent-collaboration-network.md)，沿已授权web / 3080交付。只读HTTP契约见[数据接口](data-api.md)，本机日志恢复见[运行指南](operations.md)，人工验收见[手动清单](manual-tests.md)。
 
 主Agent统筹、专业创作、同级执行子Agent和持久原文/成果/进度见[ADR-0086](adr/0086-creative-projects-and-scoped-canvas-executor.md)；工具参考见[数据接口](data-api.md)，新增验收见[手动清单](manual-tests.md)。
 

@@ -13,6 +13,7 @@ import { NODE_OVERLAY_STYLE } from './nodeOverlayLayout'
 import { SignedImage } from './SignedMedia'
 import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoading'
 import { ReviewButton } from './ReviewControls'
+import { observeVisibility } from './observeVisibility'
 
 function ActionIcon({ action }: { action: 'rotate' | 'download' | 'expand' }) {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -33,19 +34,13 @@ function ResourceNodeBody({ node, asset, task, selected, api, workspace, rotatio
   const frameRef = useRef<HTMLDivElement>(null)
   const actionsVisible = useNodeActions(node.id, selected)
   const [visible, setVisible] = useState(false)
-  const [missing, setMissing] = useState(false)
-  useNodeMediaLoading(!visible && !missing)
+  useNodeMediaLoading(!visible)
   const [dimensions, setDimensions] = useState({ id: asset.id, width: asset.width ?? 16, height: asset.height ?? 9 })
   const updateInternals = useUpdateNodeInternals()
   const currentDimensions = dimensions.id === asset.id ? dimensions : { width: asset.width ?? 16, height: asset.height ?? 9 }
   const size = mediaFrame(currentDimensions.width, currentDimensions.height, rotation)
   const play = asset.kind === 'video' && playing && selected && visible
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting))
-    if (frameRef.current) observer.observe(frameRef.current)
-    return () => observer.disconnect()
-  }, [])
-  useEffect(() => { setMissing(false) }, [asset.id])
+  useEffect(() => observeVisibility(frameRef.current, setVisible), [])
   useEffect(() => { if (!visible && playing) onStop(node.id) }, [visible, playing, node.id, onStop])
   useEffect(() => {
     const hide = () => { if (document.hidden) onStop(node.id) }
@@ -75,11 +70,9 @@ function ResourceNodeBody({ node, asset, task, selected, api, workspace, rotatio
         event.preventDefault(); event.stopPropagation()
         onFocus(node.id)
       }}>
-      {missing ? <div className="dc-missing">封面暂不可用<small>可通过顶部操作栏查看原文件</small></div>
-        : visible && <SignedImage api={api} canvas={workspace} assetId={asset.id} alt={node.title} draggable={false} decoding="async"
+      {visible && <SignedImage api={api} canvas={workspace} assetId={asset.id} alt={node.title} draggable={false} decoding="async"
           style={{ width: size.imageWidth, height: size.imageHeight, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
-          onLoad={(event) => setDimensions({ id: asset.id, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-          onError={() => setMissing(true)} />}
+          onLoad={(event) => setDimensions({ id: asset.id, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />}
       {play && <VideoPlayer key={asset.id} src={api.media(workspace, asset.id)} api={api} canvas={workspace} assetId={asset.id} autoPlay label={`循环播放 ${node.title}`} />}
     </div>
     <NodeLoading task={task} title={node.title} />

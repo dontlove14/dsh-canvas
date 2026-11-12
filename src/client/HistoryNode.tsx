@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import { useUpdateNodeInternals } from '@xyflow/react'
 import { TRACKED_STATUSES, TaskStatusLabels, isTtsParams, type Asset, type CanvasNode } from '../shared/contracts'
 import { type CanvasApi } from './api'
-import { type GenerationCard, historyFrame, resultHandle, submissionIdentity } from './generationHistory'
+import { type GenerationCard, type HistoryDimensions, historyFrame, resultHandle, submissionIdentity, EMPTY_HISTORY_DIMENSIONS } from './generationHistory'
 import type { HistoryInspection } from './useHistoryInspection'
 import { CanvasHandle } from './CanvasHandle'
 import { NodeTitle } from './NodeTitle'
@@ -14,20 +14,29 @@ import { NodeLoading, NodeLoadingBoundary, useNodeMediaLoading } from './NodeLoa
 import { useNodeActions } from './CanvasSelection'
 import { UiButton } from './ui'
 import { ReviewBadges, ReviewButton } from './ReviewControls'
-
-const noop = () => {}
+import { observeVisibility } from './observeVisibility'
 
 export const HistoryNode = memo(function HistoryNode({ node, cards, connectedAssets, selected, expanded, api, workspace, playing,
-  onPlay, onStop, onRename, onExpand, onOpen, onSize, onInspect, inspection }: {
+  onPlay, onStop, onRename, onExpand, onOpen, onSize, onInspect, inspection, dimensions, onDimensions }: {
   node: CanvasNode; cards: GenerationCard[]; connectedAssets: string[]; selected: boolean; expanded: boolean
   api: CanvasApi; workspace: string; playing: boolean; onPlay: (id: string) => void; onStop: (id: string) => void
   onRename: (id: string, title: string) => void; onExpand: (id: string) => void; onOpen: (asset: Asset) => void
   onSize: (id: string, width: number, height: number) => void
   onInspect?: (value: HistoryInspection) => void; inspection?: HistoryInspection
+  dimensions?: HistoryDimensions
+  onDimensions?: (nodeId: string, assetId: string, width: number, height: number) => void
 }) {
   const audio = node.kind === 'tts-generation'
   const acceptsInput = !audio || isTtsParams(node.params) && !node.params.reference_id.trim()
-  const size = historyFrame(cards, audio, expanded)
+  const [measured, setMeasured] = useState<HistoryDimensions>(EMPTY_HISTORY_DIMENSIONS)
+  const displayDimensions = dimensions ?? measured
+  const size = historyFrame(cards, audio, expanded, displayDimensions)
+  const measure = (assetId: string, width: number, height: number) => {
+    if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) return
+    if (displayDimensions[assetId]?.width === width && displayDimensions[assetId]?.height === height) return
+    if (onDimensions) onDimensions(node.id, assetId, width, height)
+    else setMeasured((current) => ({ ...current, [assetId]: { width, height } }))
+  }
   const shown = expanded ? cards : cards.slice(0, 1)
   const actionsVisible = useNodeActions(node.id, selected, true)
   const [playingAsset, setPlayingAsset] = useState<string | null>(null)
@@ -69,7 +78,8 @@ export const HistoryNode = memo(function HistoryNode({ node, cards, connectedAss
                 {audio ? <HistoryAudio asset={asset} api={api} workspace={workspace}
                   playing={playing && selected && playingAsset === asset.id} onPlay={() => { setPlayingAsset(asset.id); onPlay(node.id) }} onStop={() => onStop(node.id)} />
                   : <ResultMedia asset={asset} api={api} workspace={workspace} playing={playing && selected && playingAsset === asset.id}
-                    onPlay={() => { setPlayingAsset(asset.id); onPlay(node.id) }} onStop={() => onStop(node.id)} onOpen={() => onOpen(asset)} onDimensions={noop} />}
+                    onPlay={() => { setPlayingAsset(asset.id); onPlay(node.id) }} onStop={() => onStop(node.id)} onOpen={() => onOpen(asset)}
+                    onDimensions={(width, height) => { if (asset.id === card.results[0]?.id) measure(asset.id, width, height) }} />}
                 {expanded && <div className="dc-history-review-label nodrag nopan" onClick={(event) => event.stopPropagation()}>
                   <span title={asset.filename}>{asset.filename}</span><ReviewBadges assetId={asset.id} />
                 </div>}
@@ -108,11 +118,7 @@ function HistoryAudio({ asset, api, workspace, playing, onPlay, onStop }: {
   const frame = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
   useNodeMediaLoading(!visible)
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '160px' })
-    if (frame.current) observer.observe(frame.current)
-    return () => observer.disconnect()
-  }, [])
+  useEffect(() => observeVisibility(frame.current, setVisible, { rootMargin: '160px' }), [])
   useEffect(() => { if (!visible && playing) onStop() }, [visible, playing, onStop])
   return <div className="dc-history-audio-player" ref={frame}>
     {visible && <AudioPlayer asset={asset} api={api} workspace={workspace} label={asset.filename} active={playing} onPlay={onPlay} onStop={onStop} />}

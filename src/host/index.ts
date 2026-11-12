@@ -9,6 +9,8 @@ import { V2_ROOT } from '../shared/v2'
 import { CanvasService, routeDefinitions } from './service'
 import { HarnessVault } from './credentials'
 import { CanvasAgentCoordinator } from './agent/coordinator'
+import { DEFAULT_IMAGE_REQUEST_TIMEOUT_MS } from './providers'
+import { agentSpaceAssets } from './agentSpaceAssets'
 
 export const name = 'dsh-canvas'
 export const inject = ['connection', 'credentials', 'agents', 'llm', 'sessionController', 'agentPresets', 'workingDirectory']
@@ -17,6 +19,7 @@ export const Config = z.object({
   maxConcurrentTasks: z.number().int().min(1).max(8).default(2),
   pollIntervalMs: z.number().int().min(500).max(60000).default(3000),
   requestTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
+  imageRequestTimeoutMs: z.number().int().min(1000).max(600000).default(DEFAULT_IMAGE_REQUEST_TIMEOUT_MS),
   maxMediaBytes: z.number().int().min(1024).max(1024 * 1024 * 1024).default(200 * 1024 * 1024),
   maxReferenceBytes: z.number().int().min(1024).max(100 * 1024 * 1024).default(20 * 1024 * 1024),
 })
@@ -38,6 +41,10 @@ export async function apply(ctx: Context, input: Partial<Config> = {}): Promise<
     methods: route.methods,
     requestBody: route.requestBody,
     fetch: (request) => service.handle(request),
+  }))
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: `/${V2_ROOT}/agent-space-assets`, methods: ['GET'], requestBody: 'buffered',
+    fetch: agentSpaceAssets(),
   }))
   ctx.effect(() => ctx.connection.fetch.register({
     path: `/${API_ROOT}/workspace`, methods: ['GET'], requestBody: 'buffered',

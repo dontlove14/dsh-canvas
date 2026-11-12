@@ -1,10 +1,10 @@
 # ADR-0088：已保存成果交接与独立身份
 
-文档类型：架构决策记录；负责人：项目维护者 / 开发执行者；最近核对：2026-11-05。
+文档类型：架构决策记录；负责人：项目维护者 / 开发执行者；最近核对：2026-11-10。
 
 状态：已采纳
 记录日期：2026-11-05
-实施版本：0.2.118；延续[ADR-0086](0086-creative-projects-and-scoped-canvas-executor.md)的创作分工和[ADR-0087](0087-visible-agent-collaboration-journal.md)的事实来源。
+实施版本：0.2.118；延续[ADR-0086](0086-creative-projects-and-scoped-canvas-executor.md)的创作分工和[ADR-0087](0087-visible-agent-collaboration-journal.md)中Agent 空间的事实来源；正式名称见[ADR-0093](0093-agent-space-name-and-integration-boundaries.md)。
 
 ## 背景与驱动因素
 

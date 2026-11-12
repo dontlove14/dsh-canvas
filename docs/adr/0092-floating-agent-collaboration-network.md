@@ -1,17 +1,19 @@
-# ADR-0092：输入框上方的悬浮智能体协作图
+# ADR-0092：Agent 空间的悬浮容器与协作关系图
 
-文档类型：架构决策记录；负责人：项目维护者 / 开发执行者；最近核对：2026-11-05。
+文档类型：架构决策记录；负责人：项目维护者 / 开发执行者；最近核对：2026-11-10。
 
 状态：已采纳
+界面呈现设计由[ADR-0100](0100-agent-space-upper-left-card-and-working-podiums.md)部分替代：对话左上办公室浮卡、工作角色正面站台及整轮完成自动缩小；新界面待素材和 UI 阶段实施，以下保留历史实现与有效只读契约。
+正式功能名称与完整范围见[ADR-0093](0093-agent-space-name-and-integration-boundaries.md)：缩小入口、气泡、展开容器、关系图、任务详情与成果阅读共同属于“Agent 空间”；本ADR保留其界面实现决策。
 记录日期：2026-11-05
-实施版本：0.2.124；部分替代[ADR-0087](0087-visible-agent-collaboration-journal.md)的右侧页签、右下入口和完成隐藏决策，保留日志、身份及只读边界。
-0.2.125按用户截图改为输入框上方右侧；气泡、缩小入口和展开卡片共同右对齐，向上/向左展开。
-0.2.126按用户反馈继续外移至聊天实际右边缘，减少遮挡正文；加快Voice Ring并扩大呼吸起伏。
+实施版本：0.2.124；部分替代[ADR-0087](0087-visible-agent-collaboration-journal.md)中Agent 空间的右侧页签、右下入口和完成隐藏决策，保留日志、身份及只读边界。
+0.2.125按用户截图将Agent 空间改为输入框上方右侧；气泡、缩小入口和展开卡片共同右对齐，向上/向左展开。
+0.2.126按用户反馈将Agent 空间继续外移至聊天实际右边缘，减少遮挡正文；加快Voice Ring并扩大呼吸起伏。
 
 ## 背景与驱动因素
 
-1. 用户指定在原协作入口建立可展开/缩小的悬浮容器，放在输入框上方左侧；无需新开右侧标签页。缩小使用指定的[Voice Ring](https://libraries.dev/voice-ring)，顶部以消息气泡展示实时协作状态。
-2. 展开后需要看见每个实际智能体的工作状态和委派方向，保持当前聊天阅读位置；过程、成果、回执与认可继续可回读。
+1. 用户指定将Agent 空间实现为原入口处可展开/缩小的悬浮容器，最初放在输入框上方左侧；无需新开右侧标签页。缩小使用指定的[Voice Ring](https://libraries.dev/voice-ring)，顶部以消息气泡展示实时协作状态。
+2. Agent 空间展开后需要看见每个实际智能体的工作状态和委派方向，保持当前聊天阅读位置；过程、成果、回执与认可继续可回读。
 3. 图和动画只能表达真实公开事实，不能虚构空闲角色、把角色名当会话身份，或持续播放已结束工作的流光。
 
 ## 决策
@@ -25,20 +27,20 @@
 | 关系与方向 | 只展示真实 root→child 委派，曲线复用画布选中边三层流光的归一化长度和2.3秒节奏；宿主 returned 后8秒以内反向 child→root，过期停止 |
 | 密集历史 | 优先活动和选中批次，最多8个实际子级圆点，稳定排序；其余任务保留列表，缺失活动批次明确提示，不制造完整关系图 |
 | 顶部消息 | 仅投影最新公开事件的 seq/time/actor/kind/text/tool；文字最多360字符，无工具data/callId/原文/隐藏思维。自报信息标“报告” |
-| 输入与详情 | 原派发卡片打开同一悬浮容器并选择实际批次；列表/圆点可展开详情和已保存成果、显式定位节点；不注册协作右侧页签 |
+| 输入与详情 | 原派发卡片打开同一Agent 空间并选择实际批次；列表/圆点可展开详情和已保存成果、显式定位节点；不注册Agent 空间右侧页签 |
 | 本地展示状态 | 展开/选择仅存客户端按会话分隔；刷新默认缩小，切会话不串记录，观察无执行权限 |
 | 动画与访问 | 明暗主题随Harness；页面隐藏、不可见、减少动态偏好暂停，收起卸载图与详情；键盘Tab/Enter/Escape可操作，屏幕阅读器接收最新状态 |
 | 空间与滚动 | 限制聊天宽度、视口高度和锚点上方可用空间；ResizeObserver覆盖零高overlay之外的card/seat/chat，输入增高或侧栏变宽时重算边距；无原生边界时有限外移并按视口收敛。图按viewBox缩放、详情内滚动，SSE不自动跳尾部 |
 
 activity与首页最多100条activeTasks仅为GET/SSE派生字段，不写入TaskSchema、日志v1或其他仓储；页游标仍对应原历史列表。旧客户端忽略新字段，新客户端兼容无activity旧记录并从已保存状态推导消息。CanvasGraph、两库DDL、凭据、任务/素材/成果与认可身份保持。
 
-客户端卡片与浮层仍共享一个root GET/EventSource，单调revision、generation隔离与原生重连；重连读取当前快照，不重放执行。SSE仅保留一个待消费快照，慢客户端下一次pull读取最新状态，15秒心跳不挤占队列；过程历史由显式详情分页回读。关闭连接/宿主排空监听与心跳，页面恢复读原记录，不重新spawn或生成。
+Agent 空间的客户端卡片与悬浮容器仍共享一个root GET/EventSource，单调revision、generation隔离与原生重连；重连读取当前快照，不重放执行。SSE仅保留一个待消费快照，慢客户端下一次pull读取最新状态，15秒心跳不挤占队列；过程历史由显式详情分页回读。关闭连接/宿主排空监听与心跳，页面恢复读原记录，不重新spawn或生成。
 
 ## 备选方案
 
 | 方案 | 结论与理由 |
 | --- | --- |
-| 原右侧页签 + 右下按钮 | 被本次UI部分替代，用户指定单一悬浮卡片 |
+| Agent 空间的原右侧页签 + 右下按钮 | 被本次UI部分替代，用户指定单一悬浮卡片 |
 | 全部角色常驻圆点 / 按角色合并会话 | 不采用，可能伪造空闲智能体、混淆同角色多个任务 |
 | 全量力导向布局和每帧React更新 | 不采用，有界真实身份hub即可表达当前委派，避免布局抖动和绘制成本 |
 | 宿主只读投影 + 原生锚点 + 指定依赖 | 采用，实时状态、身份、详情与本地展示职责清楚 |
@@ -54,6 +56,6 @@ activity与首页最多100条activeTasks仅为GET/SSE派生字段，不写入Tas
 
 ## 验证与证据
 
-实现：[浮层与原生插槽](../../src/client/collaborationView.tsx)、[聊天边缘与动效](../../src/client/collaborationLayout.ts)、[真实图模型](../../src/client/collaborationGraph.ts)、[宿主投影](../../src/host/agent/collaboration.ts)、[共享订阅/展示状态](../../src/client/collaboration.ts)、[SSE](../../src/host/service.ts)、[指定依赖](../../package.json)。
+实现：[Agent 空间容器与原生插槽](../../src/client/collaborationView.tsx)、[聊天边缘与动效](../../src/client/collaborationLayout.ts)、[真实图模型](../../src/client/collaborationGraph.ts)、[宿主投影](../../src/host/agent/collaboration.ts)、[共享订阅/展示状态](../../src/client/collaboration.ts)、[SSE](../../src/host/service.ts)、[指定依赖](../../package.json)。
 
 测试：[浮层/读取/切会话/主题暂停](../../tests/collaborationClient.test.tsx)、[身份/方向/过期/图上限](../../tests/collaborationGraph.test.ts)、[公开投影/原格式/活动分页](../../tests/collaboration.test.ts)和[编译包核验](../../scripts/verify-artifact.mjs)。依次执行原check、双构建逐文件一致、编译SDK/原生客户端装配、同包安装、HTTP实际预加载与原数据核对；不调用真实LLM或付费接口。浏览器视觉、真实Agent表达及用户交互按[手动清单](../manual-tests.md)人工验收。

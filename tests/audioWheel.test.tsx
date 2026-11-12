@@ -99,8 +99,8 @@ it.each(['dc-group-actions', 'dc-resource-toolbar'])('pans both trackpad axes an
 it('pans through audio loading, waveform bars and playback controls using real bubbled XYFlow wheels', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
-    observe() { this.notify([{ isIntersecting: true }]) }; disconnect() {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
+    observe(target: Element) { this.notify([{ target, time: 0, isIntersecting: true }]) }; disconnect() {}
   })
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
   const api = new CanvasApi()

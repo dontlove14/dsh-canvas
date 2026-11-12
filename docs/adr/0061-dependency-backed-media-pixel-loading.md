@@ -4,6 +4,8 @@
 
 媒体阶段部分替代 ADR-0046 / ADR-0047。
 
+0.2.131 起依赖版本和分发方式由 [ADR-0094](0094-fixed-img-fx-source-and-specialized-media-shaders.md) 部分替代：固定上游 v0.6.0 原源码随客户端编译，保留原媒体阶段、主题和生命周期。
+
 文档类型：解释；负责人：项目维护者 / 开发执行者；最近核对：2026-10-29。
 记录日期：2026-10-29。媒体动画依赖、主题、暂停或兼容策略变化时复核。
 
@@ -15,7 +17,7 @@
 
 ## 决策
 
-锁定 `img-fx@0.5.1` 与其运行依赖 `three@0.186.1`，直接渲染真实 `ImageGeneration`，使用 `pixels-organic`。不传图片、不启用 autoReveal；实际文件链接、解码与首帧生命周期继续由原媒体组件掌握，不让动画重复获取媒体或模拟生成进度。
+初始版本锁定 `img-fx@0.5.1` 与其运行依赖 `three@0.186.1`；0.2.131 起按 ADR-0094 使用固定 v0.6.0 源码。直接渲染真实 `ImageGeneration`，使用 `pixels-organic`。不传图片、不启用 autoReveal；实际文件链接、解码与首帧生命周期继续由原媒体组件掌握，不让动画重复获取媒体或模拟生成进度。
 
 共用 NodeLoading 的 `media-loading` 分支覆盖图片 / 视频 / 音频资源、生成完成后文件等待、历史输出、引用图与独立预览。submitted / queued / generating / saving 保留 Beam / Orb，failed / unknown / save_failed 保留优先静态红色感叹号；文件准备完成或终态错误时停止效果。NodeLoadingBoundary 仍汇总就绪，只显示一个整节点动画，不重挂播放器、不改变节点尺寸或图数据。
 

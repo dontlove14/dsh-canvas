@@ -4,26 +4,41 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MediaLoadingEffect } from '../src/client/MediaLoadingEffect'
 import { NodeLoading, NodeLoadingContext } from '../src/client/NodeLoading'
+import { FRAG_SRC } from '../src/client/vendor/img-fx/upstream/engine/shaders'
 
 // Exercise img-fx's real components, shaders, theme and shared scheduler.
 // Only the unavailable jsdom GPU driver is replaced.
 const gpu = vi.hoisted(() => ({
-  created: 0, disposed: 0, fail: false,
-  draws: [] as Array<{ background: number[]; colors: number[][]; effect: number }>,
+  created: 0, disposed: 0, fail: false, framebuffer: 'float' as 'float' | 'byte' | 'none',
+  canvases: [] as HTMLCanvasElement[],
+  targets: [] as import('three').WebGLRenderTarget[],
+  releasedTargets: [] as import('three').WebGLRenderTarget[],
+  draws: [] as Array<{ background: number[]; colors: number[][]; effect: number; pass: number;
+    shader: string; material: string; target: import('three').WebGLRenderTarget | null; field: import('three').Texture | null }>,
 }))
 vi.mock('three', async (original) => {
   const actual = await original<typeof import('three')>()
-  return { ...actual, WebGLRenderer: class {
+  return { ...actual, WebGLRenderTarget: class extends actual.WebGLRenderTarget {
+    constructor(...args: ConstructorParameters<typeof actual.WebGLRenderTarget>) {
+      super(...args); gpu.targets.push(this)
+    }
+    dispose() { gpu.releasedTargets.push(this); super.dispose() }
+  }, WebGLRenderer: class {
     ratio = 1
+    target: import('three').WebGLRenderTarget | null = null
     domElement: HTMLCanvasElement
     constructor(options: { canvas: HTMLCanvasElement }) {
       if (gpu.fail) throw new Error('GPU unavailable')
-      gpu.created++; this.domElement = options.canvas
+      gpu.created++; this.domElement = options.canvas; gpu.canvases.push(options.canvas)
     }
     setPixelRatio(value: number) { this.ratio = value }
     getPixelRatio() { return this.ratio }
     setClearColor() {}
-    getContext() { return {} }
+    getContext() { return { FRAMEBUFFER: 0x8D40, FRAMEBUFFER_COMPLETE: 0x8CD5,
+      checkFramebufferStatus: () => gpu.framebuffer === 'float' ||
+        (gpu.framebuffer === 'byte' && this.target?.texture.type === actual.UnsignedByteType) ? 0x8CD5 : 0x8CD6,
+    } }
+    setRenderTarget(target: import('three').WebGLRenderTarget | null) { this.target = target }
     setSize(width: number, height: number) {
       this.domElement.width = width * this.ratio; this.domElement.height = height * this.ratio
     }
@@ -37,6 +52,8 @@ vi.mock('three', async (original) => {
         background: uniforms.u_cardBg.value.toArray(),
         colors: Array.from({ length: 7 }, (_, i) => uniforms[`u_color${i + 1}`].value.toArray()),
         effect: uniforms.u_effect.value,
+        pass: material.defines.IMGFX_PASS, shader: material.fragmentShader, material: material.uuid,
+        target: this.target, field: uniforms.u_field.value,
       })
     }
     dispose() { gpu.disposed++ }
@@ -46,7 +63,8 @@ const roots: Root[] = []
 const frames = new Map<number, FrameRequestCallback>()
 const intersections = new Map<Element, (visible: boolean) => void>()
 beforeEach(() => {
-  gpu.created = 0; gpu.disposed = 0; gpu.fail = false; gpu.draws.length = 0
+  gpu.created = 0; gpu.disposed = 0; gpu.fail = false; gpu.framebuffer = 'float'; gpu.draws.length = 0
+  gpu.canvases.length = 0; gpu.targets.length = 0; gpu.releasedTargets.length = 0
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('WebGL2RenderingContext', class {})
   vi.stubGlobal('ResizeObserver', class { observe() {}; disconnect() {} })
@@ -88,6 +106,54 @@ function tick() {
   })
 }
 describe('libraries.dev image media loading', () => {
+  it('compiles only Chromium Flow and composites its cell field, reusing both programs and the target across nodes', () => {
+    const { root } = mount(<>{[0, 1, 2].map((i) =>
+      <MediaLoadingEffect key={i} theme="dark" surface="#202023" paused={false} radius={10} />)}</>)
+    tick()
+    expect(gpu.targets).toHaveLength(1)
+    expect(new Set(gpu.draws.map((draw) => draw.material)).size).toBe(2)
+    for (let i = 0; i < gpu.draws.length; i += 2) {
+      const field = gpu.draws[i], composite = gpu.draws[i + 1]
+      expect([field.pass, composite.pass]).toEqual([1, 2])
+      expect(field.target).toBe(gpu.targets[0]); expect(composite.target).toBeNull()
+      expect(composite.field).toBe(field.target!.texture)
+      expect(field.shader).toContain('const int u_effect = 22;')
+      expect(field.shader).not.toMatch(/if\s*\(\s*u_effect\s*==/)
+      expect(field.shader.length).toBeLessThan(FRAG_SRC.length)
+      expect(composite.shader).toBe(field.shader)
+    }
+    const programs = new Set(gpu.draws.map((draw) => draw.material))
+    tick()
+    expect(new Set(gpu.draws.map((draw) => draw.material))).toEqual(programs)
+    act(() => root.render(null))
+    expect(gpu.releasedTargets).toEqual(gpu.targets)
+  })
+  it.each(['byte', 'none'] as const)('keeps the animation when floating point targets are unavailable (%s)', (capability) => {
+    gpu.framebuffer = capability
+    const { container, root } = mount(<MediaLoadingEffect theme="light" surface="#ffffff" paused={false} radius={10} />)
+    tick()
+    expect(container.querySelector('canvas.image-gen-shader')).toBeTruthy()
+    expect(container.querySelector('[data-loading-fallback]')).toBeNull()
+    expect(new Set(gpu.draws.map((draw) => draw.pass))).toEqual(new Set(capability === 'byte' ? [1, 2] : [0]))
+    expect(gpu.draws.every((draw) => draw.shader.includes('const int u_effect = 22;'))).toBe(true)
+    act(() => root.render(null))
+    expect(gpu.releasedTargets).toHaveLength(gpu.targets.length)
+    expect(frames.size).toBe(0)
+  })
+  it('pauses on context loss and resumes the existing nodes on restoration', () => {
+    const { container } = mount(<MediaLoadingEffect theme="dark" surface="#202023" paused={false} radius={10} />)
+    tick()
+    const canvas = container.querySelector('canvas.image-gen-shader')
+    const lost = new Event('webglcontextlost', { cancelable: true })
+    act(() => gpu.canvases[0].dispatchEvent(lost))
+    expect(lost.defaultPrevented).toBe(true); expect(frames.size).toBe(0)
+    const count = gpu.draws.length
+    tick(); expect(gpu.draws).toHaveLength(count)
+    act(() => gpu.canvases[0].dispatchEvent(new Event('webglcontextrestored')))
+    tick()
+    expect(gpu.draws.length).toBeGreaterThan(count); expect(gpu.created).toBe(1)
+    expect(container.querySelector('canvas.image-gen-shader')).toBe(canvas)
+  })
   it('renders the real pixel shader with monochrome Harness light/dark surfaces without remount or media fetch', () => {
     const fetch = vi.spyOn(window, 'fetch')
     const view = (theme: 'light' | 'dark', surface: string) =>

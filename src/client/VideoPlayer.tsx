@@ -17,7 +17,21 @@ export const VideoPlayer = memo(function VideoPlayer({ src, poster, label, autoP
   const [readyMedia, setReadyMedia] = useState('')
   const pending = !media.error && state.error !== 'unavailable' && readyMedia !== identity
   const inNode = useNodeMediaLoading(pending)
-  useRefreshingSource(video, actualSrc, autoPlay)
+  const source = useRefreshingSource(video, actualSrc, autoPlay, identity, media.revision)
+  const operation = useRef(0)
+  useEffect(() => () => { operation.current++ }, [identity])
+  const withFreshSource = (action: () => void) => {
+    const token = ++operation.current, playback = controller.current
+    if (!api || (media.isFresh() && video.current?.getAttribute('src') === media.url && source.isReady())) { action(); return }
+    void (async () => {
+      const url = await media.ensure()
+      if (url && token === operation.current && await source.prepare(url) && token === operation.current && playback === controller.current) action()
+    })()
+  }
+  const toggle = () => {
+    if (video.current && !video.current.paused) { operation.current++; source.pause() }
+    else withFreshSource(() => { void controller.current?.play() })
+  }
   useEffect(() => {
     const element = video.current
     if (!element) return
@@ -35,8 +49,8 @@ export const VideoPlayer = memo(function VideoPlayer({ src, poster, label, autoP
       if (!canvasModifier && event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation()
     }}>
     <video ref={video} poster={poster} loop playsInline preload="auto" draggable={false} aria-label={label}
-      onLoadedData={() => setReadyMedia(identity)}
-      onError={() => media.retry()} onClick={() => { void media.ensure(); controller.current?.toggle() }} />
+      onLoadedData={() => { setReadyMedia(identity); media.loaded() }}
+      onError={() => media.retry()} onClick={toggle} />
     {state.error && <span className="dc-video-message" role={state.error === 'unavailable' ? 'alert' : undefined}>
       {state.error === 'unavailable' ? '视频暂不可播放' : '请点击播放'}
     </span>}
@@ -44,7 +58,7 @@ export const VideoPlayer = memo(function VideoPlayer({ src, poster, label, autoP
     <div className="dc-video-controls" role="group" aria-label="视频播放控制"
       onDoubleClick={(event) => event.stopPropagation()}>
       <UiButton className="dc-video-toggle nodrag" aria-label={state.paused ? '播放视频' : '暂停视频'} title={state.paused ? '播放' : '暂停'}
-        onClick={() => { void media.ensure(); controller.current?.toggle() }}>
+        onClick={toggle}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           {state.paused ? <path d="M4 2.5v11L13 8z" /> : <path d="M4 2.5h2.5v11H4zm5.5 0H12v11H9.5z" />}
         </svg>
@@ -54,7 +68,7 @@ export const VideoPlayer = memo(function VideoPlayer({ src, poster, label, autoP
         disabled={!state.duration || state.error === 'unavailable'} aria-label="视频播放进度"
         aria-valuetext={`${formatMediaTime(time)} / ${formatMediaTime(state.duration)}`}
         style={{ '--dc-progress': `${state.duration ? (time / state.duration) * 100 : 0}%` } as CSSProperties}
-        onChange={(event) => { void media.ensure(); controller.current?.seek(Number(event.currentTarget.value)) }} />
+        onChange={(event) => { const time = Number(event.currentTarget.value); withFreshSource(() => controller.current?.seek(time)) }} />
       <span className="dc-video-time">{formatMediaTime(state.duration)}</span>
     </div>
     {!inNode && <NodeLoading mediaLoading={pending} title={label} />}

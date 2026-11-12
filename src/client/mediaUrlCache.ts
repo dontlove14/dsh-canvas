@@ -3,40 +3,81 @@ import type { MediaUrl, MediaVariant } from '../shared/objectStorage'
 export interface UrlResolver {
   mediaUrls(canvas: string, items: Array<{ assetId: string; variant: MediaVariant }>, force?: boolean): Promise<{ items: Array<MediaUrl | { assetId: string; variant: MediaVariant; error: string }> }>
 }
+export interface CachedMediaUrl extends MediaUrl { revision: number }
+export type MediaRefreshReason = 'timer' | 'resume' | 'online' | 'invalidate' | 'updated'
+const mediaKey = (canvas: string, id: string, variant: MediaVariant) => JSON.stringify([canvas, id, variant])
 export class MediaUrlCache {
-  private values = new Map<string, MediaUrl>()
-  private pending = new Map<string, Promise<MediaUrl>>()
-  private batch = new Map<string, { canvas: string; assetId: string; variant: MediaVariant; force: boolean; resolve: (v: MediaUrl) => void; reject: (e: Error) => void }>()
+  private values = new Map<string, CachedMediaUrl>()
+  private pending = new Map<string, Promise<CachedMediaUrl>>()
+  private batch = new Map<string, { canvas: string; assetId: string; variant: MediaVariant; force: boolean; resolve: (v: CachedMediaUrl) => void; reject: (e: Error) => void }>()
   private scheduled = false
   private epoch = 0
-  private watchers = new Set<() => void>()
+  private revision = 0
+  private recovering = new Set<string>()
+  private watchers = new Map<string, Set<(reason: MediaRefreshReason) => void>>()
   private timer?: ReturnType<typeof setInterval>
-  private refresh = () => { if (typeof document === 'undefined' || !document.hidden) for (const callback of this.watchers) callback() }
+  private refresh = (reason: MediaRefreshReason) => {
+    if (typeof document !== 'undefined' && document.hidden) return
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+    for (const [key, callbacks] of this.watchers) {
+      if (reason !== 'timer') this.recovering.delete(key)
+      for (const callback of callbacks) callback(reason)
+    }
+  }
+  private tick = () => this.refresh('timer')
+  private resume = () => this.refresh('resume')
+  private online = () => this.refresh('online')
   constructor(private api: UrlResolver, private now = Date.now) {}
-  peek(canvas: string, id: string, variant: MediaVariant) { return this.values.get(JSON.stringify([canvas, id, variant])) }
-  invalidate(): void { this.epoch++; this.values.clear(); this.refresh() }
-  resolve(canvas: string, assetId: string, variant: MediaVariant, force = false): Promise<MediaUrl> {
-    const key = JSON.stringify([canvas, assetId, variant])
+  peek(canvas: string, id: string, variant: MediaVariant) { return this.values.get(mediaKey(canvas, id, variant)) }
+  isFresh(canvas: string, id: string, variant: MediaVariant): boolean {
+    const value = this.peek(canvas, id, variant)
+    return !!value && value.expiresAt - this.now() > 300000 && !this.pending.has(mediaKey(canvas, id, variant))
+  }
+  invalidate(): void { this.epoch++; this.values.clear(); this.recovering.clear(); this.refresh('invalidate') }
+  /** One forced signature per recovery round, shared by every occurrence of the resource. */
+  recover(canvas: string, id: string, variant: MediaVariant, revision: number): Promise<CachedMediaUrl> | undefined {
+    const key = mediaKey(canvas, id, variant)
+    const pending = this.pending.get(key)
+    if (pending) return pending
+    const cached = this.values.get(key)
+    if (cached && cached.revision !== revision && this.isFresh(canvas, id, variant)) return Promise.resolve(cached)
+    if (this.recovering.has(key)) return
+    this.recovering.add(key)
+    return this.resolve(canvas, id, variant, true)
+  }
+  loaded(canvas: string, id: string, variant: MediaVariant, revision: number): void {
+    if (this.peek(canvas, id, variant)?.revision === revision) this.recovering.delete(mediaKey(canvas, id, variant))
+  }
+  resolve(canvas: string, assetId: string, variant: MediaVariant, force = false): Promise<CachedMediaUrl> {
+    const key = mediaKey(canvas, assetId, variant)
+    // A normal reader must join a forced refresh instead of receiving the known bad old URL.
+    if (this.pending.has(key)) return this.pending.get(key)!
     const cached = this.values.get(key)
     if (!force && cached && cached.expiresAt - this.now() > 300000) return Promise.resolve(cached)
-    if (this.pending.has(key)) return this.pending.get(key)!
-    const work = new Promise<MediaUrl>((resolve, reject) => {
+    const work = new Promise<CachedMediaUrl>((resolve, reject) => {
       this.batch.set(key, { canvas, assetId, variant, force, resolve, reject })
       if (!this.scheduled) { this.scheduled = true; queueMicrotask(() => void this.flush()) }
     }).finally(() => this.pending.delete(key))
     this.pending.set(key, work); return work
   }
-  watch(callback: () => void): () => void {
-    this.watchers.add(callback)
+  watch(canvas: string, id: string, variant: MediaVariant, callback: (reason: MediaRefreshReason) => void): () => void {
+    const key = mediaKey(canvas, id, variant)
+    const callbacks = this.watchers.get(key) ?? new Set()
+    callbacks.add(callback); this.watchers.set(key, callbacks)
     if (!this.timer) {
-      this.timer = setInterval(this.refresh, 60000)
-      document.addEventListener('visibilitychange', this.refresh); window.addEventListener('focus', this.refresh)
+      this.timer = setInterval(this.tick, 60000)
+      document.addEventListener('visibilitychange', this.resume)
+      window.addEventListener('focus', this.resume); window.addEventListener('pageshow', this.resume)
+      window.addEventListener('online', this.online)
     }
     return () => {
-      this.watchers.delete(callback)
+      callbacks.delete(callback)
+      if (!callbacks.size) { this.watchers.delete(key); this.recovering.delete(key) }
       if (!this.watchers.size) {
         clearInterval(this.timer); this.timer = undefined
-        document.removeEventListener('visibilitychange', this.refresh); window.removeEventListener('focus', this.refresh)
+        document.removeEventListener('visibilitychange', this.resume)
+        window.removeEventListener('focus', this.resume); window.removeEventListener('pageshow', this.resume)
+        window.removeEventListener('online', this.online)
       }
     }
   }
@@ -58,8 +99,15 @@ export class MediaUrlCache {
         for (const [key, request] of chunk) {
           const item = result.items.find((v) => v.assetId === request.assetId && v.variant === request.variant)
           if (!item || 'error' in item) { request.reject(new Error(item && 'error' in item ? item.error : '媒体链接不可用')); continue }
-          if (this.values.size >= 2048) this.values.delete(this.values.keys().next().value!)
-          this.values.set(key, item); request.resolve(item)
+          if (!this.values.has(key) && this.values.size >= 2048) {
+            const oldest = this.values.keys().next().value!
+            this.values.delete(oldest); this.recovering.delete(oldest)
+          }
+          const next = { ...item, revision: ++this.revision }
+          this.values.set(key, next)
+          if (!request.force) this.recovering.delete(key)
+          request.resolve(next)
+          for (const callback of this.watchers.get(key) ?? []) callback('updated')
         }
       } catch (error) { for (const [, request] of chunk) request.reject(error instanceof Error ? error : new Error('媒体链接读取失败')) }
     }

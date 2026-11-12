@@ -44,10 +44,10 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('IntersectionObserver', class {
     targets: Element[] = []
-    constructor(private notify: (entries: Array<{ isIntersecting: boolean }>) => void) {}
+    constructor(private notify: (entries: Array<{ target: Element; time: number; isIntersecting: boolean }>) => void) {}
     observe(target: Element) {
-      this.targets.push(target); intersections.set(target, (visible) => this.notify([{ isIntersecting: visible }]))
-      this.notify([{ isIntersecting: true }])
+      this.targets.push(target); intersections.set(target, (visible) => this.notify([{ target, time: 0, isIntersecting: visible }]))
+      this.notify([{ target, time: 0, isIntersecting: true }])
     }
     disconnect() { for (const target of this.targets) intersections.delete(target) }
   })
