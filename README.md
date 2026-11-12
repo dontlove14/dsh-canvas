@@ -1,10 +1,17 @@
 # 无限画布 · DeepSeek Harness 插件
 
-<!-- 文档类型：说明；负责人：项目维护者；最近核对：2026-11-05。 -->
+<!-- 文档类型：说明；负责人：项目维护者；最近核对：2026-11-12。 -->
 
 <p align="center">
   <img src="src/client/brandLogo.png" alt="无限画布首页：Agent 对话与素材创作画布">
 </p>
+
+<div align="center">
+  <video src="docs/files/agent%20%E5%9B%A2%E9%98%9F%E5%87%BA%E9%95%9C.mp4" autoplay muted playsinline controls width="800" style="max-width: 100%; height: auto;">
+    <a href="docs/files/agent%20%E5%9B%A2%E9%98%9F%E5%87%BA%E9%95%9C.mp4">观看 Agent 团队出镜视频</a>
+  </video>
+</div>
+
 
 无限画布是一款 AI 创作插件。你可以在同一张画布里生成图片、视频和语音，整理参考素材，也可以通过对话让 Agent 帮你准备创作内容。
 
