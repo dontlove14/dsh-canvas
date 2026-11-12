@@ -1,6 +1,10 @@
 # 当前架构与执行流程
 
-Agent 空间命名与对接边界见[ADR-0093](adr/0093-agent-space-name-and-integration-boundaries.md)：现有collaboration模块、路由、日志v1及机器身份继续沿用。0.2.135候选按[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)改为左上纯动作卡片与工作站台，替换旧气泡 / 关系图入口；原派发消息保留任务成果详情。根生命周期只读原生sessions.binding，子级只读共享GET/SSE；独立预设确认与资源库不写任务或画布。候选尚未安装 / 重启。
+0.2.143按[ADR-0103](adr/0103-agent-space-one-figure-per-role.md)在spaceActors中按root与角色汇总临时childIds，办公室和站台共用稳定展示身份；任一真实成员工作即保持工作。AgentSpaceMotions仍按原taskId / childId观察公开交接，将动作映射到该角色人物。宿主日志、调度与每实例画布光标保持，展示身份不作为原生会话ID，成员变动不重建同动作视频。
+
+0.2.142按[ADR-0102](adr/0102-independent-create-default-dispatch-and-small-cursors.md)让canvas_execute在原幂等门内自动派发独立create，serial与混合/依赖保留顺序，原序回执汇总；没有额外组模型名额或虚假工作者。沿[ADR-0101](adr/0101-parallel-canvas-executors-and-observed-cursors.md)，executionScheduler共用预算和资源冲突，coordinator核验指纹，Store短事务与epoch保持。presentation事件和共用CanvasWorkspace的只读ViewportPortal保持，用户箭头改为13×15屏幕盒及四实例四色。无新依赖、持久格式或上游变更。
+
+Agent 空间命名与对接边界见[ADR-0093](adr/0093-agent-space-name-and-integration-boundaries.md)：现有collaboration模块、路由、日志v1及机器身份继续沿用。0.2.140按[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)落实左上纯动作浮卡与工作站台，替换旧气泡 / 关系图入口并使用已认可正面素材；原派发消息保留任务成果详情。根生命周期只读原生sessions.binding，子级只读共享GET/SSE；独立预设确认与资源库不写任务或画布。
 
 0.2.122的[Fish流程](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)沿原分工：voiceTools只供voice专业子级读取限定官网页面，候选成果在保存/交接时核对本批次实际来源；主级选择/授权，执行级精确写入与原TTS队列合成。TTS共用真实边，params仅可选新增reference_text；Providers在issued前准备固定音频，用@msgpack/msgpack二进制序列化。chatAudio将只读canvas_show_audio回执投影为原生直接聊天行，audio-result读取原任务/成果元数据，复用签名媒体和AudioPlayer；隐藏/卸载停止播放/查询。两库DDL、CanvasGraph版本与已有sidecar结构不变。
 

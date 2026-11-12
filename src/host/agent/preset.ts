@@ -20,7 +20,7 @@ import { hash } from '../persistence/database'
 import { CanvasError, detectMedia } from '../store'
 import { submittedReferences } from './chatReferences'
 import { METHODS, MAIN_PROMPT, EXECUTOR_PROMPT } from './methods'
-import { EXECUTION_SCHEMAS, ReferenceExclusionsSchema, executionIntent } from '../../shared/execution'
+import { EXECUTION_SCHEMAS, ReferenceExclusionsSchema, executionIntent, type ExecutionCommand } from '../../shared/execution'
 import { installCreativeTools } from './creativeTools'
 import { installDelegationTools } from './delegation'
 import { installVoiceTools } from './voiceTools'
@@ -140,7 +140,7 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
     if (role === 'executor') coordinator.assertExecution(exec.agent, executionTool, args)
     const targets = [args.nodeId, args.target, args.source, ...args.references?.map((ref) => ref.source) ?? []].filter((id): id is string => !!id)
     referenceTarget(exec, c, args, targets)
-    const value = await coordinator.serial(async () => {
+    const operation = async () => {
       exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c)
       if (role === 'executor') {
         coordinator.assertExecution(exec.agent, executionTool, args)
@@ -151,6 +151,10 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
           return saved.result
         }
       }
+      if (role === 'executor' && action !== 'import') {
+        const revision = coordinator.executionRevision(exec.agent, executionTool, args)
+        if (action !== 'generate') args.revision = revision
+      }
       referenceTarget(exec, c, args, targets)
       const key = `${c.canvasId}:${args.operationId}`, receipt = coordinator.ledger.receipt(key, args)
       if (receipt) { await checkFileReceipt(exec, receipt.value); return receipt.value }
@@ -160,18 +164,39 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
       await coordinator.ledger.persist()
       exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c)
       const target = args.nodeId ?? args.target
+      const cursor = (phase: 'started' | 'committed' | 'failed', result?: Record<string, unknown>) => {
+        if (role !== 'executor' || !action || action === 'open') return
+        const state = service.store.state(c.canvasId), nodeId = target ?? result?.nodeId as string | undefined
+        const node = state.graph.nodes.find((node) => node.id === nodeId)
+        const raw = args as unknown as { patch?: { position?: { x: number; y: number }; prompt?: string; title?: string }; position?: { x: number; y: number } }
+        const placement = result?.placement as { position?: { x: number; y: number } } | undefined
+        const point = raw.patch?.position ?? node?.position ?? placement?.position ?? raw.position
+        if (!point) return
+        const source = state.graph.nodes.find((node) => node.id === args.source)
+        coordinator.presentation.operation(exec.agent.id, { operationId: args.operationId, action, phase,
+          point: { x: point.x + (action === 'connect' ? 0 : 36), y: point.y + (action === 'connect' ? 90 : 28) },
+          ...(source ? { from: { x: source.position.x + 320, y: source.position.y + 90 } } :
+            raw.patch?.position && node ? { from: { x: node.position.x + 36, y: node.position.y + 28 } } : {}),
+          text: action === 'update' && (raw.patch?.prompt !== undefined || raw.patch?.title !== undefined),
+          nodeIds: [nodeId].filter((id): id is string => !!id), graphRevision: state.graphRevision })
+      }
+      if (action !== 'create' && action !== 'import') cursor('started')
       if (action && target && service.store.state(c.canvasId).graph.nodes.some((node) => node.id === target)) {
-        await coordinator.presentation.publish(c, `${args.operationId}:working`, action,
+        if (role !== 'executor' || coordinator.presentation.followsExecutor(c.canvasId, exec.agent.id)) await coordinator.presentation.publish(c, `${args.operationId}:working`, action,
           service.store.state(c.canvasId).graphRevision, [target])
       }
-      const result = await run(c) as Record<string, unknown>
-      if (action) {
+      let result: Record<string, unknown>
+      try { result = await run(c) as Record<string, unknown> }
+      catch (error) { cursor('failed'); throw error }
+      cursor('committed', result)
+      if (action && (role !== 'executor' || coordinator.presentation.followsExecutor(c.canvasId, exec.agent.id))) {
         const intent = await coordinator.presentation.publish(c, args.operationId, action, service.store.state(c.canvasId).graphRevision,
           [args.nodeId ?? args.target ?? (result.nodeId as string | undefined) ?? (action === 'create' ? args.operationId : '')].filter(Boolean), result.taskId as string | undefined)
         result.presentationId = intent.id
       }
       coordinator.ledger.remember(key, args, result)
       if (role === 'executor') {
+        coordinator.executionCommitted(exec.agent, { tool: executionTool, input: args } as ExecutionCommand)
         coordinator.ledger.remember(executionKey, commandIntent, { result, inputRevision: args.revision })
         const binding = coordinator.binding(exec.agent)
         coordinator.creative.update(binding.projectId, binding.taskId, 'running', `已完成 ${executionTool} ${args.operationId}`)
@@ -184,12 +209,15 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
       }
       exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c)
       return result
-    }) as Record<string, unknown>
+    }
+    // Uploads own guarded Store transactions; network reads never occupy the
+    // graph queue. Their executor lease conservatively owns the whole graph.
+    const value = await (action === 'import' ? operation() : coordinator.serial(operation)) as Record<string, unknown>
     if (!action) return value
     const intent = coordinator.presentation.current(c.canvasId)
     const presentation = intent && intent.id === value.presentationId
       ? await coordinator.presentation.wait(intent, exec.signal)
-      : { id: value.presentationId, status: 'deferred', reason: '已由更新的操作替代，不重放旧操作' }
+      : { id: String(value.presentationId ?? `${c.epoch}:${args.operationId}`), status: 'deferred', reason: '已由更新的操作替代，不重放旧操作' }
     return { ...value, presentation }
   }
   const register = (agent: Agent) => {
@@ -477,7 +505,10 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
         coordinator.ledger.remember(key, args, startInput); await coordinator.ledger.persist()
         const started = await service.runtime.uploads.start(c.canvasId, startInput, guard)
         guard()
-        await coordinator.presentation.publish(c, `${args.operationId}:working`, 'import',
+        coordinator.presentation.operation(exec.agent.id, { operationId: args.operationId, action: 'import', phase: 'started',
+          point: { x: startInput.position.x + 36, y: startInput.position.y + 28 }, text: false,
+          nodeIds: [started.nodeId], graphRevision: service.store.state(c.canvasId).graphRevision })
+        if (coordinator.presentation.followsExecutor(c.canvasId, exec.agent.id)) await coordinator.presentation.publish(c, `${args.operationId}:working`, 'import',
           service.store.state(c.canvasId).graphRevision, [started.nodeId])
         const accepted = await service.runtime.uploads.accept(c.canvasId, started.id, body, args.kind, input.filename, exec.signal, guard)
         return { ...accepted, status: 'queued', purpose: args.purpose, referenceReady: false }
@@ -509,18 +540,23 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
     tool('canvas_create_node', '执行授权清单中的节点创建；references 为真实 source/assetId，prompt 使用 inspect 返回的 token 表示 @ 标签，节点与引用同次保存。不能改变创作参数。', EXECUTION_SCHEMAS.canvas_create_node, async (args, exec) => {
       coordinator.assertExecution(exec.agent, 'canvas_create_node', args)
       const control = read(exec.agent)
-      const placement = args.position ? { position: args.position, source: 'explicit' }
+      let placement = args.position ? { position: args.position, source: 'explicit' }
         : await coordinator.presentation.position(control, service.store.state(control.canvasId).graph, args.kind, args.placement ?? { group: args.kind === 'video-generation' ? 'shots' : args.kind === 'tts-generation' ? 'audio' : 'assets' }, exec.signal)
       return write(exec, args, async (c) => {
       const replay = await service.store.db.get('SELECT committed_revision FROM canvas_mutations WHERE canvas_id=? AND mutation_id=?', [c.canvasId, args.operationId])
       if (replay) return { nodeId: args.operationId, revision: replay.committed_revision }
       const state = service.store.state(c.canvasId)
+      if (!args.position && state.graph.nodes.length) placement = await coordinator.presentation.position(c, state.graph, args.kind,
+        args.placement ?? { group: args.kind === 'video-generation' ? 'shots' : args.kind === 'tts-generation' ? 'audio' : 'assets' }, exec.signal, false)
       if (args.kind === 'tts-generation' && args.modelId) throw new CanvasError('FishTTS 节点不使用图片或视频模型')
       const model = args.modelId ? coordinator.generationModels.require(rootAgent(exec), args.kind === 'video-generation' ? 'video' : 'image', args.modelId) : undefined
       const input = { ...nodeFor(state.graph, args.kind, placement.position, model), id: args.operationId, title: args.title, prompt: args.prompt, ...(args.params !== undefined ? { params: args.params } : {}) }
       const { node, edges, references, referenceCoverage } = referencedNode(state, input, args.references, service.store.listModels(), (index) => uuid({ operationId: args.operationId, reference: index }), true, args.referenceExclusions)
+      coordinator.presentation.operation(exec.agent.id, { operationId: args.operationId, action: 'create', phase: 'started',
+        point: { x: node.position.x + 36, y: node.position.y + 28 }, text: false, nodeIds: [node.id], graphRevision: state.graphRevision })
       await service.mutateGraph(c.canvasId, { mutationId: args.operationId, baseRevision: args.revision, nodes: [{ value: node, hash: hash(node) }], edges: edges.map((value) => ({ value, hash: hash(value) })), deleteNodes: [], deleteEdges: [] }, () => {
         exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c)
+        coordinator.executionRevision(exec.agent, 'canvas_create_node', args)
         if (model) coordinator.generationModels.require(rootAgent(exec), model.kind as 'image' | 'video', model.id)
       })
       return { nodeId: node.id, revision: service.store.state(c.canvasId).graphRevision, placement, references, referenceCoverage }
@@ -546,7 +582,7 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
         args.referenceExclusions)
       node = edit.node
       await service.mutateGraph(c.canvasId, { mutationId: args.operationId, baseRevision: args.revision, nodes: [{ value: node, hash: hash(node) }], edges: edit.edges.map((value) => ({ value, hash: hash(value) })), deleteNodes: [], deleteEdges: [] }, () => {
-        exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c); checkModel()
+        exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c); coordinator.executionRevision(exec.agent, 'canvas_update_node', args); checkModel()
       })
       return { nodeId: node.id, revision: service.store.state(c.canvasId).graphRevision, references: edit.references, referenceCoverage: edit.referenceCoverage }
     }, 'update'))
@@ -559,7 +595,9 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
       const node = model && isMultimodalVideo(model) && target.params && !isTtsParams(target.params)
         ? { ...target, params: videoGenerationParams(target.params, graph.edges.filter((edge) => edge.target === target.id).map((edge) => edge.assetId), model) } : target
       await service.mutateGraph(c.canvasId, { mutationId: args.operationId, baseRevision: args.revision,
-        nodes: node === target ? [] : [{ value: node, hash: hash(node) }], edges: [{ value: edge, hash: hash(edge) }], deleteNodes: [], deleteEdges: [] }, () => { exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c) })
+        nodes: node === target ? [] : [{ value: node, hash: hash(node) }], edges: [{ value: edge, hash: hash(edge) }], deleteNodes: [], deleteEdges: [] }, () => {
+          exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c); coordinator.executionRevision(exec.agent, 'canvas_connect', args)
+        })
       return { edgeId: edge.id, revision: service.store.state(c.canvasId).graphRevision, reference: promptReference(state, edge) }
     }, 'connect'))
   }

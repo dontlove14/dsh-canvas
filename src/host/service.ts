@@ -33,7 +33,7 @@ import { PresenceSchema, ViewReportSchema, PresentationAckSchema } from '../shar
 
 export interface CanvasConfig {
   dataDir: string; maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; imageRequestTimeoutMs?: number
-  maxMediaBytes: number; maxReferenceBytes: number
+  maxMediaBytes: number; maxReferenceBytes: number; maxConcurrentAgents?: number
 }
 export const routeDefinitions = [
   { suffix: 'agent-collaboration', methods: ['GET'] as const, requestBody: 'buffered' as const },

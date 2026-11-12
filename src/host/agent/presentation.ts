@@ -2,7 +2,7 @@ import { readFile, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { PresentationIntentSchema, type PresentationIntent, type PresentationAck, type ViewReport, type PresentationResult, type AutoPlacement } from '../../shared/presentation'
+import { PresentationIntentSchema, type PresentationIntent, type PresentationAck, type ViewReport, type PresentationResult, type AutoPlacement, type CursorActivity } from '../../shared/presentation'
 import { initialNodeSize, placeAgentNode } from '../../shared/agentLayout'
 import type { CanvasControl } from '../../shared/agent'
 import type { CanvasNode, CanvasGraph } from '../../shared/contracts'
@@ -21,6 +21,11 @@ export class AgentPresentation {
   private acks = new Map<string, PresentationAck>()
   private listeners = new Set<() => void>()
   private readonly path: string
+  private readonly cursorStream = randomUUID()
+  private cursorSequence = 0
+  private executors = new Map<string, { control: CanvasControl; taskId: string; activity?: CursorActivity }>()
+  private cursorEvents: CursorActivity[] = []
+  private focusChild = new Map<string, string>()
   constructor(dataDir: string, private control: (canvasId: string) => CanvasControl,
     private running: (sessionId: string) => boolean = () => true) { this.path = join(dataDir, 'agent-presentation.json') }
   async init() {
@@ -34,15 +39,52 @@ export class AgentPresentation {
   state(sessionId: string) {
     const intent = Object.values(this.data.canvases).map((entry) => entry.intent)
       .filter((entry) => entry.sessionId === sessionId && this.valid(entry)).sort((a, b) => b.createdAt - a.createdAt)[0]
-    return intent ? { intent, running: this.running(sessionId) } : { intent: null }
+    const active = [...this.executors.values()].flatMap((entry) => entry.activity && this.valid(entry.activity) && entry.control.sessionId === sessionId ? [entry.activity] : [])
+    return { ...(intent ? { intent, running: this.running(sessionId) } : { intent: null }),
+      cursors: { streamId: this.cursorStream, sequence: this.cursorSequence, floor: this.cursorEvents[0]?.sequence ?? this.cursorSequence + 1, active,
+        events: this.cursorEvents.filter((event) => event.sessionId === sessionId && this.valid(event)) } }
+  }
+  startExecutor(childId: string, control: CanvasControl, taskId: string) {
+    if (!this.executors.has(childId)) this.executors.set(childId, { control: structuredClone(control), taskId })
+  }
+  operation(childId: string, activity: Omit<CursorActivity, 'childId' | 'taskId' | 'role' | 'sessionId' | 'canvasId' | 'epoch' | 'sequence'>) {
+    const executor = this.executors.get(childId)
+    if (!executor?.control.sessionId || !this.valid({ ...executor.control, sessionId: executor.control.sessionId })) return
+    const event: CursorActivity = { ...activity, childId, taskId: executor.taskId, role: 'executor',
+      sessionId: executor.control.sessionId, canvasId: executor.control.canvasId, epoch: executor.control.epoch, sequence: ++this.cursorSequence }
+    executor.activity = event
+    this.cursorEvents.push(event); this.cursorEvents = this.cursorEvents.slice(-128)
+    if (!this.focusChild.has(event.canvasId)) this.focusChild.set(event.canvasId, childId)
+    this.changed()
+  }
+  followsExecutor(canvasId: string, childId: string) { return !this.focusChild.has(canvasId) || this.focusChild.get(canvasId) === childId }
+  endExecutor(childId: string) {
+    const executor = this.executors.get(childId)
+    if (executor?.activity) this.operation(childId, { ...executor.activity, phase: 'ended' })
+    this.executors.delete(childId)
+    if (executor && this.focusChild.get(executor.control.canvasId) === childId) {
+      this.focusChild.delete(executor.control.canvasId)
+      const next = [...this.executors].find(([, entry]) => entry.activity && entry.control.canvasId === executor.control.canvasId && this.valid(entry.activity))
+      if (next) this.focusChild.set(executor.control.canvasId, next[0])
+    }
+    this.changed()
   }
   current(canvasId: string) {
     const intent = this.data.canvases[canvasId]?.intent
     return intent && this.valid(intent) ? intent : undefined
   }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
-  changed() { for (const listener of this.listeners) listener() }
-  close() { this.closed = true; this.changed(); this.listeners.clear() }
+  changed() {
+    for (const [id, entry] of this.executors) if (!entry.control.sessionId || !this.valid({ ...entry.control, sessionId: entry.control.sessionId })) {
+      this.executors.delete(id)
+      if (this.focusChild.get(entry.control.canvasId) === id) this.focusChild.delete(entry.control.canvasId)
+    }
+    for (const listener of this.listeners) listener()
+  }
+  endRoot(sessionId: string) {
+    for (const [id, entry] of [...this.executors]) if (entry.control.sessionId === sessionId) this.endExecutor(id)
+  }
+  close() { this.closed = true; this.executors.clear(); this.focusChild.clear(); this.changed(); this.listeners.clear() }
   reportPresence(viewId: string, sessionId: string, visible: boolean) {
     this.presence.set(viewId, { sessionId, visible, receivedAt: Date.now() }); this.prune(); this.changed()
   }
@@ -104,10 +146,10 @@ export class AgentPresentation {
       this.listeners.add(finish); signal.addEventListener('abort', finish, { once: true })
     })
   }
-  async position(control: CanvasControl, graph: CanvasGraph, kind: CanvasNode['kind'], placement: AutoPlacement, signal: AbortSignal) {
+  async position(control: CanvasControl, graph: CanvasGraph, kind: CanvasNode['kind'], placement: AutoPlacement, signal: AbortSignal, waitForView = true) {
     let view = this.view(control)
     const deadline = Date.now() + 8000
-    while (!this.closed && !graph.nodes.length && !view?.center && this.foreground(control.sessionId!) && Date.now() < deadline) {
+    while (waitForView && !this.closed && !graph.nodes.length && !view?.center && this.foreground(control.sessionId!) && Date.now() < deadline) {
       signal.throwIfAborted()
       if (this.control(control.canvasId).epoch !== control.epoch) throw new CanvasError('画布已由人工接管', 409, 'AGENT_CONTROL_REVOKED')
       await this.wake(signal, 300); view = this.view(control)

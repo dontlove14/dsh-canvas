@@ -1,5 +1,11 @@
 # 运行、配置与排障指南
 
+0.2.143的Agent 空间同角色只显示一个人物，展开与缩小一致；部分实例结束时仍显示剩余实例工作，不同角色各自保留。原公开日志可核对实际实例，画布仍有各实例独立光标。沿已授权web / 3080检查、双构建、同包安装 / 重启和加载核验；成功前保留142回退包，用户手验[443–445](manual-tests.md)，见[ADR-0103](adr/0103-agent-space-one-figure-per-role.md)。
+
+0.2.142的canvas_execute默认分派多个已确定的独立新建节点，maxConcurrentAgents默认4且可配1–4；共用已有只读参考可以并行，serial、本批依赖和混合工作保持顺序。其他独立任务仍用canvas_execute_parallel。专业与执行共享预算，旧批次先查回执不重派；仅实际executor显示13×15指定箭头，结束独立移除，后台 / 重连不补播。沿已授权web / 3080检查、双构建、同包安装 / 重启、HTTP与原数据身份核验，成功前保留141回退包；用户手验[439–442](manual-tests.md)，见[ADR-0102](adr/0102-independent-create-default-dispatch-and-small-cursors.md)及[ADR-0101](adr/0101-parallel-canvas-executors-and-observed-cursors.md)。
+
+并行异常先看原执行清单逐项回执与Agent 空间原任务记录，已完成操作继续复用；依赖失败只阻塞后续分支。接管立即撤权，不能用换revision绕过相关资源冲突。重启控制回人工，排队和未完成批次不自动续发；付费任务沿原ID查询 / 保存。光标不是完成或用户认可的证据，短任务结束即移除，不为展示延迟工具执行。
+
 0.2.140落实左上悬浮：移除138–139左侧分栏和正文宽度 / 控制柄覆写；卡片绝对定位，尺寸仅作用于自建seat，正文及输入框恢复原生宽度，无整行或整列占位。139的主级正面待机兜底、原动画及按钮保持。沿已授权web / 3080检查、双构建、同包安装 / 重启、HTTP与原数据核验交付，成功前保留139回退包；用户手验[429–433](manual-tests.md)，规则见[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)。
 
 0.2.139修正已停止 / 异常 / 未知会话缩小后只剩按钮：无实际工作者时保留主级单人M09正面待机1.0倍，原状态保持；恢复运行按实际工作角色展示。沿用138正文左右并排和原生输入框 / 滚动区，原动作不重新处理。按已授权web / 3080全量check、双构建、整包 / 安装hash、HTTP及原数据核验交付，成功前保留138回退包；手验[431](manual-tests.md)，规则见[ADR-0100](adr/0100-agent-space-upper-left-card-and-working-podiums.md)。
@@ -288,6 +294,7 @@ TTS也通过“配置模型”选择FishTTS / Model Link配置独立API Key，�
 | --- | --- | --- | --- |
 | `dataDir` | `~/.dsh-canvas` | string | SQLite、公开配置、未完成恢复暂存；只允许一个写者，无永久本机媒体库 |
 | `maxConcurrentTasks` | 2 | 整数 1–8 | 同时网络 / 保存步骤；不是远端总任务数上限 |
+| `maxConcurrentAgents` | 4 | 整数 1–4 | 每个画布作用域或未绑定根会话的活动子 Agent 数；专业 / 执行共享，等待容量 / 资源 / 前置依赖不占名额；设1回到串行 |
 | `pollIntervalMs` | 3000 | 整数 500–60000 | 宿主视频查询 / 临时故障等待间隔；Seedance下限3秒，浏览器读状态另为2秒 |
 | `requestTimeoutMs` | 120000 | 整数 1000–600000 | 视频提交 / 查询、FishTTS及结果下载的单次超时，单位 ms；不是整项生成总时长 |
 | `imageRequestTimeoutMs` | 600000 | 整数 1000–600000 | 生图单次请求超时，单位 ms；包含发送与响应体读取，各图片协议 / 渠道及参考图模式统一生效 |

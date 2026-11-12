@@ -1,5 +1,7 @@
 # 开发交付规则
 
+- Agent 空间同角色展示按[ADR-0103](docs/adr/0103-agent-space-one-figure-per-role.md)：展开办公室和缩小站台均每角色一个形象，无论多少真实并行实例；任一本轮成员实际工作就保持工作，部分结束不重启工作循环，不同角色分别保留。原日志和逐实例画布光标不合并，交接按真实成员映射到稳定角色形象，不重播历史，不改任务/图/DDL。
+
 文档类型：操作指南；负责人：项目维护者 / 开发执行者；最近核对：2026-11-12。
 
 本文件供后续开发执行者进入仓库时读取。完整规则以 [ADR-0021](docs/adr/0021-local-update-and-package-retention.md) 为准，具体操作见[运行指南](docs/operations.md)。每轮修改完成时核对；目标环境、检查或保留规则变化时同步更新。
@@ -9,6 +11,7 @@
 - 每轮修改完成且必要检查通过后，主动完成版本更新、构建、打包、本地插件安装、Harness 重启和加载核验，再交付给用户；不要停在“源码已修改”或让用户重复手动安装。
 - 当前已授权目标为本机 Harness `web` profile、`http://127.0.0.1:3080`。沿用既有配置，不重复初始化 profile；默认不操作5173开发实例。
 - Agent分工按[ADR-0086](docs/adr/0086-creative-projects-and-scoped-canvas-executor.md)：主级统筹/用户决定，专业子级读取资料与保存成果，同级canvas-executor为Agent节点写入口，宿主持有精确清单、根身份、CAS/epoch、幂等与任务；不把小说改编固化成专用管线。原文与成果使用独立sidecar，保持存量CanvasGraph/DDL。
+- 并行画布执行按[ADR-0101](docs/adr/0101-parallel-canvas-executors-and-observed-cursors.md)及[ADR-0102](docs/adr/0102-independent-create-default-dispatch-and-small-cursors.md)：canvas_execute对已确定且无本批引用/锚点依赖的多个新建节点默认自动分给最多4个真实实例，共用已有只读参考允许并行；明确顺序用executionMode=serial，单项/混合/本批依赖保持顺序，其他独立任务主级用canvas_execute_parallel。原批次key和输入先核对回执，不重派旧/失败/中断批次；实际回执按原命令顺序返回。共享节点/上游/素材写冲突排队，dependsOn只启动已完成前置分支；每作用域maxConcurrentAgents默认4、范围1–4，专业和执行共享。普通编辑仅在相关资源指纹未变时重基，提交前重验精确授权与epoch，付费生成保持原快照。光标只给实际canvas-executor、只在所属画布内，使用用户指定SVG和13×15半尺寸屏幕盒、四实例四色，真实事件只读投影；各实例结束独立移除，重连/后台恢复不重播，不改图/DDL/成果或Agent空间原动作。
 - 成果交接按[ADR-0088](docs/adr/0088-saved-artifact-handoff-and-independent-identity.md)：批次taskId与新成果artifactId分开，已保存成果按实际回执核验并复用；旧全文结果先匹配本批次成果，未匹配才另存独立ID。不得重新渲染已保存文件、重置认可或改写历史混用ID；长标题须保留完整UUID和扩展名。
 - Agent参考准备按[ADR-0089](docs/adr/0089-agent-reference-generation-and-prompt-mentions.md)：有素材的视频优先参考生成；create/update通过references与prompt的`{{asset:UUID}}`同次保存真实边和@标签，逐项说明用途。首尾帧参数不代替连线；交接核对完整参数与实际引用，不自动修补历史图或重提生成。
 - 视频一致性按[ADR-0090](docs/adr/0090-model-aware-video-consistency-references.md)：以所选模型referenceLimits按镜头规划分镜/人物/场景/道具/适用音色；不支持音频则跳过音色。参考生视频核对派生素材当时的原始依赖，必要原图直接连入；无关依赖仅按主级精确排除原因和交接回执处理，不猜用途或自动连线。

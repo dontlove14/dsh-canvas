@@ -8,6 +8,7 @@ import flowCss from '@xyflow/react/dist/style.css?inline'
 import css from './styles.css?inline'
 import agentCss from './agent.css?inline'
 import agentSpaceCss from './agentSpace.css?inline'
+import executorCursorsCss from './executorCursors.css?inline'
 import { CanvasApi } from './api'
 import { CanvasApp } from './Canvas'
 import { CanvasSettings } from './Settings'
@@ -124,7 +125,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.plugin = name
-    style.textContent = `${flowCss}\n${css}\n${agentCss}\n${agentSpaceCss}`
+    style.textContent = `${flowCss}\n${css}\n${agentCss}\n${agentSpaceCss}\n${executorCursorsCss}`
     document.head.appendChild(style)
     return () => style.remove()
   })

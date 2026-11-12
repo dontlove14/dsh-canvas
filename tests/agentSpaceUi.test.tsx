@@ -71,9 +71,9 @@ it('sizes only the floating card, shows actual working identities and shrinks on
     expect(document.querySelector('.dc-collaboration-bubble')).toBeNull()
     await act(async () => Stream.all[0].send([child('one'), child('two'), child('queued', 'dispatched')]))
     await act(async () => (document.querySelector('.dc-agent-space-toggle') as HTMLElement).click())
-    expect([...document.querySelectorAll('.dc-agent-space-podium [data-agent-id]')].map((node) => node.getAttribute('data-agent-id'))).toEqual(['session', 'one', 'two'])
+    expect([...document.querySelectorAll('.dc-agent-space-podium [data-role]')].map((node) => node.getAttribute('data-role'))).toEqual(['main', 'writer'])
     expect(seat.dataset.expanded).toBe('false')
-    expect(seat.style.getPropertyValue('--dc-agent-space-podium-width')).toBe('226px')
+    expect(seat.style.getPropertyValue('--dc-agent-space-podium-width')).toBe('150px')
     await act(async () => Stream.all[0].send([child('one', 'completed'), child('two'), child('queued', 'dispatched')], 2))
     expect(document.querySelectorAll('.dc-agent-space-podium')).toHaveLength(2)
     expect(seat.style.getPropertyValue('--dc-agent-space-podium-width')).toBe('150px')
@@ -92,6 +92,44 @@ it('sizes only the floating card, shows actual working identities and shrinks on
     expect(content.hasAttribute('data-dc-agent-space-expanded')).toBe(false)
     expect(content.style.getPropertyValue('--dc-agent-space-podium-width')).toBe('')
     expect(Stream.all[0].close).toHaveBeenCalled()
+  } finally { await act(async () => root.unmount()); client.close() }
+})
+it('keeps four executor instances as one office figure and one podium, with continuous video while any sibling works', async () => {
+  const source = observable<any>({ entries: [start()], change: { kind: 'replace' }, revision: 1 })
+  const session = observable<any>({ sessionId: 'session', running: true, pendingSubmissions: [], openState: 'open' })
+  const binding = { session, eventSource: source }
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ tasks: [], revision: 0, total: 0, active: 0, next: null })))
+  const bank = resources(), client = new CollaborationClient({ url: (path) => `/api/${path}` })
+  const content = document.body.appendChild(document.createElement('div')); content.dataset.conversationContent = ''
+  const root = createRoot(content.appendChild(document.createElement('div')))
+  const toggle = () => (content.querySelector('.dc-agent-space-toggle') as HTMLButtonElement).click()
+  const executor = () => content.querySelector('[data-role="executor"]')!
+  const tasks = ['one', 'two', 'three', 'four'].map((id) => child(id, 'running', 'executor'))
+  try {
+    await act(async () => root.render(<AgentSpaceLauncher client={client} sessionId="session" resources={bank}
+      getBinding={() => binding as any} />))
+    await act(async () => Stream.all[0].send([...tasks, child('artist', 'running', 'assets')]))
+    expect(content.querySelectorAll('.dc-agent-space-office [data-role="executor"]')).toHaveLength(1)
+    expect(content.querySelectorAll('.dc-agent-space-office [data-role]')).toHaveLength(original.roles.length)
+    const officeVideo = executor().querySelector('video'), identity = executor().getAttribute('data-actor-id')
+    const partial = tasks.map((entry, index) => ({ ...entry, state: index === 0 ? 'completed' : index === 1 ? 'blocked' : 'running' }))
+    await act(async () => Stream.all[0].send([...partial, child('artist', 'running', 'assets')], 2))
+    expect(executor().querySelector('video')).toBe(officeVideo)
+    expect(executor().getAttribute('data-actor-id')).toBe(identity)
+    expect(executor().getAttribute('data-action')).toBe('work')
+    await act(async () => toggle())
+    expect(content.querySelectorAll('.dc-agent-space-podium [data-role="executor"]')).toHaveLength(1)
+    expect(content.querySelectorAll('.dc-agent-space-podium')).toHaveLength(3)
+    const podiumVideo = executor().querySelector('video')
+    await act(async () => Stream.all[0].send([...partial.map((entry) => entry.id === 'three' ? { ...entry, state: 'completed' } : entry),
+      child('artist', 'running', 'assets')], 3))
+    expect(executor().querySelector('video')).toBe(podiumVideo)
+    expect(executor().getAttribute('data-action')).toBe('work-front')
+    await act(async () => Stream.all[0].send([...tasks.map((entry) => ({ ...entry, state: 'completed' })),
+      child('artist', 'running', 'assets')], 4))
+    expect(content.querySelector('[data-role="executor"]')).toBeNull()
+    expect(content.querySelectorAll('.dc-agent-space-podium')).toHaveLength(2)
+    expect(tasks.every((entry) => entry.state === 'running')).toBe(true)
   } finally { await act(async () => root.unmount()); client.close() }
 })
 it('floats over unchanged native conversation layout in expanded and compact states', async () => {
@@ -239,8 +277,8 @@ it('retains a non-working main podium on an unknown status drop and resumes actu
     expect((content.querySelector('.dc-agent-space-seat') as HTMLElement).style.getPropertyValue('--dc-agent-space-podium-width')).toBe('74px')
     await act(async () => session.set({ ...session.getSnapshot(), running: true }))
     expect(content.querySelector('.dc-agent-space-card')?.getAttribute('data-expanded')).toBe('false')
-    expect([...content.querySelectorAll('.dc-agent-space-podium [data-agent-id]')].map((node) => node.getAttribute('data-agent-id')))
-      .toEqual(['session', 'one'])
+    expect([...content.querySelectorAll('.dc-agent-space-podium [data-role]')].map((node) => node.getAttribute('data-role')))
+      .toEqual(['main', 'writer'])
     expect(content.querySelector('[data-agent-id="session"]')?.getAttribute('data-action')).toBe('work-front')
     expect((content.querySelector('.dc-agent-space-seat') as HTMLElement).style.getPropertyValue('--dc-agent-space-podium-width')).toBe('150px')
     expect(task.state).toBe('running')

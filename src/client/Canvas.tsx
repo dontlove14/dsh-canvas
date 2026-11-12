@@ -79,6 +79,7 @@ import { blankCanvasPoint } from './useNodeCreationMenu'
 import { AgentControlBar } from './AgentControl'
 import type { CanvasPresentationClient } from './presentation'
 import { useCanvasPresentation } from './useCanvasPresentation'
+import { AgentCursorLayer } from './AgentCursorLayer'
 import { NodeInspection, PresentedTaskEditor } from './NodeInspection'
 import { AgentNodeHighlight } from './AgentNodeHighlight'
 
@@ -618,6 +619,7 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
         ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': '放大', 'controls.zoomOut.ariaLabel': '缩小', 'controls.fitView.ariaLabel': '适应画布' }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="var(--dc-grid)" />
+        <AgentCursorLayer presentation={presentation} sessionId={sessionId} workspace={workspace} control={state.agentControl} active={active} container={container} />
         {agentPresentation.following && active && pageVisible && <svg className="dc-agent-watermark" aria-hidden="true" focusable="false">
           <defs><pattern id={`dc-agent-watermark-${viewId}`} width="330" height="180" patternUnits="userSpaceOnUse">
             <text x="165" y="90" textAnchor="middle" dominantBaseline="middle" transform="rotate(-24 165 90)">Agent 操作中</text>

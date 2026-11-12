@@ -60,7 +60,7 @@ ADR-0087 和 ADR-0092 的标题、正文及索引统一采用 Agent 空间；其
 
 ### 固定办公室动作方案的独立验证
 
-2026-11-11 按用户要求先在[全角色动作 Demo](../../Agent%20空间-透明循环验证/Agent%20空间-透明循环验证.html)验证统一固定办公室、角色透明动作视频和可选前景家具遮挡，再迭代视觉效果。后处理 WebM、PNG、场景 SVG 与来源 / 脚底 / 循环参数清单统一存于 [`src/client/assets/agent_team/motions`](../../src/client/assets/agent_team/motions/README.md)；原始角色 GLB、设定图和存量画布成果身份保留。
+2026-11-11 按用户要求先在全角色动作 Demo（历史附件 `Agent 空间-透明循环验证/Agent 空间-透明循环验证.html`，当前仓库未保留可访问文件）验证统一固定办公室、角色透明动作视频和可选前景家具遮挡，再迭代视觉效果。现存后处理 WebM、PNG、场景 SVG 与来源 / 脚底 / 循环参数清单统一存于 [`src/client/assets/agent_team/motions`](../../src/client/assets/agent_team/motions/README.md)；原始角色 GLB、设定图和存量画布成果身份保留。
 
 该 Demo 包含 8 位角色、26 条动作和派发、专业间流转、并行、排队、失败重试、取消、主级接续 / 用户认可等模拟情景。只有主级具备真实左右行走视频；专业间交接使用原地手势和资料标记，不补造专业角色行走或转向。
 

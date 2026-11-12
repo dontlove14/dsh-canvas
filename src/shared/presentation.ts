@@ -33,6 +33,19 @@ export interface PresentationState {
   intent: PresentationIntent | null
   /** Live native Agent driver state; never stored in the presentation sidecar. */
   running?: boolean
+  cursors?: CursorState
+}
+export const CursorActivitySchema = PresentationIdentitySchema.extend({
+  childId: z.string().min(1).max(200), taskId: z.string().uuid(), role: z.literal('executor'),
+  operationId: z.string().uuid(), sequence: z.number().int().nonnegative(),
+  action: z.enum(['create', 'update', 'connect', 'generate', 'import']),
+  phase: z.enum(['started', 'committed', 'failed', 'ended']),
+  point: Point, from: Point.optional(), text: z.boolean().default(false),
+  nodeIds: z.array(z.string()).max(100), graphRevision: z.number().int().nonnegative(),
+}).strict()
+export type CursorActivity = z.infer<typeof CursorActivitySchema>
+export interface CursorState {
+  streamId: string; sequence: number; floor?: number; active: CursorActivity[]; events: CursorActivity[]
 }
 export interface PresentationResult { id: string; status: PresentationAck['status']; reason?: string }
 export const AutoPlacementSchema = z.object({

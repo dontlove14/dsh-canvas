@@ -2,6 +2,7 @@ import type { CanvasApi } from './api'
 import { PresentationIntentSchema, type PresentationIntent, type PresentationState } from '../shared/presentation'
 import type { SessionFace, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import { isGenerationHandoff, type CanvasControl } from '../shared/agent'
+import { ExecutorCursors } from './executorCursors'
 
 type ConversationSnapshot = Pick<SessionSnapshot, 'sessionId' | 'running' | 'pendingSubmissions' | 'removed' | 'openState' | 'promptError'>
 export interface CanvasConversation {
@@ -23,6 +24,7 @@ export interface CanvasViewSeat {
 }
 /** Plugin-root observer; neither the model picker nor a canvas tab owns navigation. */
 export class CanvasPresentationClient {
+  readonly cursors = new ExecutorCursors()
   private intent: PresentationIntent | null = null
   private running = false
   private listeners = new Set<() => void>()
@@ -144,8 +146,9 @@ export class CanvasPresentationClient {
     if ((starting || (snapshot?.running && !previous?.running)) && this.intent && this.activeReply() && !this.following() && this.automatic.has(this.key(this.intent))) this.scheduleIdle()
     return true
   }
-  receive(state: PresentationState) {
+  receive(state: PresentationState, baseline = false) {
     if (this.disposed) return
+    this.cursors.receive(state.cursors, baseline)
     const intent = state.intent ? PresentationIntentSchema.parse(state.intent) : null
     if (intent && this.intent && intent.sessionId === this.intent.sessionId && intent.createdAt < this.intent.createdAt) return
     const running = !!intent && (this.conversation?.sessionId === intent.sessionId
@@ -237,7 +240,7 @@ export class CanvasPresentationClient {
       else open(intent.canvasId)
     } catch { /* Slow mount or an unsaved draft remains pending; never mark it opened. */ }
   }
-  clear() { this.disposed = true; this.activityVersion++; this.stopIdle(); this.stopAdmission(); this.interactions.clear(); this.manualSeats.clear(); this.conversation = null; this.pendingReply = false; this.intent = null; this.running = false; this.notify(); this.listeners.clear(); this.seats.clear(); this.viewsChanged() }
+  clear() { this.cursors.reset(); this.disposed = true; this.activityVersion++; this.stopIdle(); this.stopAdmission(); this.interactions.clear(); this.manualSeats.clear(); this.conversation = null; this.pendingReply = false; this.intent = null; this.running = false; this.notify(); this.listeners.clear(); this.seats.clear(); this.viewsChanged() }
 }
 
 export function installCanvasPresentation(api: CanvasApi, client: CanvasPresentationClient, window: {
@@ -297,9 +300,11 @@ export function installCanvasPresentation(api: CanvasApi, client: CanvasPresenta
       if (next && typeof EventSource !== 'undefined') {
         const captured = generation
         stream = new EventSource(api.url('agent-presentation-events', { sessionId: next }))
+        let baseline = true
+        stream.onopen = () => { baseline = true }
         stream.onmessage = (event) => {
           if (!alive || captured !== generation || window.session() !== next) return
-          try { client.receive(JSON.parse(event.data)); void sync() } catch {}
+          try { client.receive(JSON.parse(event.data), baseline); baseline = false; void sync() } catch {}
         }
       }
     }
@@ -312,7 +317,7 @@ export function installCanvasPresentation(api: CanvasApi, client: CanvasPresenta
       fetching = true
       const baseline = client.getSnapshot()
       void api.presentation(next).then((state) => {
-        if (alive && captured === generation && window.session() === next && (state.intent || baseline === client.getSnapshot())) client.receive(state)
+        if (alive && captured === generation && window.session() === next && (state.intent || baseline === client.getSnapshot())) client.receive(state, true)
       }).catch(() => {}).finally(() => { fetching = false })
     }
     await client.navigate(next, (canvasId) => window.open(canvasId), Date.now(), () => alive && captured === generation && !document.hidden && window.session() === next)

@@ -1,0 +1,10 @@
+.dc-executor-cursor-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1005; }
+.dc-executor-cursor { position: absolute; left: 0; top: 0; pointer-events: none; }
+.dc-executor-cursor-size { transform-origin: 0 0; color: var(--dc-accent); }
+.dc-executor-cursor[data-instance="2"] .dc-executor-cursor-size { color: color-mix(in srgb, var(--dc-accent) 55%, #1ca8b8); }
+.dc-executor-cursor[data-instance="1"] .dc-executor-cursor-size { color: color-mix(in srgb, var(--dc-accent) 55%, #c78a27); }
+.dc-executor-cursor[data-instance="3"] .dc-executor-cursor-size { color: color-mix(in srgb, var(--dc-accent) 55%, #c858a9); }
+.dc-executor-cursor-glyph { width: 13px; height: 15px; transform-origin: 0 1px; filter: drop-shadow(0 1px 1px rgb(0 0 0 / .18)); }
+.dc-executor-cursor-glyph svg { fill: currentColor; }
+.dc-executor-cursor-label { position: absolute; left: 10px; top: 14px; white-space: nowrap; padding: 3px 7px; border-radius: 6px; background: var(--dc-surface); color: var(--dc-text); font: 500 11px/1.4 system-ui, sans-serif; box-shadow: 0 2px 6px rgb(0 0 0 / .15); border-left: 3px solid currentColor; }
+.dc-executor-cursor[data-phase="failed"] .dc-executor-cursor-size { color: var(--dc-danger, #d84c56); }

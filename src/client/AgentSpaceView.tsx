@@ -68,7 +68,7 @@ function ActorSurface({ actor, pose, resources, front, paused }: {
   useLayoutEffect(() => {
     const element = frame.current, prepared = resources.video(action.video)
     if (!element || !prepared) return
-    // Concurrent sessions of the same role have distinct surfaces over one cached Blob.
+    // Distinct conversation cards share cached Blobs, with one stable surface per role.
     const video = prepared.parentElement ? prepared.cloneNode() as HTMLVideoElement : prepared
     videoRef.current = video; video.muted = true; video.playsInline = true
     video.className = 'dc-agent-space-video'; video.loop = action.loop
@@ -102,7 +102,7 @@ function ActorSurface({ actor, pose, resources, front, paused }: {
     if (video.readyState >= 2 && Math.abs(video.currentTime - target) > .18) video.currentTime = target
   }, [pose.time, pose.held, action.duration, action.loop])
   return <div ref={frame} className="dc-agent-space-actor" style={style as CSSProperties} aria-label={role.name}
-    data-agent-id={actor.id.startsWith('idle:') ? undefined : actor.id} data-working={actor.working} data-role={actor.role}
+    data-agent-id={actor.role === 'main' ? actor.id : undefined} data-actor-id={actor.id} data-working={actor.working} data-role={actor.role}
     data-action={action.action} data-front-substitute={front && !action.action.endsWith('-front') ? '' : undefined}>
     <img src={resources.url(action.poster)} alt="" draggable={false} />
   </div>

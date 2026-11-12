@@ -40,14 +40,55 @@ it('does not interpret a status drop, unrelated completion, history prepend or d
   root.events([event(3, 'turn/end', 1, 'blocked')])
   expect(root.getSnapshot()).toMatchObject({ expanded: true, phase: 'failed' })
 })
-it('uses only actually running identities on podiums, including simultaneous children of the same role', () => {
+it('shows one stable figure per role while keeping actual members and excluding queued, foreign and old activity', () => {
   const root = new AgentSpaceRoot(); root.events([event(1)])
   const tasks = [task('one'), task('two'), task('queued', 'dispatched'), task('done', 'completed'),
     { ...task('foreign'), rootId: 'other' }, { ...task('old'), createdAt: 1 }]
   const actors = spaceActors('root', root.getSnapshot(), tasks, manifest)
-  expect(actors.filter((actor) => actor.working).map((actor) => actor.id)).toEqual(['root', 'one', 'two'])
+  expect(actors).toHaveLength(manifest.roles.length)
+  expect(actors.filter((actor) => actor.working).map((actor) => actor.role)).toEqual(['main', 'writer'])
+  expect(actors.find((actor) => actor.role === 'writer')?.childIds).toEqual(['one', 'two', 'queued', 'done'])
   root.events([event(2, 'turn/end')])
   expect(spaceActors('root', root.getSnapshot(), tasks, manifest).filter((actor) => actor.working)).toEqual([])
+})
+it('keeps a shared executor working until its last running member ends and preserves its display identity', () => {
+  const root = new AgentSpaceRoot(); root.events([event(1)])
+  const own = ['one', 'two', 'three', 'four'].map((id) => task(id, 'running', 'executor'))
+  const actor = (tasks: CollaborationTask[]) => spaceActors('root', root.getSnapshot(), tasks, manifest).find((actor) => actor.role === 'executor')!
+  const first = actor(own)
+  expect(first.childIds).toEqual(['one', 'two', 'three', 'four'])
+  expect(first.working).toBe(true)
+  const partial = own.map((entry, index) => ({ ...entry, state: index === 0 ? 'blocked' : index === 1 ? 'completed' : entry.state } as CollaborationTask))
+  expect(actor(partial)).toMatchObject({ id: first.id, home: first.home, working: true, failed: false })
+  const stopped = partial.map((entry) => entry.state === 'running' ? { ...entry, state: 'completed' as const } : entry)
+  expect(actor(stopped)).toMatchObject({ id: first.id, working: false, failed: true })
+  expect(actor([])).toMatchObject({ id: first.id, working: false, failed: false })
+})
+it('routes each real sibling handoff to the shared role figure without replaying the baseline or completing its working sibling', () => {
+  const root = new AgentSpaceRoot(); root.events([event(1)])
+  const motions = new AgentSpaceMotions(manifest)
+  const baseline = [task('one'), task('two'), task('three')]
+  const observe = (tasks: CollaborationTask[]) => {
+    const actors = spaceActors('root', root.getSnapshot(), tasks, manifest)
+    motions.observe(root.getSnapshot(), tasks, actors); return actors
+  }
+  let actors = observe(baseline)
+  motions.advance(1)
+  expect(motions.pose(actors[0]).action.action).toBe('work')
+  let current = baseline
+  for (const id of ['one', 'two']) {
+    current = current.map((entry) => entry.id === id ? { ...entry, state: 'completed' } : entry)
+    actors = observe(current)
+    for (let step = 0; step < 200 && !motions.paper(); step++) motions.advance(.1)
+    const story = actors.find((actor) => actor.role === 'writer')!
+    expect(motions.pose(story).action.action).toBe('give')
+    expect(story.working).toBe(true)
+    motions.advance(100)
+    expect(motions.pose(story).action.action).toBe('work')
+  }
+  observe([...current, { ...task('foreign'), rootId: 'other' }, { ...task('old'), createdAt: 1 }])
+  motions.advance(.2)
+  expect(motions.pose(actors[0]).action.action).toBe('work')
 })
 it('uses delivered frontal loops for every podium role and preserves all action-specific rates', () => {
   expect(agentSpaceAction(manifest, 'main', 'idle-front').code).toBe('M09')
@@ -101,8 +142,9 @@ it('restores actual running children when the native event window has not loaded
   const root = new AgentSpaceRoot()
   root.observe(snapshot(true), true)
   const tasks = [task('current'), task('old-done', 'completed'), { ...task('foreign'), rootId: 'other' }]
-  expect(spaceActors('root', root.getSnapshot(), tasks, manifest).filter((actor) => actor.working).map((actor) => actor.id))
-    .toEqual(['root', 'current'])
+  const actors = spaceActors('root', root.getSnapshot(), tasks, manifest)
+  expect(actors.filter((actor) => actor.working).map((actor) => actor.role)).toEqual(['main', 'writer'])
+  expect(actors.find((actor) => actor.role === 'writer')?.childIds).toEqual(['current'])
   root.events([event(2, 'turn/end')])
   expect(root.getSnapshot()).toMatchObject({ phase: 'completed', expanded: false, turn: 1 })
 })

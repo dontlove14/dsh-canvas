@@ -130,12 +130,15 @@ if (process.argv[2] === 'record') {
     assert.equal((await routes.get('/api/canvas/v2/agent-reference-resolve').fetch(
       new Request('http://localhost/api/canvas/v2/agent-reference-resolve', { method: 'POST', body: '{}' }))).status, 400)
     const presentationState = routes.get('/api/canvas/v2/agent-presentation')
-    assert.deepEqual(await (await presentationState.fetch(new Request('http://localhost/api/canvas/v2/agent-presentation?sessionId=offline'))).json(), { intent: null })
+    const idlePresentation = await (await presentationState.fetch(new Request('http://localhost/api/canvas/v2/agent-presentation?sessionId=offline'))).json()
+    assert.match(idlePresentation.cursors.streamId, /^[a-f0-9-]{36}$/)
+    assert.deepEqual(idlePresentation, { intent: null,
+      cursors: { streamId: idlePresentation.cursors.streamId, sequence: 0, floor: 1, active: [], events: [] } })
     const presentationStream = await routes.get('/api/canvas/v2/agent-presentation-events').fetch(
       new Request('http://localhost/api/canvas/v2/agent-presentation-events?sessionId=offline'))
     assert.equal(presentationStream.headers.get('content-type'), 'text/event-stream')
     const presentationReader = presentationStream.body.getReader()
-    assert.equal(new TextDecoder().decode((await presentationReader.read()).value), 'data: {"intent":null}\n\n')
+    assert.equal(new TextDecoder().decode((await presentationReader.read()).value), `data: ${JSON.stringify(idlePresentation)}\n\n`)
     await presentationReader.cancel()
     for (const suffix of ['agent-presence', 'agent-view', 'agent-presentation-ack']) {
       const invalid = await routes.get(`/api/canvas/v2/${suffix}`).fetch(new Request(`http://localhost/api/canvas/v2/${suffix}?canvas=${id}`, {

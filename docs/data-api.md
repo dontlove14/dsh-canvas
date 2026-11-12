@@ -1,5 +1,11 @@
 # 数据与 HTTP 接口参考
 
+0.2.142的 `canvas_execute` 增加可选 `executionMode:"auto"|"serial"`，省略按auto且不填入旧参数哈希。两个以上新鲜create、同修订且无本批references.source / placement.anchorNodeId依赖时，自动分成最多配置容量个实际实例，共享已有只读参考允许并行；单项、混合与依赖保持顺序。原字段保持，receipts按原序；自动分组增加`dispatch:{mode:"parallel",tasks:[{taskId,status,value?,reason?}]}`。原批次ID与派生子任务ID分开，旧completed / started先核验而不重派；失败保留成功回执，完成要求所有分支完成及全部实际回执。参数变化复用ID仍409 REQUEST_REUSED，旧started仍409 SPECIALIST_INCOMPLETE。例：`canvas_execute({operationId,task:"准备十个独立镜头",commands:preparedCreates})`；用户要求逐个时加`executionMode:"serial"`。详见[ADR-0102](adr/0102-independent-create-default-dispatch-and-small-cursors.md)。
+
+`canvas_execute_parallel({operationId,tasks,note?})`继续按传入tasks派发，不自动再拆分：tasks为2–16项ExecutionBatch加`dependsOn:UUID[]`（默认空、最多16），任务组JSON≤512000字符，每批≤256000字符且1–100个命令。组、任务及命令operationId分别保持独立；任务ID、跨任务命令ID不得重复，前置ID必须在组内且无环。返回`{completed,tasks:[{taskId,status,value?,reason?}]}`，status为completed/blocked/interrupted；value为原单批实际回执。普通编辑在相关资源不变时由宿主重基当前修订，同组任务沿用主级读取时revision；不修改意图或付费快照。409 AGENT_RESOURCE_CONFLICT，依赖失败分支不启动；未知结果按原批次回执核对，不自动重派。详见[ADR-0101](adr/0101-parallel-canvas-executors-and-observed-cursors.md)。
+
+现有agent-presentation GET/SSE附加`cursors:{streamId,sequence,floor,active,events}`，events最多128项，只含真实executor的sessionId/canvasId/epoch/childId/taskId/operationId/sequence/action/phase/point/from?/text/nodeIds/graphRevision；phase为started/committed/failed/ended。坐标为画布坐标，位置来自实际节点或提交布局，text仅表示文本修改形状，不含正文。首次 / 重连 / 缓冲缺口只呈现active，旧客户端忽略附加字段；结束只移除对应childId。状态不持久、读取不触发工具、无新HTTP路由/DDL/图字段。maxConcurrentAgents配置见[运行指南](operations.md)。
+
 0.2.122的[Fish契约](adr/0091-fish-voice-discovery-cloning-and-chat-auditions.md)：TtsParams新增可选`reference_text`（≤32000字符，无默认字段），原reference_id / speed / volume保持；TtsTaskSnapshot.referenceIds由0份改为0–1份UUID。图保存检查音频类型/一份/ID互斥/实际来源，生成再要求非空参考原文；无需DDL迁移。TTS朗读prompt不含媒体token，references仍真实同次保存，其他生成保留@规则。
 
 | 新只读入口 | 输入与结果 |
@@ -51,7 +57,8 @@
 | creative_progress | 专业；progress最多2000字 | 保存批次进度；不表示完成 |
 | creative_artifact_decide | main；artifactId、approved/rejected、userDecision | 记录用户认可/拒绝；主自检不等于用户认可 |
 | canvas_specialist | main；operationId、role、task、sourceIds/artifactIds/nodeIds/assetIds各最多100 | taskId、实际artifactId、draft/sources/version/status/needsReview/file/baseRevision/stale/artifactOutputIds；已保存成果核验后交接，失败批次不自动重spawn |
-| canvas_execute | main；operationId、task、1–100项{tool,input}、artifactIds、allowTts默认false | completed、逐项实际receipts、revision、taskId；子级自报不作为完成证据 |
+| canvas_execute | main；operationId、task、1–100项{tool,input}、artifactIds、allowTts默认false、executionMode可选auto/serial | completed、原序实际receipts、revision、taskId；独立create默认分组时加dispatch；子级自报不作为完成证据 |
+| canvas_execute_parallel | main；operationId、2–16项ExecutionBatch加dependsOn | 逐任务completed/blocked/interrupted与原批回执；独立实例并行，冲突 / 前置依赖排队 |
 
 最小长文流程：`creative_source_import({path:"原文.txt"})` → `canvas_specialist({operationId,role:"story",task:"先分析第一单元并保留未读进度",sourceIds:[sourceId]})` → `creative_artifact_read({artifactId})` → 用户认可后记录decide。工作区原生@仍由Harness处理，不新增文件候选器。
 
@@ -114,7 +121,7 @@ create / update / generate检查具体模型确认：不可用409 / AGENT_MODEL_
 
 | 路径（`/api/canvas/v2/`） | 输入 / 输出 | 语义 |
 | --- | --- | --- |
-| `GET agent-presentation?sessionId=...` | `{intent:null或{id,sessionId,canvasId,epoch,action,graphRevision,nodeIds,taskId?,createdAt},running?}` | 当前有效控制下最新意图和原生运行状态，无则仅 intent:null；no-store |
+| `GET agent-presentation?sessionId=...` | `{intent:null或{id,sessionId,canvasId,epoch,action,graphRevision,nodeIds,taskId?,createdAt},running?,cursors?}` | 当前有效控制下最新意图、原生运行状态与executor光标；no-store，141字段见本页顶部 |
 | `GET agent-presentation-events?sessionId=...` | text/event-stream，data 为同一状态；2 秒心跳 | 初始与变化发送，重连读取最新状态，不重放旧操作；关闭流随 Host 释放 |
 | `POST agent-presence` | `{sessionId,viewId,visible}` → `{ok:true}` | 前台当前会话报告，5 秒时效 |
 | `POST agent-view?canvas=...` | `{sessionId,canvasId,epoch,viewId,sequence,visible,following,center?,width?,height?,zoom?,sizes?}` → `{ok:true}` | 有序实际容器坐标与节点尺寸；5 秒有效，30 秒清过期 |

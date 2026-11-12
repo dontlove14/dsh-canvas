@@ -42,6 +42,18 @@ export const ExecutionCommandSchema = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('canvas_generate'), input: EXECUTION_SCHEMAS.canvas_generate }).strict(),
 ])
 export type ExecutionCommand = z.infer<typeof ExecutionCommandSchema>
+export const ExecutionBatchSchema = z.object({
+  operationId: IdSchema, task: z.string().trim().min(1).max(24000),
+  commands: z.array(ExecutionCommandSchema).min(1).max(100),
+  executionMode: z.enum(['auto', 'serial']).optional(),
+  allowTts: z.boolean().default(false), artifactIds: z.array(IdSchema).max(100).default([]), ...StepNote,
+}).strict().refine((args) => JSON.stringify(args).length <= 256000, '执行批次过大，请拆分')
+export const ParallelExecutionSchema = z.object({
+  operationId: IdSchema,
+  tasks: z.array(ExecutionBatchSchema.safeExtend({ dependsOn: z.array(IdSchema).max(16).default([]) })).min(2).max(16),
+  ...StepNote,
+}).strict().refine((args) => JSON.stringify(args).length <= 512000, '并行任务组过大，请拆分')
+export type ExecutionBatch = z.infer<typeof ExecutionBatchSchema>
 /** Narration and the sequential CAS revision may change; creative intent may not. */
 export function executionIntent(input: unknown) {
   const value = structuredClone(input) as Record<string, unknown>

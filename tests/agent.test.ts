@@ -616,6 +616,188 @@ describe('Creative project sources and scoped delegation', () => {
     expect(await f.registry.execute({ agent: childAgent!, name: command.tool, arguments: command.input, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })).toMatchObject({ isError: true })
     expect(f.service.store.state(f.canvasId).graph.nodes).toHaveLength(0)
   })
+  it('fans out real scoped executor tools, rebases independent commits and removes only the finished cursor', async () => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const nodeIds = [randomUUID(), randomUUID()]
+    for (const nodeId of nodeIds) expect(await f.call('canvas_create_node', {
+      operationId: nodeId, revision: f.service.store.state(f.canvasId).graphRevision, kind: 'image-generation', title: '初稿', prompt: '',
+    })).toMatchObject({ isError: false })
+    for (const cursor of f.coordinator.presentation.state(f.agent.id).cursors.active) f.coordinator.presentation.endExecutor(cursor.childId)
+    const tasks = nodeIds.map((nodeId, index) => ({ operationId: randomUUID(), task: `改名${index}`, dependsOn: [],
+      commands: [{ tool: 'canvas_update_node', input: { operationId: randomUUID(), revision: 2, nodeId, patch: { title: `成果${index}` } } }] }))
+    let overlap = 0, peak = 0, count = 0, releaseStart!: () => void, ready!: () => void
+    const startGate = new Promise<void>((resolve) => { releaseStart = resolve })
+    const bothWritten = new Promise<void>((resolve) => { ready = resolve })
+    const finishes = tasks.map(() => { let finish!: () => void; const promise = new Promise<void>((resolve) => { finish = resolve }); return { finish, promise } })
+    const childIds: string[] = []
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      const index = childIds.length; childIds.push(spec.childId)
+      const child = await f.child('executor', spec.childId)
+      const result = (async () => {
+        peak = Math.max(peak, ++overlap)
+        if (overlap === 2) releaseStart()
+        await startGate
+        const command = tasks[index].commands[0]
+        const written = await f.registry.execute({ agent: child, name: command.tool, arguments: command.input, callId: ToolCallId(randomUUID()), signal: spec.signal })
+        if (written.isError) throw new Error(JSON.stringify(written))
+        expect(written).toMatchObject({ isError: false })
+        if (++count === 2) ready()
+        await finishes[index].promise
+        overlap--
+        return { stopReason: 'completed', structured: { status: 'completed', summary: '回执已保存' } }
+      })()
+      return { childId: child.id, result, dispose: async () => f.coordinator.unregister(child) }
+    } })
+    const pending = f.rawCall('canvas_execute_parallel', { operationId: randomUUID(), tasks })
+    await Promise.race([bothWritten, pending.then((value) => { throw new Error(`并行任务过早返回：${JSON.stringify(value)}`) })])
+    expect(peak).toBe(2)
+    expect(f.service.store.state(f.canvasId).graphRevision).toBe(4)
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active.filter((cursor) => childIds.includes(cursor.childId))).toHaveLength(2)
+    expect(f.coordinator.presentation.current(f.canvasId)?.nodeIds).toEqual([nodeIds[0]])
+    finishes[0].finish()
+    // Observe the actual finally path, not a timer-based UI assumption.
+    await vi.waitFor(() => expect(f.coordinator.presentation.state(f.agent.id).cursors.active.some((cursor) => cursor.childId === childIds[0])).toBe(false))
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active.some((cursor) => cursor.childId === childIds[1])).toBe(true)
+    finishes[1].finish()
+    expect(await pending).toMatchObject({ isError: false, value: { completed: true, tasks: [{ status: 'completed' }, { status: 'completed' }] } })
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active.filter((cursor) => childIds.includes(cursor.childId))).toHaveLength(0)
+    expect(f.service.store.state(f.canvasId).graph.nodes.map((node) => node.title)).toEqual(['成果0', '成果1'])
+  })
+  it('automatically divides one ten-create call into four real executors, preserves ordered receipts and never respawns replay', async () => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const model = await configureGeneration(f); await chooseGeneration(f, model)
+    const commands: ExecutionCommand[] = Array.from({ length: 10 }, (_, index) => ({
+      tool: 'canvas_create_node', input: { operationId: randomUUID(), revision: 0, kind: 'image-generation', modelId: model.id, title: `节点${index}`, prompt: `已确定提示词${index}` },
+    }))
+    let active = 0, peak = 0, writes = 0, start!: () => void, ready!: () => void
+    const gate = new Promise<void>((resolve) => { start = resolve }), written = new Promise<void>((resolve) => { ready = resolve })
+    const finishes = Array.from({ length: 4 }, () => { let finish!: () => void; const promise = new Promise<void>((resolve) => { finish = resolve }); return { finish, promise } })
+    const childIds: string[] = [], taskIds: string[] = [], actualCommands: ExecutionCommand[] = []
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      const index = childIds.length; childIds.push(spec.childId)
+      const prompt = JSON.parse(spec.request.prompt[0].text)
+      taskIds.push(prompt.binding.taskId); actualCommands.push(...prompt.commands)
+      const child = await f.child('executor', spec.childId)
+      const result = (async () => {
+        peak = Math.max(peak, ++active); if (active === 4) start()
+        await gate
+        const foreign = commands.find((command) => !prompt.commands.some((own: ExecutionCommand) => own.input.operationId === command.input.operationId))!
+        expect(await f.registry.execute({ agent: child, name: foreign.tool, arguments: foreign.input, callId: ToolCallId(randomUUID()), signal: spec.signal })).toMatchObject({ isError: true })
+        for (const command of prompt.commands) {
+          const response = await f.registry.execute({ agent: child, name: command.tool, arguments: command.input, callId: ToolCallId(randomUUID()), signal: spec.signal })
+          if (response.isError) throw new Error(JSON.stringify(response))
+          if (++writes === 10) ready()
+        }
+        await finishes[index].promise; active--
+        return { stopReason: 'completed', structured: { status: 'completed', summary: '实际回执' } }
+      })()
+      return { childId: child.id, result, dispose: async () => f.coordinator.unregister(child) }
+    } })
+    const args = { operationId: randomUUID(), task: '创建10个已确定节点', commands }
+    const pending = f.rawCall('canvas_execute', args)
+    await Promise.race([written, pending.then((value) => { throw new Error(`提前返回：${JSON.stringify(value)}`) })])
+    expect(peak).toBe(4); expect(new Set(taskIds).size).toBe(4); expect(taskIds).not.toContain(args.operationId)
+    expect(actualCommands).toHaveLength(10)
+    expect(new Set(actualCommands.map((command) => command.input.operationId)).size).toBe(10)
+    for (const command of commands) expect(actualCommands).toContainEqual(command)
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active.map((cursor) => cursor.childId).sort()).toEqual([...childIds].sort())
+    const nodes = f.service.store.state(f.canvasId).graph.nodes
+    expect(nodes).toHaveLength(10); expect(new Set(nodes.map((node) => JSON.stringify(node.position))).size).toBe(10)
+    finishes[0].finish()
+    await vi.waitFor(() => expect(f.coordinator.presentation.state(f.agent.id).cursors.active.some((cursor) => cursor.childId === childIds[0])).toBe(false))
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active).toHaveLength(3)
+    finishes.slice(1).forEach((finish) => finish.finish())
+    const response = await pending
+    expect(response).toMatchObject({ isError: false, value: { completed: true, revision: 10, taskId: args.operationId, dispatch: { mode: 'parallel', tasks: taskIds.map((taskId) => ({ taskId, status: 'completed' })) } } })
+    expect((response.value as any).receipts.map((entry: any) => entry.operationId)).toEqual(commands.map((command) => command.input.operationId))
+    expect((response.value as any).receipts.every((entry: any) => entry.receipt !== null)).toBe(true)
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active).toEqual([])
+    expect(await f.rawCall('canvas_execute', args)).toEqual(response)
+    expect(childIds).toHaveLength(4); expect(f.service.store.state(f.canvasId).tasks).toHaveLength(0)
+  })
+  it('honors explicit serial creates and reuses pre-upgrade completed or interrupted batch identities', async () => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    let spawns = 0
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      spawns++; const child = await f.child('executor', spec.childId)
+      return { childId: child.id, result: Promise.resolve({ stopReason: 'completed', structured: { status: 'completed', summary: '未写入' } }), dispose: async () => f.coordinator.unregister(child) }
+    } })
+    const commands: ExecutionCommand[] = [0, 1].map((index) => ({ tool: 'canvas_create_node', input: {
+      operationId: randomUUID(), revision: 0, kind: 'image-generation', title: `节点${index}`, prompt: '',
+    } }))
+    expect(await f.rawCall('canvas_execute', { operationId: randomUUID(), task: '按顺序', executionMode: 'serial', commands })).toMatchObject({ isError: false, value: { completed: false } })
+    expect(spawns).toBe(1)
+    const project = f.coordinator.creative.project(f.agent.id, await realpath(f.dir), f.canvasId, 'Agent test')
+    const args = { operationId: randomUUID(), task: '历史批次', commands, allowTts: false, artifactIds: [] }
+    const key = `${project.id}:execution-batch:${args.operationId}`, oldValue = { completed: false, receipts: [], taskId: args.operationId }
+    f.coordinator.ledger.remember(key, args, oldValue)
+    expect(await f.rawCall('canvas_execute', args)).toMatchObject({ isError: false, value: oldValue })
+    const interrupted = { ...args, operationId: randomUUID() }
+    f.coordinator.ledger.remember(`${project.id}:execution-batch:${interrupted.operationId}:started`, interrupted, { started: true })
+    expect(await f.rawCall('canvas_execute', interrupted)).toMatchObject({ isError: true })
+    expect(spawns).toBe(1)
+  })
+  it('retains successful creates when an automatic sibling fails and replays without new executors', async () => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const commands: ExecutionCommand[] = [0, 1].map((index) => ({ tool: 'canvas_create_node', input: {
+      operationId: randomUUID(), revision: 0, kind: 'image-generation', title: `节点${index}`, prompt: '',
+    } }))
+    let spawns = 0
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      const index = spawns++, child = await f.child('executor', spec.childId)
+      const result = (async () => {
+        if (index === 0) throw new Error('模型调用失败')
+        const command = JSON.parse(spec.request.prompt[0].text).commands[0]
+        expect(await f.registry.execute({ agent: child, name: command.tool, arguments: command.input, callId: ToolCallId(randomUUID()), signal: spec.signal })).toMatchObject({ isError: false })
+        return { stopReason: 'completed', structured: { status: 'completed', summary: '已保存' } }
+      })()
+      return { childId: child.id, result, dispose: async () => f.coordinator.unregister(child) }
+    } })
+    const args = { operationId: randomUUID(), task: '两个独立节点', commands }
+    const response = await f.rawCall('canvas_execute', args)
+    expect(response).toMatchObject({ isError: false, value: { completed: false, receipts: [{ receipt: null }, { operationId: commands[1].input.operationId }], dispatch: { tasks: [{ status: 'blocked' }, { status: 'completed' }] } } })
+    expect(f.service.store.state(f.canvasId).graph.nodes.map((node) => node.id)).toEqual([commands[1].input.operationId])
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active).toEqual([])
+    expect(await f.rawCall('canvas_execute', args)).toEqual(response); expect(spawns).toBe(2)
+  })
+  it.each([false, true])('queues same-node executor tasks with dependency=%s and accepts the original group revision', async (dependent) => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const nodeId = randomUUID()
+    expect(await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: 'image-generation', title: '初稿', prompt: '' })).toMatchObject({ isError: false })
+    for (const cursor of f.coordinator.presentation.state(f.agent.id).cursors.active) f.coordinator.presentation.endExecutor(cursor.childId)
+    const firstId = randomUUID()
+    const tasks = [0, 1].map((index) => ({ operationId: index === 0 ? firstId : randomUUID(), task: `改名${index}`,
+      dependsOn: dependent && index === 1 ? [firstId] : [],
+      commands: [{ tool: 'canvas_update_node', input: { operationId: randomUUID(), revision: 1, nodeId, patch: { title: `成果${index}` } } }] }))
+    let ready!: () => void, finish!: () => void, active = 0, peak = 0
+    const written = new Promise<void>((resolve) => { ready = resolve })
+    const gate = new Promise<void>((resolve) => { finish = resolve })
+    const childIds: string[] = []
+    Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
+      const index = childIds.length; childIds.push(spec.childId)
+      const child = await f.child('executor', spec.childId)
+      const result = (async () => {
+        peak = Math.max(peak, ++active)
+        const command = tasks[index].commands[0]
+        const response = await f.registry.execute({ agent: child, name: command.tool, arguments: command.input, callId: ToolCallId(randomUUID()), signal: spec.signal })
+        if (response.isError) throw new Error(JSON.stringify(response))
+        if (index === 0) { ready(); await gate }
+        active--
+        return { stopReason: 'completed', structured: { status: 'completed', summary: '回执已保存' } }
+      })()
+      return { childId: child.id, result, dispose: async () => f.coordinator.unregister(child) }
+    } })
+    const pending = f.rawCall('canvas_execute_parallel', { operationId: randomUUID(), tasks })
+    await Promise.race([written, pending.then((value) => { throw new Error(JSON.stringify(value)) })])
+    expect(childIds).toHaveLength(1)
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active.map((cursor) => cursor.childId)).toEqual(childIds)
+    finish()
+    expect(await pending).toMatchObject({ isError: false, value: { completed: true, tasks: [{ status: 'completed' }, { status: 'completed' }] } })
+    expect(peak).toBe(1)
+    expect(f.service.store.state(f.canvasId).graphRevision).toBe(3)
+    expect(f.service.store.state(f.canvasId).graph.nodes[0].title).toBe('成果1')
+    expect(f.coordinator.presentation.state(f.agent.id).cursors.active).toEqual([])
+  })
   it('retains explicit approval on old artifacts and marks dependents for review after source/spec revisions', async () => {
     const f = await fixture(), project = f.coordinator.creative.project(f.agent.id, await realpath(f.dir), f.canvasId, '通用制作')
     const source = await f.coordinator.creative.import(project.id, 'workspace:brief.md', 'brief.md', Buffer.from('第一版原文'), () => {})
@@ -974,7 +1156,7 @@ describe('Manual image and video generation handoff', () => {
     expect(f.agent.cancel).not.toHaveBeenCalled()
     expect(child.cancel).toHaveBeenCalledOnce()
     expect(f.service.store.state(f.canvasId).graph).toEqual(graph)
-    expect(f.coordinator.presentation.state(f.agent.id)).toEqual({ intent: null })
+    expect(f.coordinator.presentation.state(f.agent.id)).toMatchObject({ intent: null, cursors: { active: [] } })
     expect(f.service.store.state(f.canvasId).tasks).toHaveLength(0)
     expect(generated).not.toHaveBeenCalled()
     expect(await f.call('canvas_inspect', {})).toMatchObject({ isError: false, value: { control: { mode: 'manual' } } })
@@ -1728,19 +1910,22 @@ describe('Canvas Agent permissions and durable operations', () => {
     f.coordinator.ledger.remember(`${interrupted}:started`, args, { started: true })
     await expect(f.coordinator.specialist(f.agent, interrupted, args, run)).rejects.toMatchObject({ code: 'SPECIALIST_INCOMPLETE' })
   })
-  it('admits only two professional runs and retains receipts before accepting new work', async () => {
+  it('shares four model slots and queues excess runs without losing receipts', async () => {
     const f = await fixture()
     let release!: () => void, started!: () => void
     const waiting = new Promise<void>((resolve) => { release = resolve })
     const active = new Promise<void>((resolve) => { started = resolve })
     let count = 0
-    const run = async () => { if (++count === 2) started(); await waiting; return {} }
+    const run = async () => { if (++count === 4) started(); await waiting; return {} }
     const first = f.coordinator.specialist(f.agent, `${f.canvasId}:specialist:${randomUUID()}`, {}, run)
     const second = f.coordinator.specialist(f.agent, `${f.canvasId}:specialist:${randomUUID()}`, {}, run)
+    const third = f.coordinator.specialist(f.agent, `${f.canvasId}:specialist:${randomUUID()}`, {}, run)
+    const fourth = f.coordinator.specialist(f.agent, `${f.canvasId}:specialist:${randomUUID()}`, {}, run)
     await active
-    await expect(f.coordinator.specialist(f.agent, `${f.canvasId}:specialist:${randomUUID()}`, {}, run)).rejects.toMatchObject({ code: 'SPECIALIST_CAPACITY' })
-    release(); await Promise.all([first, second])
-    expect(count).toBe(2)
+    const fifth = f.coordinator.specialist(f.agent, `${f.canvasId}:specialist:${randomUUID()}`, {}, run)
+    expect(count).toBe(4)
+    release(); await Promise.all([first, second, third, fourth, fifth])
+    expect(count).toBe(5)
   })
   it('isolates and replays a generated request identity without calling the service twice', async () => {
     const f = await fixture(), nodeId = randomUUID()

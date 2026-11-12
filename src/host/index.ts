@@ -17,6 +17,7 @@ export const inject = ['connection', 'credentials', 'agents', 'llm', 'sessionCon
 export const Config = z.object({
   dataDir: z.string().default(resolve(homedir(), '.dsh-canvas')),
   maxConcurrentTasks: z.number().int().min(1).max(8).default(2),
+  maxConcurrentAgents: z.number().int().min(1).max(4).default(4),
   pollIntervalMs: z.number().int().min(500).max(60000).default(3000),
   requestTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
   imageRequestTimeoutMs: z.number().int().min(1000).max(600000).default(DEFAULT_IMAGE_REQUEST_TIMEOUT_MS),

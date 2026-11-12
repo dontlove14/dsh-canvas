@@ -1,6 +1,6 @@
 {
   "name": "dsh-canvas",
-  "version": "0.2.140",
+  "version": "0.2.143",
   "private": true,
   "description": "Local image, video and FishTTS generation canvas plugin for DeepSeek Harness",
   "license": "SEE LICENSE IN LICENSE",

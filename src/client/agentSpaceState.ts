@@ -78,21 +78,23 @@ export class AgentSpaceRoot {
 }
 
 export interface SpaceActor {
-  id: string; role: string; working: boolean; failed: boolean; home: [number, number]
+  /** Stable display identity; native members remain independent in the collaboration journal. */
+  id: string; childIds: string[]; role: string; working: boolean; failed: boolean; home: [number, number]
 }
 export function spaceActors(rootId: string, state: AgentSpaceRootState, tasks: readonly CollaborationTask[], manifest: AgentSpaceManifest) {
   const current = tasks.filter((task) => task.rootId === rootId && (state.since === -Infinity
     ? ['running', 'dispatched'].includes(task.state) : task.createdAt >= state.since))
-  const root: SpaceActor = { id: rootId, role: 'main', home: [180, 660], working: state.phase === 'running', failed: state.phase === 'failed' }
+  const root: SpaceActor = { id: rootId, childIds: [], role: 'main', home: [180, 660], working: state.phase === 'running', failed: state.phase === 'failed' }
   const actors = [root]
   for (const [index, role] of manifest.roles.filter((role) => role.id !== 'main').entries()) {
     const own = current.filter((task) => agentSpaceRole[task.role] === role.id)
-    for (const [lane, task] of own.entries()) actors.push({
-      id: task.childId, role: role.id, home: [430 + index * 170 + lane * 35, 612 + lane * 35],
-      working: state.phase === 'running' && task.state === 'running',
-      failed: !['completed', 'idle'].includes(state.phase) && task.state === 'blocked',
+    const running = own.some((task) => task.state === 'running')
+    actors.push({
+      id: `role:${rootId}:${role.id}`, childIds: [...new Set(own.map((task) => task.childId))],
+      role: role.id, home: [430 + index * 170, 612],
+      working: state.phase === 'running' && running,
+      failed: !running && !['completed', 'idle'].includes(state.phase) && own.some((task) => task.state === 'blocked'),
     })
-    if (!own.length) actors.push({ id: `idle:${role.id}`, role: role.id, home: [430 + index * 170, 612], working: false, failed: false })
   }
   return actors
 }
@@ -124,7 +126,8 @@ export class AgentSpaceMotions {
     if (this.epoch !== root.epoch || root.phase !== 'running') {
       this.epoch = root.epoch; this.jobs = []; this.current = undefined; this.prior = undefined
     }
-    const current = tasks.filter((task) => actors.some((actor) => actor.id === task.childId) && task.createdAt >= root.since)
+    const current = tasks.filter((task) => task.rootId === actors[0].id &&
+      actors.some((actor) => actor.childIds.includes(task.childId) && agentSpaceRole[task.role] === actor.role) && task.createdAt >= root.since)
     if (root.phase === 'running' && this.prior) for (const task of current) {
       const old = this.prior.get(task.id)
       if (!old && ['running', 'dispatched'].includes(task.state)) this.enqueue(task, actors, false)
@@ -133,7 +136,7 @@ export class AgentSpaceMotions {
     this.prior = new Map(current.map((task) => [task.id, task.state]))
   }
   private enqueue(task: CollaborationTask, actors: SpaceActor[], returning: boolean) {
-    const main = actors[0], child = actors.find((actor) => actor.id === task.childId)
+    const main = actors[0], child = actors.find((actor) => actor.childIds.includes(task.childId) && agentSpaceRole[task.role] === actor.role)
     if (!child) return
     // Do not play an obsolete outward gesture after the actual result has returned.
     this.jobs = this.jobs.filter((job) => job.taskId !== task.id)
@@ -154,7 +157,7 @@ export class AgentSpaceMotions {
     const giveDelay = contactTime - giveTime, receiveDelay = contactTime - receiveTime
     const duration = Math.max(giveDelay + give.duration / agentSpaceRate(this.manifest, give),
       receiveDelay + receive.duration / agentSpaceRate(this.manifest, receive)) + .25
-    this.jobs.push({ taskId: task.id, childId: child.id, steps: [
+    this.jobs.push({ taskId: task.id, childId: task.childId, steps: [
       walk(main.home, contact),
       { duration, contact: contactTime, motions: [
         { id: returning ? child.id : main.id, action: give, from: returning ? child.home : contact, to: returning ? child.home : contact, delay: giveDelay },
