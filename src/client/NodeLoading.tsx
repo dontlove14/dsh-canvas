@@ -11,6 +11,7 @@ type Environment = { theme: 'dark' | 'light'; ink: string; surface?: string; pau
 const useDomEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 export const NodeLoadingContext = createContext<Environment>({ theme: 'dark', ink: '#efedf4', paused: false })
 const NodeMediaContext = createContext<{ loading: boolean; report: (id: string, loading: boolean) => void } | null>(null)
+export const TaskDetailNavigationContext = createContext<((task: Pick<TaskSummary, 'id' | 'workspaceId'>) => void) | null>(null)
 
 /** Media children contribute readiness without changing graph or task data. */
 export function NodeLoadingBoundary({ children }: { children: ReactNode }) {
@@ -91,16 +92,23 @@ export const beamPauseCss = `
 }`
 
 export function NodeLoading({ task, title, mediaLoading = false, compact = false }: {
-  task?: Pick<TaskSummary, 'status' | 'progress'>; title: string; mediaLoading?: boolean; compact?: boolean
+  task?: Pick<TaskSummary, 'status' | 'progress'> & Partial<Pick<TaskSummary, 'id' | 'workspaceId'>>; title: string; mediaLoading?: boolean; compact?: boolean
 }) {
   const media = useContext(NodeMediaContext)
+  const openTask = useContext(TaskDetailNavigationContext)
   if (task && (task.status === 'failed' || task.status === 'unknown' || task.status === 'save_failed')) {
+    const icon = <svg className="dc-node-failure-icon" viewBox="0 0 1024 1024" aria-hidden="true">
+      <path d="M932.829867 441.258667A432.7424 432.7424 0 0 1 938.666667 512c0 235.639467-191.0272 426.666667-426.666667 426.666667S85.333333 747.639467 85.333333 512 276.360533 85.333333 512 85.333333a424.9088 424.9088 0 0 1 270.848 96.9728" fill="#FFFFFF" />
+      <path d="M512 955.733333C267.332267 955.733333 68.266667 756.6848 68.266667 512 68.266667 267.332267 267.332267 68.266667 512 68.266667a444.501333 444.501333 0 0 1 281.7024 100.864 17.066667 17.066667 0 0 1-21.691733 26.368A410.197333 410.197333 0 0 0 512 102.4C286.1568 102.4 102.4 286.1568 102.4 512s183.7568 409.6 409.6 409.6 409.6-183.7568 409.6-409.6a414.037333 414.037333 0 0 0-5.597867-67.9424 17.066667 17.066667 0 1 1 33.655467-5.614933A445.0304 445.0304 0 0 1 955.733333 512c0 244.6848-199.048533 443.733333-443.733333 443.733333z" fill="#F35B5B" />
+      <path d="M343.057067 732.142933a51.165867 51.165867 0 0 1-36.1984-87.3984l337.902933-337.902933a51.165867 51.165867 0 0 1 72.3968 0 51.165867 51.165867 0 0 1 0 72.3968l-337.902933 337.92a51.0976 51.0976 0 0 1-36.1984 14.984533z" fill="#F35B5B" />
+      <path d="M680.942933 732.142933a51.029333 51.029333 0 0 1-36.1984-15.0016L306.8416 379.255467a51.165867 51.165867 0 0 1 0-72.3968 51.165867 51.165867 0 0 1 72.3968 0L717.141333 644.7616a51.165867 51.165867 0 0 1-36.1984 87.381333z" fill="#F35B5B" />
+    </svg>
     return <div className="dc-node-failure" data-task-status={task.status} data-compact={compact ? '' : undefined}>
-      <svg className="dc-node-failure-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-        <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" />
-        <path d="M24 13v13" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-        <circle cx="24" cy="34" r="2.5" fill="currentColor" />
-      </svg>
+      {openTask && task.id && task.workspaceId
+        ? <button type="button" className="dc-node-failure-button nodrag nopan" title="查看失败原因" aria-label={`${title}：查看任务详情`}
+          onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); openTask({ id: task.id!, workspaceId: task.workspaceId! }) }}>{icon}</button>
+        : icon}
       <span className="dc-sr-only" role="status" aria-live="polite" aria-atomic="true" aria-label={`${title}状态`}>{TaskStatusLabels[task.status]}</span>
     </div>
   }

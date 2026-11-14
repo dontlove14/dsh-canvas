@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 import { ensureThinkingOrbsPatch } from './patch-thinking-orbs.mjs'
 import { imgFxSourceDir, verifyImgFxSource } from './img-fx-source.mjs'
 import { buildAgentSpaceAssets } from './agent-space-assets.mjs'
+import { writeAgentSkillIdentity } from './agent-skills.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 process.chdir(root)
@@ -53,7 +54,13 @@ await build({
 await build({
   entryPoints: ['src/host/agent/preset.ts'], outfile: 'lib/agent-preset.js', bundle: true, platform: 'node', format: 'esm',
   target: 'node22', packages: 'external', sourcemap: true,
+  plugins: [{ name: 'packaged-skill-text', setup(builder) {
+    builder.onResolve({ filter: /\.md\?raw$/ }, (args) => ({ path: resolve(args.resolveDir, args.path.slice(0, -4)), namespace: 'skill-text' }))
+    builder.onLoad({ filter: /.*/, namespace: 'skill-text' }, async (args) => ({ contents: await readFile(args.path, 'utf8'), loader: 'text' }))
+  } }],
 })
+await cp('src/host/agent/skills', 'lib/agent-skills', { recursive: true, filter: (path) => !/\.(?:ts|json)$/.test(path) })
+await writeAgentSkillIdentity('lib/agent-skills', JSON.parse(await readFile('package.json', 'utf8')).version)
 // Bundling places Database's import.meta.url in lib/index.js.
 await copyFile('src/host/persistence/worker.mjs', 'lib/worker.mjs')
 await copyFile('src/host/persistence/schema.sql', 'lib/schema.sql')

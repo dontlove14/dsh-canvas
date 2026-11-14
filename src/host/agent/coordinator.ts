@@ -14,22 +14,25 @@ import { AgentLedger } from './ledger'
 import { handoffSummary } from './handoff'
 import { AgentPresentation } from './presentation'
 import { CanvasChatReferences } from './chatReferences'
-import { AgentModelSelection } from './modelSelection'
+import { AgentModelSelection, type PlanningModel } from './modelSelection'
 import { CreativeProjects } from './creative'
 import { AgentCollaboration } from './collaboration'
 import { executionIntent, type ExecutionCommand } from '../../shared/execution'
 import { ExecutionScheduler, executionResources, resourceFingerprint, type Resources } from './executionScheduler'
+import { capabilities, taskSkills } from './capabilities'
+import { AgentVideoSound } from './videoSound'
 
 declare module '@deepseek-ai/cordis' { interface Context { canvasAgent: CanvasAgentCoordinator } }
 const internalPresets = new Set(INTERNAL_CANVAS_PRESETS)
 export interface AgentMember { agent: Agent; role: 'main' | 'executor' | SpecialistRole; rootId: string }
-export interface CreativeBinding { projectId: string; taskId: string; sourceIds: string[]; artifactIds: string[]; nodeIds: string[]; assetIds: string[] }
+export interface CreativeBinding { projectId: string; taskId: string; sourceIds: string[]; artifactIds: string[]; nodeIds: string[]; assetIds: string[]; skillNames?: string[]; planningModels?: PlanningModel[] }
 /** All foreground writes and paid dispatch admissions share one commit queue. */
 export class CanvasAgentCoordinator extends Service {
   readonly ledger: AgentLedger
   readonly presentation: AgentPresentation
   readonly chatReferences: CanvasChatReferences
   readonly generationModels: AgentModelSelection
+  readonly videoSound = new AgentVideoSound()
   readonly creative: CreativeProjects
   readonly collaboration: AgentCollaboration
   private bindings = new Map<string, CreativeBinding>()
@@ -79,6 +82,7 @@ export class CanvasAgentCoordinator extends Service {
     return work
   }
   register(agent: Agent, role: AgentMember['role'], rootId = agent.id) {
+    capabilities(role)
     if (role === 'main' && this.members.get(agent.id)?.agent !== agent &&
       this.ledger.controls().some((control) => control.sessionId === agent.id && control.mode === 'manual')) this.rememberManualInputs(agent)
     this.members.set(agent.id, { agent, role, rootId })
@@ -114,6 +118,7 @@ export class CanvasAgentCoordinator extends Service {
     this.presentation.endExecutor(agent.id)
     this.bindings.delete(agent.id); this.executions.delete(agent.id)
     this.generationModels.clear(agent)
+    this.videoSound.clear(agent)
     this.routes.delete(agent.id)
     this.manualInputs.delete(agent.id)
     this.restrictions.get(agent)?.dispose(); this.restrictions.delete(agent)
@@ -144,8 +149,9 @@ export class CanvasAgentCoordinator extends Service {
     if (!root || this.member(root).role !== 'main') throw new CanvasError('主 Agent 已关闭', 403, 'AGENT_FORBIDDEN')
     return root
   }
-  bind(agent: Agent, binding: CreativeBinding) { this.member(agent); this.bindings.set(agent.id, structuredClone(binding)) }
+  bind(agent: Agent, binding: CreativeBinding) { taskSkills(this.member(agent).role, binding.skillNames); this.bindings.set(agent.id, structuredClone(binding)) }
   prepareChild(id: string, rootId: string, role: AgentMember['role'], binding: CreativeBinding, control?: CanvasControl, commands?: ExecutionCommand[], allowTts = false, inputRevision?: number) {
+    taskSkills(role, binding.skillNames)
     this.prepared.set(id, { rootId, role, binding: structuredClone(binding), control, commands, allowTts, inputRevision })
     return () => { this.prepared.delete(id) }
   }
@@ -153,6 +159,7 @@ export class CanvasAgentCoordinator extends Service {
     this.member(agent)
     const binding = this.bindings.get(agent.id)
     if (!binding) throw new CanvasError('子 Agent 未获得本批次任务授权', 403, 'AGENT_FORBIDDEN')
+    this.generationModels.assertPlan(this.rootAgent(agent), binding.planningModels)
     return structuredClone(binding)
   }
   grantExecution(agent: Agent, control: CanvasControl, commands: ExecutionCommand[], allowTts: boolean, inputRevision?: number) {
@@ -273,6 +280,7 @@ export class CanvasAgentCoordinator extends Service {
     const next: CanvasControl = { ...control, mode: 'manual', epoch: control.epoch + 1,
       updatedAt: Date.now(), reason: GENERATION_HANDOFF_REASON }
     this.ledger.setControl(next)
+    this.videoSound.clear(agent)
     this.rememberManualInputs(agent); this.generationModels.clear(agent); this.revoked.add(agent.id)
     this.ledger.setHandoff(control.canvasId, hash(graph), summary, graph)
     for (const member of this.members.values()) if (member.rootId === agent.id && member.agent !== agent) member.agent.cancel({ kind: 'user' })
@@ -288,7 +296,7 @@ export class CanvasAgentCoordinator extends Service {
     this.executionScheduler.changed()
     if (c.sessionId) {
       const main = this.members.get(c.sessionId)?.agent
-      if (main) { this.rememberManualInputs(main); this.generationModels.clear(main) }
+      if (main) { this.rememberManualInputs(main); this.generationModels.clear(main); this.videoSound.clear(main) }
       this.revoked.add(c.sessionId)
       for (const member of this.members.values()) if (member.rootId === c.sessionId) member.agent.cancel({ kind: 'user' })
       for (const dispose of this.children.get(c.sessionId) ?? []) void dispose().catch(() => {})

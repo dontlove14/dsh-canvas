@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { verifyImgFxSource } from './img-fx-source.mjs'
+import { agentSkillIdentity } from './agent-skills.mjs'
+import { Context } from '@deepseek-ai/cordis'
+import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
+import { SkillRegistry } from '@deepseek-ai/dsh-skill'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 process.chdir(root)
@@ -26,7 +30,11 @@ async function files(directory, optional = false) {
 }
 async function hashes(paths) { return Object.fromEntries(await Promise.all(paths.map(async (path) => [path, digest(await readFile(path))]))) }
 const pkg = JSON.parse(await readFile('package.json', 'utf8'))
+const agentSkills = await agentSkillIdentity('lib/agent-skills', pkg.version)
+assert.deepEqual(agentSkills, JSON.parse(await readFile('lib/agent-skills/manifest.json', 'utf8')), 'Packaged skill identity changed')
+assert.deepEqual(await agentSkillIdentity('src/host/agent/skills', pkg.version), agentSkills, 'Source/packaged skills differ')
 const checkDir = process.env.CANVAS_ARTIFACT_CHECK_DIR ?? join(tmpdir(), `${pkg.name}-artifact-${pkg.version}`)
+const sourceOnly = process.env.CANVAS_ARTIFACT_SOURCE_ONLY === '1'
 await mkdir(checkDir, { recursive: true })
 const lib = await hashes(await files('lib'))
 const clientSource = await readFile('lib/client.js', 'utf8')
@@ -41,6 +49,61 @@ if (process.argv[2] === 'record') {
   console.log(`Recorded ${Object.keys(lib).length} built files`)
 } else {
   assert.deepEqual(lib, JSON.parse(await readFile(join(checkDir, 'lib-first.json'), 'utf8')), 'Build output changed')
+  const skillScope = createScope(new Context(), {}), skillCtx = skillScope.ctx
+  try {
+    new SkillRegistry(skillCtx)
+    const { CanvasSkills } = await import('../lib/agent-preset.js')
+    const agent = { id: 'offline-skills', ctx: skillCtx, session: { snapshotEvents: () => [] } }
+    const familyMethods = { 'canvas-gpt-image-prompt': ['image', 'gpt-image'], 'canvas-banana-image-prompt': ['image', 'banana'],
+      'canvas-seedream-image-prompt': ['image', 'seedream'], 'canvas-seedance-video-prompt': ['video', 'seedance'],
+      'canvas-minimax-video-prompt': ['video', 'minimax'], 'canvas-wan-video-prompt': ['video', 'wan'], 'canvas-kling-video-prompt': ['video', 'kling'] }
+    let planningModels = []
+    const generationModels = { selections: () => Object.fromEntries(['image', 'video'].map((kind) =>
+      [kind, planningModels.find((plan) => plan.kind === kind) ? { modelId: `offline-${kind}` } : null])),
+    pin: (_agent, kind) => planningModels.find((plan) => plan.kind === kind) }
+    const coordinator = { member: () => ({ role: 'shots', rootId: 'offline-root' }), session: () => ({ canvas: null }),
+      rootAgent: () => agent, generationModels,
+      binding: () => ({ projectId: 'offline', taskId: 'offline', sourceIds: [], artifactIds: [], nodeIds: [], assetIds: [], skillNames: ['canvas-director-intent'] }) }
+    const loader = new CanvasSkills(skillCtx, coordinator, 'shots'), signal = new AbortController().signal
+    await loader.required(agent, signal)
+    assert(loader.context(agent).includes('导演意图') && !loader.context(agent).includes('<skill_content name="canvas-shot-sequence-design"'))
+    const resource = await loader.resource(agent, 'canvas-shot-sequence-design', 'references/sequence-template.md', signal)
+    assert(resource.content.includes('镜头序列模板') && !resource.executable)
+    assert.deepEqual((await loader.list(agent, signal)).skills.map((skill) => skill.name).sort(),
+      ['canvas-creative-source-reading', 'canvas-model-aware-references', 'canvas-generation-prompt-craft', 'canvas-saved-artifact-handoff',
+        'canvas-director-intent', 'canvas-shot-sequence-design', 'canvas-shot-composition', 'canvas-video-shot-prompt',
+        'canvas-seedance-video-prompt', 'canvas-minimax-video-prompt', 'canvas-wan-video-prompt', 'canvas-kling-video-prompt'].sort())
+    let checkedReferences = 0
+    const checkedResources = new Set()
+    for (const role of ['main', 'story', 'shots', 'audio', 'review', 'assets', 'voice', 'executor']) {
+      planningModels = []
+      const roleScope = createScope(skillCtx, { role }, { parent: scopeOf(skillCtx) })
+      try {
+        const reader = { id: `offline-${role}`, ctx: roleScope.ctx, session: { snapshotEvents: () => [] } }
+        const bound = { ...coordinator, member: () => ({ role, rootId: 'offline-root' }),
+          binding: () => ({ projectId: 'offline', taskId: role, sourceIds: [], artifactIds: [], nodeIds: [], assetIds: [], planningModels }) }
+        const methods = new CanvasSkills(roleScope.ctx, bound, role)
+        await methods.required(reader, signal)
+        if (role === 'main') assert.equal(methods.context(reader), '', 'Main methods and workbooks must remain task-loaded')
+        const available = await methods.list(reader, signal)
+        for (const skill of available.skills) for (const path of skill.resources) {
+          const family = familyMethods[skill.name]
+          planningModels = family ? [{ kind: family[0], modelId: `offline-${family[0]}`, approvalId: 'offline',
+            fingerprint: skill.name, model: { promptFamily: family[1] } }] : []
+          const actual = await methods.resource(reader, skill.name, path, signal)
+          const expected = agentSkills.skills.find((item) => item.name === skill.name).resources[path]
+          assert.equal(actual.sha256, expected)
+          assert.equal(digest(actual.content), expected)
+          assert.equal(actual.executable, false)
+          assert(!methods.context(reader).includes(actual.content), 'Reference workbooks must not be injected into the body context')
+          checkedReferences++
+          checkedResources.add(`${skill.name}/${path}`)
+        }
+      } finally { await roleScope.dispose() }
+    }
+    assert.equal(checkedReferences, 66, 'All eight roles must load their allowed private, shared and matching model references from the compiled package')
+    assert.equal(checkedResources.size, 32, 'All 32 reviewed resource identities must be verified')
+  } finally { await skillScope.dispose() }
   const dataDir = await mkdtemp(join(checkDir, 'runtime-'))
   const routes = new Map(); const cleanup = []; const records = new Map()
   const agentServices = {
@@ -389,11 +452,14 @@ if (process.argv[2] === 'record') {
     assert.equal(waveform.headers.get('location'), null)
     const original = await routes.get('/api/canvas/v2/media').fetch(new Request(`http://localhost/api/canvas/v2/media?canvas=${id}&id=${audioId}`))
     assert.equal(original.status, 307)
-    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), ...await files('designs', true), 'README.md', 'LICENSE', 'NOTICE.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'vitest.config.ts', 'cordis.patch.yml']
+    const sourcePaths = [...await files('src'), ...await files('scripts'), ...await files('tests'), ...await files('docs'), ...await files('.trae/skills'), ...await files('designs', true), 'README.md', 'LICENSE', 'NOTICE.md', 'AGENTS.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.host.json', 'tsconfig.client.json', 'vitest.config.ts', 'cordis.patch.yml']
     const source = await hashes(sourcePaths)
-    const manifest = { name: pkg.name, version: pkg.version, node: process.version, npm: execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim(), source, sourceHash: digest(JSON.stringify(source)), lib, libHash: digest(JSON.stringify(lib)), reproducible: true, compiledHostSmoke: 'passed', imgFxSource }
-    await writeFile(`${pkg.name}-${pkg.version}.manifest.json`, JSON.stringify(manifest, null, 2))
+    const manifest = { name: pkg.name, version: pkg.version, ...(sourceOnly ? { verificationMode: 'source-only', installed: false } : {}),
+      node: process.version, npm: execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim(), source, sourceHash: digest(JSON.stringify(source)), lib, libHash: digest(JSON.stringify(lib)), reproducible: true, compiledHostSmoke: 'passed', compiledSkillSmoke: 'passed', agentSkills, imgFxSource }
+    const manifestPath = sourceOnly ? join(checkDir, `${pkg.name}-${pkg.version}.source-only.manifest.json`) : `${pkg.name}-${pkg.version}.manifest.json`
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
     console.log(`Reproducible lib ${manifest.libHash}; compiled Host/Worker/schema startup passed`)
+    if (sourceOnly) console.log(`Source-only verification saved to ${manifestPath}; installed release manifest retained`)
   } finally {
     for (const dispose of cleanup.reverse()) await dispose()
     await rm(dataDir, { recursive: true, force: true })

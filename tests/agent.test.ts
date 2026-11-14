@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, scopeTarget, scopeOf } from '@deepseek-ai/dsh-scope'
 import { ToolRuntime, assertObjectJsonSchema, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
+import { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import { UserQuestionService, type AskUserQuestionRequest, type AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { mkdtemp, readFile, stat, rm, writeFile, symlink, readdir, realpath } from 'node:fs/promises'
@@ -15,17 +16,23 @@ import { fakeFactory, initialize } from './support/objectStorage'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { referenceText, referenceSpans, type ChatReference } from '../src/shared/chatReferences'
 import { submittedReferences } from '../src/host/agent/chatReferences'
-import { BUILTIN_MODELS, providerFor } from '../src/shared/modelCatalog'
+import { BUILTIN_MODELS, providerFor, modelPromptFamily } from '../src/shared/modelCatalog'
+import { videoReferenceLimits, videoReferenceDurations } from '../src/shared/video'
+import { planningKinds, MODEL_PROMPT_SKILLS, matchingPromptSkills } from '../src/host/agent/modelPromptSkills'
 import { MOCK_MODELS } from '../src/shared/mockModels'
 import { hash, sql } from '../src/host/persistence/database'
 import { GENERATION_HANDOFF_REASON, isGenerationHandoff } from '../src/shared/agent'
-import { MAIN_PROMPT, METHODS } from '../src/host/agent/methods'
+import { MAIN_PROMPT, specialistPrompt } from '../src/host/agent/methods'
+import { PACKAGED_SKILLS } from '../src/host/agent/skills/manifest'
+import { AGENT_CAPABILITIES } from '../src/host/agent/capabilities'
+import type { AgentRole } from '../src/shared/agent'
 import { AgentLedger } from '../src/host/agent/ledger'
 import { CanvasNodeSchema, NodeKindSchema, defaultTtsParams } from '../src/shared/contracts'
 import { EXECUTION_SCHEMAS, type ExecutionCommand } from '../src/shared/execution'
 import { CreativeProjects, readCreativeSource } from '../src/host/agent/creative'
 import { SpecialistOutput } from '../src/host/agent/delegation'
 import { assetToken, resolvePrompt } from '../src/shared/promptMentions'
+import { taskDiagnosisRequest } from '../src/host/agent/taskDiagnosis'
 
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
@@ -53,6 +60,7 @@ async function fixture(delegate = true) {
   ctx.reflect.provide('attachments', {})
   ctx.reflect.provide('subagents', {})
   const registry = new ToolRuntime(ctx)
+  new SkillRegistry(ctx)
   new UserQuestionService(ctx)
   const coordinator = new CanvasAgentCoordinator(ctx, service)
   service.agentControl = coordinator
@@ -74,7 +82,7 @@ async function fixture(delegate = true) {
   const created = await service.store.catalogCommand({ requestId: randomUUID(), operation: 'canvas-create', name: 'Agent test' })
   if (delegate) await coordinator.delegate(created.id, agent.id, 0)
   const rawCall = (name: string, args: unknown, signal = new AbortController().signal) => registry.execute({ name, arguments: args, callId: ToolCallId(randomUUID()), agent, signal })
-  const child = async (role: 'assets' | 'executor' = 'assets', id = `child-${randomUUID()}`) => {
+  const child = async (role: Exclude<AgentRole, 'main'> = 'assets', id = `child-${randomUUID()}`) => {
     const childPreset = createScope(ctx, {}, { parent: scopeOf(ctx) })
     preset(childPreset.ctx, { role })
     const child = { id, session: { snapshotEvents: () => [] }, cancel: vi.fn(), options: agent.options } as unknown as Agent
@@ -86,7 +94,7 @@ async function fixture(delegate = true) {
     await ctx.serial(scopeTarget(child, child), 'agent/created', { agent: child, source: 'startup' })
     let bound = false
     try { coordinator.binding(child); bound = true } catch {}
-    if (role === 'assets' && !bound) {
+    if (role !== 'executor' && !bound) {
       const project = coordinator.creative.project(agent.id, await realpath(dir), coordinator.session(agent.id).canvas?.canvasId, 'Agent test')
       const taskId = randomUUID()
       coordinator.creative.begin(project.id, taskId, role, {}, 'fixture professional task', [], [])
@@ -122,6 +130,446 @@ async function chooseGeneration(f: Awaited<ReturnType<typeof fixture>>, model: {
   try { expect(await f.call('canvas_select_model', { kind: model.kind, ...(change ? { change: true } : {}) })).toMatchObject({ isError: false, value: { approved: true, selection: { modelId: model.id } } }) }
   finally { dispose() }
 }
+
+describe('Main Agent exact task diagnosis authority', () => {
+  async function failedTask() {
+    const f = await fixture(), model = await configureGeneration(f), nodeId = randomUUID()
+    await chooseGeneration(f, model)
+    await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: 'image-generation', title: '任务', prompt: '不提供给诊断模型的完整提示词', modelId: model.id })
+    vi.spyOn(f.service.runtime, 'wake').mockImplementation(() => {})
+    const task = await f.service.generate(f.canvasId, nodeId, 1, randomUUID())
+    await f.service.store.update(f.canvasId, (state) => {
+      Object.assign(state.tasks.find((item) => item.id === task.id)!, { status: 'failed', error: 'insufficient balance' })
+    }, () => [sql("UPDATE task_details SET phase='failed',failure_stage='submit',failure_code='PROVIDER_ERROR',failure_message='insufficient balance' WHERE task_id=?", [task.id])])
+    await f.service.store.recordProviderExchange(task.id, {
+      step: 'submit', time: 1, url: 'https://provider.test?signature=private', method: 'POST',
+      request: { headers: { authorization: 'Bearer actual-private-key' }, body: JSON.stringify({ prompt: '不提供给诊断模型的完整提示词', image: 'A'.repeat(300000) }), encoding: 'utf8' },
+      response: { status: 402, statusText: '', headers: { 'x-request-id': 'real-ticket' }, body: '{"error":{"message":"insufficient balance"}}', encoding: 'utf8' },
+    })
+    const message = { id: 'diagnosis-user', source: { kind: 'user' }, content: [{ type: 'text', text: `这个任务为什么失败？${task.id}` }] } as any
+    f.events.push({ type: 'user/message', data: message })
+    await f.coordinator.takeover(f.canvasId)
+    return { ...f, task, message }
+  }
+  it('reads a large-record failed task via compact evidence without opening, taking over or generating', async () => {
+    const f = await failedTask(), before = await f.service.store.snapshot(f.canvasId), control = f.coordinator.control(f.canvasId)
+    const generate = vi.spyOn(f.service, 'generate'), presentation = vi.spyOn(f.coordinator.presentation, 'publish')
+    await f.ctx.serial(scopeTarget(f.agent, f.agent), 'agent/pre-step', { agent: f.agent, messages: [f.message], signal: new AbortController().signal }, async () => ({}))
+    expect(f.coordinator.control(f.canvasId)).toEqual(control)
+    const result = await f.rawCall('canvas_task_diagnose', { taskId: f.task.id })
+    expect(result).toMatchObject({ isError: false, value: { readOnly: true, diagnosis: { taskId: f.task.id, category: 'provider', reason: expect.stringContaining('余额') } } })
+    expect(JSON.stringify(result.value)).not.toMatch(/完整提示词|actual-private-key|signature=|A{160}/)
+    expect(f.contexts.find((item) => item.name === 'canvas:skills').text({ agent: f.agent })).toContain('canvas-task-failure-diagnosis')
+    expect(generate).not.toHaveBeenCalled(); expect(presentation).not.toHaveBeenCalled()
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    expect(f.coordinator.control(f.canvasId)).toEqual(control)
+  })
+  it('rejects unspecified tasks, children, forged evidence and former user requests', async () => {
+    const f = await failedTask()
+    expect(await f.rawCall('canvas_task_diagnose', { taskId: randomUUID() })).toMatchObject({ isError: true })
+    const child = await f.child()
+    expect(f.registry.get('canvas_task_diagnose', child)).toBeUndefined()
+    expect(await f.registry.execute({ agent: child, name: 'canvas_task_diagnose', arguments: { taskId: f.task.id }, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })).toMatchObject({ isError: true })
+    f.events.push({ type: 'user/message', data: { id: 'next', source: { kind: 'canvas-agent' }, content: [{ type: 'text', text: f.task.id }] } })
+    expect(taskDiagnosisRequest(f.agent, f.task.id)).toBe('diagnosis-user')
+    f.events.push({ type: 'user/message', data: { id: 'new-user', source: { kind: 'user' }, content: [{ type: 'text', text: '现在先做别的' }] } })
+    expect(await f.rawCall('canvas_task_diagnose', { taskId: f.task.id })).toMatchObject({ isError: true })
+  })
+  it('rejects cancellation and a new message arriving during the read instead of publishing late evidence', async () => {
+    const f = await failedTask(), abort = new AbortController()
+    abort.abort()
+    expect(await f.rawCall('canvas_task_diagnose', { taskId: f.task.id }, abort.signal)).toMatchObject({ isError: true })
+    const read = f.service.store.taskFailureEvidence.bind(f.service.store)
+    vi.spyOn(f.service.store, 'taskFailureEvidence').mockImplementationOnce(async (...args) => {
+      const evidence = await read(...args)
+      f.events.push({ type: 'user/message', data: { id: 'late-user', source: { kind: 'user' }, content: [{ type: 'text', text: '不用查了' }] } })
+      return evidence
+    })
+    expect(await f.rawCall('canvas_task_diagnose', { taskId: f.task.id })).toMatchObject({ isError: true })
+  })
+  it('refuses nonfailed and inaccessible tasks even when the real user names the ID', async () => {
+    const f = await failedTask(), signal = new AbortController().signal
+    await f.service.store.update(f.canvasId, (state) => { state.tasks.find((item) => item.id === f.task.id)!.status = 'completed' })
+    await expect(f.service.store.taskFailureEvidence(f.task.id, signal, () => {})).rejects.toThrow('不是失败')
+    await f.service.store.db.batch([sql('UPDATE canvases SET owner_id=? WHERE id=?', ['another-owner', f.canvasId])])
+    await expect(f.service.store.taskFailureEvidence(f.task.id, signal, () => {})).rejects.toThrow('无法访问')
+  })
+  it.each(['submit', 'save', 'network'] as const)('records real %s exception provenance without confusing transport failures with program bugs', async (stage) => {
+    const f = await failedTask(), runtime = f.service.runtime as any
+    const task = await f.service.generate(f.canvasId, f.task.nodeId, 1, randomUUID())
+    const localError = new TypeError(stage === 'network' ? 'fetch failed' : "Cannot read properties of undefined (reading 'id')")
+    vi.spyOn(runtime.providers, 'prepare').mockResolvedValue([])
+    vi.spyOn(runtime.providers, 'forTask').mockReturnValue({
+      submit: async () => {
+        if (stage !== 'save') throw localError
+        return { status: 'completed', outputs: [{ id: randomUUID(), url: 'https://unused.test/result', filename: 'result.png' }] }
+      },
+      outputStream: async () => { throw localError },
+    })
+    await runtime.scan()
+    await vi.waitFor(() => expect(f.service.store.state(f.canvasId).tasks.find((item) => item.id === task.id)?.status).toBe(stage === 'save' ? 'save_failed' : 'failed'))
+    f.events.push({ type: 'user/message', data: { id: 'actual-runtime-failure', source: { kind: 'user' }, content: [{ type: 'text', text: `诊断失败任务 ${task.id}` }] } })
+    const result = await f.rawCall('canvas_task_diagnose', { taskId: task.id })
+    expect(result).toMatchObject({ isError: false, value: {
+      evidence: { programError: stage !== 'network' },
+      diagnosis: { category: stage === 'network' ? 'unknown' : 'plugin' },
+    } })
+    if (stage === 'save') expect(result.value.diagnosis.reason).toContain('生成已返回结果')
+  })
+})
+describe('Three-layer Agent skills and capabilities', () => {
+  it.each(Object.keys(AGENT_CAPABILITIES) as AgentRole[])('loads only %s methods through the native registry and retains its write boundary', async (role) => {
+    const f = await fixture(), agent = role === 'main' ? f.agent : await f.child(role)
+    if (role === 'executor') {
+      const control = f.coordinator.attached(f.agent), project = f.coordinator.creative.project(f.agent.id, await realpath(f.dir), control.canvasId, 'fixture')
+      f.coordinator.bind(agent, { projectId: project.id, taskId: randomUUID(), sourceIds: [], artifactIds: [], nodeIds: [], assetIds: [] })
+    }
+    const call = (name: string, args: unknown) => f.registry.execute({ agent, name, arguments: args, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })
+    const schemas = f.registry.schemas(agent)
+    for (const schema of schemas) expect(schema.parameters.type, `${role}/${schema.name} model parameters`).toBe('object')
+    expect(schemas.find((schema) => schema.name === 'canvas_skill')?.parameters).toMatchObject({
+      type: 'object', properties: { action: { enum: ['list', 'load'] } }, required: ['action'], additionalProperties: false,
+    })
+    const before = await f.service.store.snapshot(f.canvasId)
+    const list = await call('canvas_skill', { action: 'list' })
+    expect(list).toMatchObject({ isError: false, value: { complete: true } })
+    expect(list.value.skills.map((skill: any) => skill.name).sort()).toEqual([...AGENT_CAPABILITIES[role].skills].sort())
+    expect(list.value.skills.filter((skill: any) => skill.loaded).map((skill: any) => skill.name).sort()).toEqual([...AGENT_CAPABILITIES[role].required].sort())
+    const selected = AGENT_CAPABILITIES[role].skills[0]
+    expect(await call('canvas_skill', { action: 'load', name: selected })).toMatchObject({ isError: false, value: { name: selected, sha256: PACKAGED_SKILLS.get(selected)!.sha256 } })
+    const skillsContext = f.contexts.filter((entry) => entry.name === 'canvas:skills').at(-1).text({ agent })
+    expect(skillsContext).toContain(selected)
+    expect(skillsContext).not.toContain('<skill_content name="canvas-director-intent"')
+    const forbidden = role === 'shots' ? 'canvas-narrative-structure' : 'canvas-director-intent'
+    expect(await call('canvas_skill', { action: 'load', name: forbidden })).toMatchObject({ isError: true })
+    expect(await call('canvas_skill_resource', { name: forbidden, path: '../SKILL.md' })).toMatchObject({ isError: true })
+    expect(await call('bash', {})).toMatchObject({ isError: true })
+    if (role !== 'executor') expect(await call('canvas_create_node', { operationId: randomUUID(), revision: 0, kind: 'image-generation', title: '越权', prompt: '' })).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it('rejects invalid skill actions before reading methods and retains the action-specific input contract', async () => {
+    const f = await fixture(false), get = vi.spyOn(f.ctx.skills, 'get')
+    for (const args of [{ action: 'load' }, { action: 'load', name: '' }, { action: 'load', name: 'x'.repeat(101) },
+      { action: 'list', name: 'canvas-production-orchestration' }, { action: 'list', extra: true }, { action: 'unknown' }])
+      expect(await f.rawCall('canvas_skill', args)).toMatchObject({ isError: true })
+    expect(get).not.toHaveBeenCalled()
+    expect(f.contexts.find((entry) => entry.name === 'canvas:skills').text({ agent: f.agent })).toBe('')
+  })
+  it('mounts all 36 skills once and requires governance for unknown roles and cross-role task choices', async () => {
+    expect(PACKAGED_SKILLS.size).toBe(36)
+    expect(new Set(Object.values(AGENT_CAPABILITIES).flatMap((policy) => policy.skills))).toEqual(new Set(PACKAGED_SKILLS.keys()))
+    const f = await fixture()
+    const spawn = vi.fn(); Object.assign(f.ctx.subagents, { startActivation: spawn })
+    expect(await f.call('canvas_specialist', { operationId: randomUUID(), role: 'story', task: '写故事', skillNames: ['canvas-execution-procedure'] })).toMatchObject({ isError: true })
+    expect(() => f.coordinator.register(f.agent, 'director' as AgentRole)).toThrow('未声明')
+    expect(spawn).not.toHaveBeenCalled()
+  })
+  it.each(['main', 'story', 'shots', 'audio', 'review', 'assets'] as const)('reads every %s reference through scoped tools with the exact packaged text and retains saved graph state', async (role) => {
+    const f = await fixture(), child = role === 'main' ? f.agent : await f.child(role)
+    const context = f.contexts.filter((entry) => entry.name === 'canvas:skills').at(-1)
+    const outsider = role === 'main' ? await f.child('assets') : f.agent
+    const before = await f.service.store.snapshot(f.canvasId)
+    const call = (name: string, args: unknown) => f.registry.execute({ agent: child, name, arguments: args, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })
+    const list = await call('canvas_skill', { action: 'list' })
+    expect(list).toMatchObject({ isError: false })
+    const references = list.value.skills.filter((skill: any) =>
+      !['canvas-creative-source-reading', 'canvas-model-aware-references', 'canvas-generation-prompt-craft', 'canvas-saved-artifact-handoff',
+        ...Object.values(MODEL_PROMPT_SKILLS)].includes(skill.name))
+      .flatMap((skill: any) => skill.resources.map((path: string) => ({ name: skill.name, path })))
+    expect(references).toHaveLength(role === 'main' ? 5 : role === 'shots' ? 4 : 3)
+    expect(list.value.skills.filter((skill: any) => skill.loaded).map((skill: any) => skill.name).sort())
+      .toEqual([...AGENT_CAPABILITIES[role].required].sort())
+    for (const reference of references) {
+      const resource = PACKAGED_SKILLS.get(reference.name)!.resources[reference.path]
+      const text = await readFile(join(process.cwd(), 'src/host/agent/skills', role, reference.name, reference.path), 'utf8')
+      expect(await call('canvas_skill_resource', reference)).toMatchObject({
+        isError: false, value: { ...reference, executable: false, content: text, sha256: resource.sha256 },
+      })
+      expect(resource.content).toBe(text)
+      const methodsContext = context.text({ agent: child })
+      expect(methodsContext).not.toContain(text)
+      expect(await call('canvas_skill_resource', { ...reference, path: '../' + reference.path })).toMatchObject({ isError: true })
+      expect(await f.registry.execute({ agent: outsider, name: 'canvas_skill_resource', arguments: reference,
+        callId: ToolCallId(randomUUID()), signal: new AbortController().signal })).toMatchObject({ isError: true })
+    }
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it.each(Object.keys(AGENT_CAPABILITIES) as AgentRole[])('reads shared workbooks only within %s capability scope without granting source or canvas writes', async (role) => {
+    const f = await fixture(), agent = role === 'main' ? f.agent : await f.child(role)
+    if (role === 'executor') {
+      const control = f.coordinator.attached(f.agent), project = f.coordinator.creative.project(f.agent.id, await realpath(f.dir), control.canvasId, 'fixture')
+      f.coordinator.bind(agent, { projectId: project.id, taskId: randomUUID(), sourceIds: [], artifactIds: [], nodeIds: [], assetIds: [] })
+    }
+    const context = f.contexts.filter((entry) => entry.name === 'canvas:skills').at(-1)
+    const before = await f.service.store.snapshot(f.canvasId)
+    const call = (name: string, args: unknown) => f.registry.execute({ agent, name, arguments: args, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })
+    const schemas = f.registry.schemas(agent)
+    const listed = (await call('canvas_skill', { action: 'list' })).value
+    const shared = ['canvas-creative-source-reading', 'canvas-model-aware-references', 'canvas-generation-prompt-craft', 'canvas-saved-artifact-handoff']
+    const allowed = shared.filter((name) => AGENT_CAPABILITIES[role].skills.includes(name))
+    expect(listed.skills.filter((skill: any) => shared.includes(skill.name)).map((skill: any) => skill.name).sort()).toEqual([...allowed].sort())
+    expect(listed.skills.filter((skill: any) => skill.loaded).map((skill: any) => skill.name).sort()).toEqual([...AGENT_CAPABILITIES[role].required].sort())
+    for (const name of shared) {
+      const skill = PACKAGED_SKILLS.get(name)!
+      expect(Object.keys(skill.resources)).toHaveLength(1)
+      const [path, resource] = Object.entries(skill.resources)[0]
+      const text = await readFile(join(process.cwd(), 'src/host/agent/skills/common', name, path), 'utf8')
+      expect(resource.content).toBe(text)
+      expect(resource.sha256).toBe(createHash('sha256').update(text).digest('hex'))
+      if (allowed.includes(name)) {
+        expect(await call('canvas_skill', { action: 'load', name })).toMatchObject({ isError: false, value: { name, sha256: skill.sha256 } })
+        expect(await call('canvas_skill_resource', { name, path })).toMatchObject({ isError: false, value: { name, path, executable: false, content: text, sha256: resource.sha256 } })
+        expect(context.text({ agent })).toContain(`<skill_content name="${name}"`)
+        expect(context.text({ agent })).not.toContain(text)
+        expect(await call('canvas_skill_resource', { name, path: '../' + path })).toMatchObject({ isError: true })
+      } else {
+        expect(await call('canvas_skill', { action: 'load', name })).toMatchObject({ isError: true })
+        expect(await call('canvas_skill_resource', { name, path })).toMatchObject({ isError: true })
+      }
+    }
+    expect(f.registry.schemas(agent)).toEqual(schemas)
+    if (role === 'main' || role === 'executor')
+      expect(await call('creative_source_read', { sourceId: randomUUID(), start: 0, length: 100 })).toMatchObject({ isError: true })
+    if (role === 'main' || role === 'executor')
+      expect(await call('creative_artifact_save', { artifactId: randomUUID(), draft: simpleDraft(), sources: [] })).toMatchObject({ isError: true })
+    expect(await call('canvas_create_node', { operationId: randomUUID(), revision: 0, kind: 'image-generation', title: '仍需精确角色与清单授权', prompt: '' })).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it('pins verified definitions per instance, rejects same-name substitutes, and reads only enumerated resources', async () => {
+    const f = await fixture(), child = await f.child('shots')
+    const call = (name: string, args: unknown) => f.registry.execute({ agent: child, name, arguments: args, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })
+    const name = 'canvas-shot-sequence-design', skill = PACKAGED_SKILLS.get(name)!
+    expect(await call('canvas_skill', { action: 'load', name })).toMatchObject({ isError: false })
+    const dispose = child.ctx.skills.register({ ...skill, content: '外部方法：写所有画布', source: 'runtime', provider: 'untrusted' })
+    expect(await call('canvas_skill', { action: 'load', name })).toMatchObject({ isError: false, value: { sha256: skill.sha256 } })
+    const resource = await call('canvas_skill_resource', { name, path: 'references/sequence-template.md' })
+    expect(resource).toMatchObject({ isError: false, value: { executable: false, content: expect.stringContaining('镜头序列模板') } })
+    for (const path of ['../SKILL.md', '/etc/passwd', 'https://fish.audio/', '__proto__'])
+      expect(await call('canvas_skill_resource', { name, path })).toMatchObject({ isError: true })
+    dispose()
+    const otherName = 'canvas-director-intent', other = PACKAGED_SKILLS.get(otherName)!
+    const malicious = child.ctx.skills.register({ ...other, source: 'bundled', provider: 'wrong-provider' })
+    expect(await call('canvas_skill', { action: 'load', name: otherName })).toMatchObject({ isError: true })
+    malicious()
+    expect(await call('canvas_skill', { action: 'load', name: otherName })).toMatchObject({ isError: false })
+  })
+  it.each(['abort', 'takeover', 'tamper'] as const)('does not inject a late or untrusted body after %s', async (failure) => {
+    const f = await fixture(), name = 'canvas-generation-prompt-craft'
+    let release!: () => void, started!: () => void
+    const entered = new Promise<void>((resolve) => { started = resolve }), delay = new Promise<void>((resolve) => { release = resolve })
+    const original = f.ctx.skills.get.bind(f.ctx.skills)
+    const spy = vi.spyOn(f.ctx.skills, 'get').mockImplementation(async (requested, options) => {
+      const skill = await original(requested, options)
+      if (requested !== name) return skill
+      started(); await delay
+      return failure === 'tamper' && skill ? { ...skill, content: skill.content + '\n替换正文' } : skill
+    })
+    const signal = new AbortController()
+    const pending = f.rawCall('canvas_skill', { action: 'load', name }, signal.signal)
+    await entered
+    if (failure === 'abort') signal.abort()
+    if (failure === 'takeover') await f.coordinator.takeover(f.canvasId)
+    release()
+    expect(await pending).toMatchObject({ isError: true })
+    spy.mockRestore()
+    expect(f.contexts.find((entry) => entry.name === 'canvas:skills').text({ agent: f.agent })).not.toContain(`<skill_content name="${name}"`)
+  })
+  it('loads selected director methods before a child starts and hands off its saved artifact without re-saving', async () => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    await chooseGeneration(f, await configureGeneration(f, 'video', 'https://api.modellink.online/seedance/api/v3'))
+    const artifactId = randomUUID(), operationId = randomUUID()
+    const spawn = vi.fn(async (spec: any) => {
+      const child = await f.child('shots', spec.childId)
+      const methods = f.contexts.filter((entry) => entry.name === 'canvas:skills').at(-1).text({ agent: child })
+      expect(methods).toContain('canvas-director-intent')
+      expect(methods).not.toContain('<skill_content name="canvas-shot-sequence-design"')
+      const result = (async () => {
+        const saved = await f.registry.execute({ agent: child, name: 'creative_artifact_save', callId: ToolCallId(randomUUID()), signal: spec.signal,
+          arguments: { artifactId, draft: { kind: 'shot-plan', title: '导演意图', content: '跟随角色视点，门后信息最后揭示，钥匙声建立期待', dependencies: [], assetIds: [] } } })
+        expect(saved).toMatchObject({ isError: false })
+        return { stopReason: 'completed', structured: { result: { artifactId, summary: '导演方案已保存' } } }
+      })()
+      return { childId: child.id, result, dispose: async () => f.coordinator.unregister(child) }
+    })
+    Object.assign(f.ctx.subagents, { startActivation: spawn })
+    const args = { operationId, role: 'shots', task: '本批只制定导演意图', skillNames: ['canvas-director-intent'] }
+    const result = await f.call('canvas_specialist', args)
+    expect(result).toMatchObject({ isError: false, value: { artifactId, taskId: operationId, status: 'draft' } })
+    expect(await f.call('canvas_specialist', args)).toMatchObject({ isError: false, value: result.value })
+    expect(spawn).toHaveBeenCalledTimes(1)
+  })
+})
+describe('Model-first creative planning and family prompt methods', () => {
+  it('requires live selections before formal tasks without creating a run or changing the graph', async () => {
+    const f = await fixture(), spawn = vi.fn()
+    Object.assign(f.ctx.subagents, { startActivation: spawn })
+    const before = await f.service.store.snapshot(f.canvasId)
+    for (const task of [
+      { role: 'shots', task: '正式分镜' },
+      { role: 'shots', task: '镜头序列', skillNames: [], modelKinds: [] },
+      { role: 'assets', task: '图片规格', skillNames: ['canvas-asset-generation-spec'] },
+      { role: 'assets', task: '生图提示词', skillNames: ['canvas-generation-prompt-craft'] },
+      { role: 'review', task: '复核模型预算', modelKinds: ['video'] },
+    ]) expect(await f.call('canvas_specialist', { operationId: randomUUID(), ...task })).toMatchObject({ isError: true })
+    expect(spawn).not.toHaveBeenCalled()
+    expect((await f.call('creative_project', {})).value.runs).toEqual([])
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    expect(planningKinds('story')).toEqual([])
+    expect(planningKinds('assets', ['canvas-visual-asset-design'])).toEqual([])
+  })
+  it.each([
+    ['openai-image', 'gpt-image'], ['gemini-image', 'banana'], ['seedream-image', 'seedream'],
+    ['seedance-video', 'seedance'], ['minimax-video', 'minimax'], ['wan-video', 'wan'], ['kling-video', 'kling'],
+  ] as const)('injects %s current capabilities and its matching method before the real specialist starts', async (protocol, family) => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const model = BUILTIN_MODELS.find((model) => model.protocol === protocol)!
+    await f.service.store.saveModel({ ...model, api_key: 'fixture-family-secret' })
+    await chooseGeneration(f, model)
+    const method = MODEL_PROMPT_SKILLS[family], role = model.kind === 'image' ? 'assets' : 'shots'
+    const before = await f.service.store.snapshot(f.canvasId)
+    let childAgent!: Agent
+    const spawn = vi.fn(async (spec: any) => {
+      const request = JSON.parse(spec.request.prompt[0].text), binding = request.binding
+      expect(binding.planningModels).toHaveLength(1)
+      const planned = binding.planningModels[0]
+      expect(planned).toMatchObject({ modelId: model.id, kind: model.kind,
+        model: { promptFamily: family, provider: providerFor(model)!.id } })
+      expect(planned.model.capabilities).toEqual(f.service.store.listModels().find((item) => item.id === model.id)!.capabilities)
+      expect(JSON.stringify(binding)).not.toMatch(/fixture-family-secret|api_key_mask/)
+      if (model.kind === 'video') {
+        expect(planned.model.referenceLimits).toEqual(videoReferenceLimits(planned.model))
+        expect(planned.model.referenceDurations).toEqual(videoReferenceDurations(planned.model))
+      }
+      childAgent = await f.child(role, spec.childId)
+      const loaded = f.contexts.filter((entry) => entry.name === 'canvas:skills').at(-1).text({ agent: childAgent })
+      expect(loaded).toContain(`<skill_content name="${method}"`)
+      for (const other of Object.values(MODEL_PROMPT_SKILLS).filter((name) => name !== method))
+        expect(loaded).not.toContain(`<skill_content name="${other}"`)
+      const inspect = await f.registry.execute({ agent: childAgent, name: 'canvas_inspect', arguments: {},
+        callId: ToolCallId(randomUUID()), signal: spec.signal })
+      expect(inspect).toMatchObject({ isError: false, value: { planningModels: binding.planningModels,
+        modelSelections: { [model.kind]: { modelId: model.id } } } })
+      const resource = await f.registry.execute({ agent: childAgent, name: 'canvas_skill_resource',
+        arguments: { name: method, path: 'references/prompt-workbook.md' }, callId: ToolCallId(randomUUID()), signal: spec.signal })
+      const text = await readFile(join(process.cwd(), 'src/host/agent/skills/models', method, 'references/prompt-workbook.md'), 'utf8')
+      expect(resource).toMatchObject({ isError: false, value: { content: text, executable: false } })
+      expect(f.registry.schemas(childAgent).some((schema) => schema.name === 'canvas_select_model' || schema.name === 'canvas_create_node')).toBe(false)
+      return { childId: childAgent.id, result: Promise.resolve({ stopReason: 'completed', structured: simpleDraft('当前模型方法规格') }),
+        dispose: async () => f.coordinator.unregister(childAgent) }
+    })
+    Object.assign(f.ctx.subagents, { startActivation: spawn })
+    const args = { operationId: randomUUID(), role, task: '按当前模型编写正式规格',
+      ...(role === 'assets' ? { skillNames: ['canvas-asset-generation-spec'] } : {}) }
+    const result = await f.call('canvas_specialist', args)
+    expect(result).toMatchObject({ isError: false, value: { planningModels: [{ modelId: model.id }] } })
+    expect(await f.call('canvas_specialist', args)).toMatchObject({ isError: false, value: result.value })
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+  })
+  it('rejects unrelated family methods before spawning and never guesses a new adapter family', async () => {
+    const f = await fixture(), model = await configureGeneration(f, 'video', 'https://api.modellink.online/seedance/api/v3')
+    await chooseGeneration(f, model)
+    const spawn = vi.fn(); Object.assign(f.ctx.subagents, { startActivation: spawn })
+    expect(await f.call('canvas_specialist', { operationId: randomUUID(), role: 'shots', task: '用错族方法',
+      skillNames: ['canvas-kling-video-prompt'] })).toMatchObject({ isError: true })
+    expect(await f.call('canvas_skill', { action: 'load', name: 'canvas-kling-video-prompt' })).toMatchObject({ isError: true })
+    expect(spawn).not.toHaveBeenCalled()
+    expect(modelPromptFamily({ kind: 'video', protocol: 'future-video' })).toBeNull()
+    expect(modelPromptFamily({ kind: 'image', protocol: 'seedance-video' })).toBeNull()
+    expect(modelPromptFamily({ kind: 'video', protocol: 'seedance-video', name: '新增型号' } as any)).toBe('seedance')
+    const plan = f.coordinator.generationModels.pin(f.agent, 'video')
+    expect(matchingPromptSkills('shots', [{ ...plan, model: { ...plan.model, promptFamily: null } }])).toEqual([])
+    expect(videoReferenceDurations({ protocol: 'future-video', model_id: 'new' }).perVideo).toBeNull()
+  })
+  it.each(['choice', 'capability'] as const)('rejects a stale specialist save and final handoff after a %s change', async (change) => {
+    const f = await fixture(); f.coordinator.setRoute(f.agent, { provider: 'fixture', model: 'vision' })
+    const model = await configureGeneration(f, 'video', 'https://api.modellink.online/seedance/api/v3')
+    await chooseGeneration(f, model)
+    let childAgent!: Agent, finish!: (value: unknown) => void, entered!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const spawn = vi.fn(async (spec: any) => {
+      childAgent = await f.child('shots', spec.childId)
+      const result = new Promise((resolve) => { finish = resolve })
+      entered()
+      return { childId: childAgent.id, result, dispose: async () => f.coordinator.unregister(childAgent) }
+    })
+    Object.assign(f.ctx.subagents, { startActivation: spawn })
+    const operationId = randomUUID(), pending = f.call('canvas_specialist', { operationId, role: 'shots', task: '旧模型分镜' })
+    await started
+    if (change === 'choice') {
+      f.coordinator.generationModels.clear(f.agent)
+      await chooseGeneration(f, model)
+    } else {
+      const current = f.service.store.listModels(), spy = vi.spyOn(f.service.store, 'listModels').mockImplementation(() =>
+        current.map((item) => item.id === model.id ? { ...item, capabilities: { ...item.capabilities, seconds: [3], secondsRange: { min: 3, max: 3 } } } : item))
+      cleanup.push(async () => spy.mockRestore())
+    }
+    const artifactId = randomUUID()
+    expect(await f.registry.execute({ agent: childAgent, name: 'creative_artifact_save',
+      arguments: { artifactId, draft: simpleDraft('过期分镜') }, callId: ToolCallId(randomUUID()), signal: new AbortController().signal })).toMatchObject({ isError: true })
+    finish({ stopReason: 'completed', structured: simpleDraft('迟到分镜') })
+    expect(await pending).toMatchObject({ isError: true })
+    const project = (await f.call('creative_project', {})).value
+    expect(project.runs.find((run: any) => run.id === operationId)).toMatchObject({ state: 'blocked', artifactOutputIds: [] })
+    expect(project.artifacts).toEqual([])
+    expect(f.service.store.state(f.canvasId).graph.nodes).toEqual([])
+  })
+})
+describe('Host-owned native video sound', () => {
+  const params = { size: '720p/16:9', n: 1, seconds: 5, videoMode: 'text' as const }
+  async function readySound() {
+    const f = await fixture(), model = await configureGeneration(f, 'video', 'https://api.modellink.online/seedance/api/v3')
+    await chooseGeneration(f, model); return { ...f, model }
+  }
+  it('keeps sound on when a supplied full parameter object omits audio and rejects model-declared muting', async () => {
+    const f = await readySound(), nodeId = randomUUID()
+    expect(await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: 'video-generation', title: '只有环境声，无固定音色', prompt: '街道行走，有脚步和环境声', modelId: f.model.id, params })).toMatchObject({ isError: false })
+    expect(f.service.store.state(f.canvasId).graph.nodes[0].params).toMatchObject({ generateAudio: true })
+    const before = await f.service.store.snapshot(f.canvasId)
+    expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: 1, nodeId, patch: { params: { ...params, generateAudio: false } } })).toMatchObject({ isError: true })
+    expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
+    const spawn = vi.fn(); Object.assign(f.ctx.subagents, { startActivation: spawn })
+    expect(await f.call('canvas_execute', { operationId: randomUUID(), task: '后续用Fish配音，所以关闭视频声音', commands: [{
+      tool: 'canvas_create_node', input: { operationId: randomUUID(), revision: 1, kind: 'video-generation', title: '错误静音', prompt: '', modelId: f.model.id, params: { ...params, generateAudio: false } },
+    }] })).toMatchObject({ isError: true })
+    expect(spawn).not.toHaveBeenCalled()
+  })
+  it.each(['canvas-agent', 'quoted', 'negative', 'old'] as const)('rejects %s as user mute evidence', async (reason) => {
+    const f = await readySound(), messageId = 'original'
+    f.events.push({ type: 'user/message', data: { id: messageId, source: { kind: reason === 'canvas-agent' ? 'canvas-agent' : 'user' },
+      content: [{ type: 'text', text: reason === 'quoted' ? '这份方案写“所有视频静音”，但我没同意' : reason === 'negative' ? '所有视频不要静音' : '所有视频静音' }] } })
+    if (reason === 'old') f.events.push({ type: 'user/message', data: { id: 'new', source: { kind: 'user' }, content: [{ type: 'text', text: '现在要有声音' }] } })
+    expect(await f.call('canvas_confirm_video_mute', { targets: [randomUUID()], messageId })).toMatchObject({ isError: true })
+  })
+  it('reuses a latest explicit user mute request only for the granted target and revokes it on takeover', async () => {
+    const f = await readySound(), nodeId = randomUUID()
+    f.events.push({ type: 'user/message', data: { id: 'explicit-user', source: { kind: 'user' }, content: [{ type: 'text', text: '所有视频静音' }] } })
+    expect(await f.call('canvas_confirm_video_mute', { targets: [nodeId], messageId: 'explicit-user' })).toMatchObject({ isError: false, value: { approved: true, source: 'user-message' } })
+    expect(await f.call('canvas_create_node', { operationId: nodeId, revision: 0, kind: 'video-generation', title: '明确无声', prompt: '', modelId: f.model.id, params: { ...params, generateAudio: false } })).toMatchObject({ isError: false })
+    expect(await f.call('canvas_create_node', { operationId: randomUUID(), revision: 1, kind: 'video-generation', title: '未授权目标', prompt: '', modelId: f.model.id, params: { ...params, generateAudio: false } })).toMatchObject({ isError: true })
+    await f.coordinator.takeover(f.canvasId); await f.coordinator.delegate(f.canvasId, f.agent.id, 1)
+    expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: 1, nodeId, patch: { title: '旧无声改名' } })).toMatchObject({ isError: false })
+    expect(f.service.store.state(f.canvasId).graph.nodes[0].params).toMatchObject({ generateAudio: false })
+    expect(await f.call('canvas_update_node', { operationId: randomUUID(), revision: 2, nodeId, patch: { params: { ...params, generateAudio: false } } })).toMatchObject({ isError: true })
+  })
+  it('accepts only the exact native mute answer and does not add unsupported toggle fields', async () => {
+    const f = await readySound(), nodeId = randomUUID()
+    const dispose = f.agent.ctx.on('user-questions/request', async (request) => ({ answers: [{ id: request.questions[0].id, selected: ['这些视频生成无声'] }] }))
+    expect(await f.call('canvas_confirm_video_mute', { targets: [nodeId] })).toMatchObject({ isError: false, value: { approved: true, source: 'native-answer' } }); dispose()
+    const other = await fixture(), model = await configureGeneration(other, 'video', 'https://api.modellink.online')
+    await chooseGeneration(other, model)
+    expect(await other.call('canvas_create_node', { operationId: randomUUID(), revision: 0, kind: 'video-generation', title: '原生无开关', prompt: '', modelId: model.id })).toMatchObject({ isError: false })
+    expect(other.service.store.state(other.canvasId).graph.nodes[0].params).not.toHaveProperty('generateAudio')
+  })
+  it('revokes prior mute authority for a new user request within the same canvas epoch', async () => {
+    const f = await readySound(), target = randomUUID(), control = f.coordinator.attached(f.agent)
+    f.events.push({ type: 'user/message', data: { id: 'mute-user', source: { kind: 'user' }, content: [{ type: 'text', text: '所有视频静音' }] } })
+    expect(await f.call('canvas_confirm_video_mute', { targets: [target], messageId: 'mute-user' })).toMatchObject({ isError: false })
+    f.coordinator.videoSound.require(f.agent, control, target)
+    f.events.push({ type: 'user/message', data: { id: 'sound-user', source: { kind: 'user' }, content: [{ type: 'text', text: '现在有声音' }] } })
+    expect(() => f.coordinator.videoSound.require(f.agent, control, target)).toThrow('明确无声要求')
+  })
+})
 describe('Configured generation model choices', () => {
   it.each(BUILTIN_MODELS.filter((model) => model.protocol === 'kling-video'))('requires the exact Kling provider selected through native questions: $api_base', async (model) => {
     const f = await fixture()
@@ -154,7 +602,7 @@ describe('Configured generation model choices', () => {
     expect(result.models[0]).toMatchObject({ id: model.id, modelId: model.id, providerName: 'Model Link', has_api_key: true })
     expect(JSON.stringify(result)).not.toContain('fixture-model-key')
     expect(result.models[0]).not.toHaveProperty('api_key_mask')
-    expect(JSON.parse(f.contexts[0].text({ agent: f.agent })).models).toHaveLength(1)
+    expect(JSON.parse(f.contexts.find((entry) => entry.name === 'canvas:control').text({ agent: f.agent })).models).toHaveLength(1)
   })
   it('excludes missing EP, credentialless, legacy and mock entries even if they appear in the underlying catalogue', async () => {
     const f = await fixture()
@@ -632,12 +1080,15 @@ describe('Creative project sources and scoped delegation', () => {
     const childIds: string[] = []
     Object.assign(f.ctx.subagents, { startActivation: async (spec: any) => {
       const index = childIds.length; childIds.push(spec.childId)
+      const prompt = JSON.parse(spec.request.prompt[0].text)
       const child = await f.child('executor', spec.childId)
       const result = (async () => {
         peak = Math.max(peak, ++overlap)
         if (overlap === 2) releaseStart()
         await startGate
-        const command = tasks[index].commands[0]
+        // Concurrent activation order need not match the original manifest order.
+        const command = prompt.commands[0]
+        expect(tasks.some((task) => task.commands[0].input.operationId === command.input.operationId)).toBe(true)
         const written = await f.registry.execute({ agent: child, name: command.tool, arguments: command.input, callId: ToolCallId(randomUUID()), signal: spec.signal })
         if (written.isError) throw new Error(JSON.stringify(written))
         expect(written).toMatchObject({ isError: false })
@@ -653,7 +1104,9 @@ describe('Creative project sources and scoped delegation', () => {
     expect(peak).toBe(2)
     expect(f.service.store.state(f.canvasId).graphRevision).toBe(4)
     expect(f.coordinator.presentation.state(f.agent.id).cursors.active.filter((cursor) => childIds.includes(cursor.childId))).toHaveLength(2)
-    expect(f.coordinator.presentation.current(f.canvasId)?.nodeIds).toEqual([nodeIds[0]])
+    const currentTargets = f.coordinator.presentation.current(f.canvasId)?.nodeIds
+    expect(currentTargets).toHaveLength(1)
+    expect(nodeIds).toContain(currentTargets![0])
     finishes[0].finish()
     // Observe the actual finally path, not a timer-based UI assumption.
     await vi.waitFor(() => expect(f.coordinator.presentation.state(f.agent.id).cursors.active.some((cursor) => cursor.childId === childIds[0])).toBe(false))
@@ -708,7 +1161,10 @@ describe('Creative project sources and scoped delegation', () => {
     expect(f.coordinator.presentation.state(f.agent.id).cursors.active).toHaveLength(3)
     finishes.slice(1).forEach((finish) => finish.finish())
     const response = await pending
-    expect(response).toMatchObject({ isError: false, value: { completed: true, revision: 10, taskId: args.operationId, dispatch: { mode: 'parallel', tasks: taskIds.map((taskId) => ({ taskId, status: 'completed' })) } } })
+    expect(response).toMatchObject({ isError: false, value: { completed: true, revision: 10, taskId: args.operationId, dispatch: { mode: 'parallel' } } })
+    const dispatched = (response.value as any).dispatch.tasks as Array<{ taskId: string; status: string }>
+    expect(dispatched.map((task) => task.taskId).sort()).toEqual([...taskIds].sort())
+    expect(dispatched.every((task) => task.status === 'completed')).toBe(true)
     expect((response.value as any).receipts.map((entry: any) => entry.operationId)).toEqual(commands.map((command) => command.input.operationId))
     expect((response.value as any).receipts.every((entry: any) => entry.receipt !== null)).toBe(true)
     expect(f.coordinator.presentation.state(f.agent.id).cursors.active).toEqual([])
@@ -1057,7 +1513,7 @@ describe('Agent reference generation and prompt mentions', () => {
     const f = await ready(['image', 'image']), nodeId = randomUUID()
     const params = { size: '720p/16:9', n: 1, seconds: 5, videoMode: 'frames', firstFrameId: f.refs[1].assetId, lastFrameId: f.refs[0].assetId }
     expect(await f.call('canvas_create_node', { operationId: nodeId, revision: f.revision, kind: 'video-generation', title: '指定起止画面', prompt: f.prompt, modelId: f.model.id, references: f.refs, params })).toMatchObject({ isError: false })
-    expect(f.service.store.state(f.canvasId).graph.nodes.find((node) => node.id === nodeId)?.params).toEqual(params)
+    expect(f.service.store.state(f.canvasId).graph.nodes.find((node) => node.id === nodeId)?.params).toEqual({ ...params, generateAudio: true })
     expect(await f.call('canvas_handoff_generation', { operationId: randomUUID(), revision: f.revision + 1, nodeIds: [nodeId] })).toMatchObject({ isError: false, value: { nodes: [{ videoMode: 'frames' }] } })
   })
   it.each(['frames-audio', 'image-count', 'foreign-frame'] as const)('rejects %s before any reference mutation', async (failure) => {
@@ -1103,20 +1559,16 @@ describe('Agent reference generation and prompt mentions', () => {
     expect(await f.call('canvas_create_node', { operationId: randomUUID(), revision: f.revision, kind: 'video-generation', title: '旧清单', prompt: f.prompt, modelId: f.model.id, references: f.refs })).toMatchObject({ isError: true })
     expect(await f.service.store.snapshot(f.canvasId)).toEqual(before)
   })
-  it('instructs main and every specialist to prefer references and give literal tokens and their uses', () => {
-    for (const prompt of [MAIN_PROMPT, ...Object.entries(METHODS).filter(([role]) => role !== 'voice').map(([, method]) => method)]) {
-      expect(prompt).toContain('有真实素材时优先使用参考生成')
-      expect(prompt).toContain('分镜构图、人物形象（含服装）、场景空间、道具外观、人物音色')
-      expect(prompt).toContain('不能替代人物/场景/道具原始参考')
-      expect(prompt).toContain('只参考张小强的音色，不复述样例内容')
-      expect(prompt).toContain('referenceDependencies')
-      expect(prompt).toContain('不支持音频参考时跳过人物音色一致性')
-      expect(prompt).toContain('models.referenceLimits[实际模式]中的image/video/audio/total')
-      expect(prompt).toContain('不得用“分镜已含细节”“数量不足”“找不到素材”排除必要一致性')
-      expect(prompt).toContain('{{asset:实际UUID}}')
-      expect(prompt).toContain('firstFrameId/lastFrameId不是连线')
-      expect(prompt).toContain('是什么、怎么用')
-    }
+  it('keeps hard reference boundaries in personas and puts detailed methods in the scoped skill', () => {
+    for (const prompt of [MAIN_PROMPT, ...(['story', 'assets', 'shots', 'audio', 'review'] as const).map(specialistPrompt)])
+      for (const boundary of ['有真实素材时优先使用参考生成', '{{asset:实际UUID}}', 'firstFrameId/lastFrameId不是连线', 'referenceDependencies'])
+        expect(prompt).toContain(boundary)
+    const method = PACKAGED_SKILLS.get('canvas-model-aware-references')!.content
+    for (const detail of ['构图/起点', '人物身份与服装状态', '场景固定空间', '可见道具', '适用人物音色',
+      '不能替代人物/场景/道具原始一致性参考', '只参考该角色音色，不复述样例',
+      'models.referenceLimits[实际模式]中的image/video/audio/total', 'referenceDependencies', '不代替引用边', '无音频参考',
+      '视频原生声音默认开启', '宿主绑定精确目标'])
+      expect(method).toContain(detail)
   })
 })
 describe('Manual image and video generation handoff', () => {

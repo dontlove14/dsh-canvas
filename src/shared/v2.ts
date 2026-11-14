@@ -75,5 +75,6 @@ export interface TaskDetail extends TaskModelIdentity {
   failureStage: string | null
   failureCode: string | null
   failureMessage: string | null
+  providerExchange?: { request: boolean; response: boolean }
   attempts: Array<{ step: string; issued_at: number; finished_at: number | null; outcome: string | null; error: string | null }>
 }

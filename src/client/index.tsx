@@ -35,6 +35,9 @@ import { CollaborationLauncher, DispatchCard, installCollaborationDispatch } fro
 import { createRoot } from 'react-dom/client'
 import { AgentSpaceResources } from './agentSpaceResources'
 import { AgentSpaceGate, AgentSpaceGateOverlay, installAgentSpacePresetGate } from './agentSpaceGate'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
+import { TaskAgentContext, TaskAgentNavigation, type TaskAgent } from './taskAgent'
+import { installChatTaskDiagnosis } from './chatTaskDiagnosis'
 
 declare module '@deepseek-ai/dsh-client-ui-sidebar-right/client' {
   interface SidebarRightTabParamsMap { 'dsh-canvas': { canvasId?: string; nodeId?: string } }
@@ -44,18 +47,18 @@ export const name = 'dsh-canvas'
 export const inject = ['slots', 'layout', 'sidebarRightTabs']
 const PANEL_ID = 'dsh-canvas' as MainPanelId
 const components = { Button, Input, Checkbox, SegmentedControl, Menu, Modal, Tooltip }
-interface Face { api: CanvasApi; presentation: CanvasPresentationClient; collaboration: CollaborationClient }
-function MainPanel({ api, sessionId, presentation }: Face & { sessionId?: string }) {
-  return <HarnessUiProvider components={components}><CanvasApp api={api} sessionId={sessionId} presentation={presentation} /></HarnessUiProvider>
+interface Face { api: CanvasApi; presentation: CanvasPresentationClient; collaboration: CollaborationClient; taskAgent: TaskAgent }
+function MainPanel({ api, sessionId, presentation, taskAgent }: Face & { sessionId?: string }) {
+  return <TaskAgentContext.Provider value={taskAgent}><HarnessUiProvider components={components}><CanvasApp api={api} sessionId={sessionId} presentation={presentation} /></HarnessUiProvider></TaskAgentContext.Provider>
 }
-function SidebarPanel({ api, useTabInfo, sessionId, presentation }: Face & { useTabInfo: UseSidebarRightTabInfo; sessionId?: string }) {
+function SidebarPanel({ api, useTabInfo, sessionId, presentation, taskAgent }: Face & { useTabInfo: UseSidebarRightTabInfo; sessionId?: string }) {
   const { tab } = useTabInfo()
   const viewId = useRef(crypto.randomUUID()).current
   const params = tab.navigation.params as { canvasId?: string; nodeId?: string } | undefined
-  return <HarnessUiProvider components={components}><CanvasApp api={api} active={tab.visible} sessionId={sessionId} requestedCanvas={params?.canvasId}
+  return <TaskAgentContext.Provider value={taskAgent}><HarnessUiProvider components={components}><CanvasApp api={api} active={tab.visible} sessionId={sessionId} requestedCanvas={params?.canvasId}
     navigationRevision={tab.navigation.revision} presentation={presentation} viewId={viewId}
     requestedNode={params?.nodeId}
-    /></HarnessUiProvider>
+    /></HarnessUiProvider></TaskAgentContext.Provider>
 }
 function SettingsPanel({ api }: { api: CanvasApi }) {
   return <HarnessUiProvider components={components}><CanvasSettings api={api} /></HarnessUiProvider>
@@ -93,9 +96,17 @@ export function apply(ctx: Context): void {
     onMutate: (listener) => ctx.on('slots/changed', listener),
   }))
   const api = new CanvasApi()
+  installChatTaskDiagnosis(ctx)
   installChatAudio(ctx, api, (props) => <HarnessUiProvider components={components}><ChatAudioCard {...props} /></HarnessUiProvider>)
-  const face: Face = { api, presentation: new CanvasPresentationClient(), collaboration: new CollaborationClient(api) }
+  let taskNavigation: TaskAgentNavigation | undefined
+  const face: Face = { api, presentation: new CanvasPresentationClient(), collaboration: new CollaborationClient(api),
+    taskAgent: { ask: (target, close, signal) => taskNavigation?.ask(target, close, signal) ?? Promise.reject(new Error('诊断对话正在准备，请稍后再试。')) } }
   const spaceResources = new AgentSpaceResources(api), spaceGate = new AgentSpaceGate(spaceResources)
+  ctx.inject(['sessions', 'uiWorkspace', 'workspaces', 'conversation'], (scope) => {
+    taskNavigation = new TaskAgentNavigation(api, scope.sessions, ctx.layout, scope.uiWorkspace, scope.workspaces, scope.conversation,
+      (signal) => spaceGate.prepareAuthorized(signal))
+    scope.effect(() => () => { taskNavigation?.dispose(); taskNavigation = undefined })
+  })
   ctx.effect(() => {
     const element = document.createElement('div')
     element.dataset.dcAgentSpaceGate = ''; document.body.append(element)

@@ -1,5 +1,6 @@
 import type { Asset, CanvasGraph, GenerationParams, ModelCapabilities, PublicModel } from './contracts'
 import { seedanceLimits } from './modelCatalog'
+import { videoReferenceDurations } from './videoConstraints'
 
 export function seedanceReferenceLimit(kind: Asset['kind']): number {
   return ({ image: 30, video: 200, audio: 15 }[kind]) * 1024 * 1024
@@ -87,9 +88,10 @@ export function validateSeedanceInputs(params: GenerationParams, assets: readonl
       if (asset.kind === 'video' && (asset.width * asset.height < 407696 || asset.width * asset.height > 8295044))
         throw new Error('Seedance 参考视频像素总数超限')
     }
-    if (asset.kind !== 'image' && asset.duration !== undefined && (asset.duration < 2 || asset.duration > limits.duration))
+    const duration = videoReferenceDurations({ protocol: 'seedance-video', model_id: modelId }).perVideo!
+    if (asset.kind !== 'image' && asset.duration !== undefined && (asset.duration < duration.min || asset.duration > duration.max))
       throw new Error(`Seedance 参考${asset.kind === 'video' ? '视频' : '音频'}时长需在2至${limits.duration}秒之间`)
   }
-  for (const kind of ['audio', 'video'] as const) if (assets.filter((asset) => asset.kind === kind).reduce((sum, asset) => sum + (asset.duration ?? 0), 0) > limits.duration)
+  for (const kind of ['audio', 'video'] as const) if (assets.filter((asset) => asset.kind === kind).reduce((sum, asset) => sum + (asset.duration ?? 0), 0) > videoReferenceDurations({ protocol: 'seedance-video', model_id: modelId }).totalVideo!)
     throw new Error(`Seedance 参考${kind === 'video' ? '视频' : '音频'}总时长不能超过${limits.duration}秒`)
 }

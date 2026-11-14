@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { CanvasApi } from './api'
 import { TaskStatusLabels, type TaskAction } from '../shared/contracts'
 import { TaskSearchQuerySchema, type TaskPage, type TaskRow, type TaskSearchQuery, type TaskDetail } from '../shared/v2'
@@ -7,14 +7,36 @@ import { UiDateTimeRangePicker } from './UiDateTimeRangePicker'
 import { UiPagination } from './UiPagination'
 import { dateText, timeText, type DateTimeRange } from './dateTimeRange'
 import { copyText } from './clipboard'
+import { canAskTaskAgent } from '../shared/taskFailure'
+import { TaskAgentContext, type TaskAgent } from './taskAgent'
 
 const types = [{ value: '', label: '全部类型' }, { value: 'image', label: '图片生成' }, { value: 'video', label: '视频生成' }, { value: 'tts', label: '语音生成' }, { value: 'import', label: '素材导入' }]
 const formatTime = (stamp: number) => `${dateText(new Date(stamp))} ${timeText(new Date(stamp))}`
 const initialDraft = { taskId: '', folderName: '', canvasName: '', type: '' }
 const initialQuery: TaskSearchQuery = { page: 1, pageSize: 10 }
+export interface TaskDetailTarget { id: string; canvasId: string }
 
-export function TaskDialog({ api, onClose, readOnly = false }: { api: CanvasApi; onClose: () => void; readOnly?: boolean }) {
-  const [selected, setSelected] = useState<TaskRow | null>(null)
+export function TaskDialog({ api, onClose, readOnly = false, initialTask, onAskAgent }: { api: CanvasApi; onClose: () => void; readOnly?: boolean; initialTask?: TaskDetailTarget; onAskAgent?: TaskAgent['ask'] }) {
+  const taskAgent = useContext(TaskAgentContext)
+  const [asking, setAsking] = useState(false), [askError, setAskError] = useState('')
+  const askController = useRef<AbortController | null>(null), handedOff = useRef(false)
+  useEffect(() => () => { if (!handedOff.current) askController.current?.abort() }, [])
+  const ask = async (target: TaskDetailTarget) => {
+    if (askController.current) return
+    const controller = new AbortController(); askController.current = controller
+    setAsking(true); setAskError('')
+    try {
+      const open = onAskAgent ?? taskAgent?.ask.bind(taskAgent)
+      if (!open) throw new Error('诊断对话正在准备，请稍后再试。')
+      await open(target, () => { handedOff.current = true; onClose() }, controller.signal)
+    } catch (error) {
+      if (!controller.signal.aborted && !handedOff.current) setAskError(error instanceof Error ? error.message : '打开诊断对话失败，请重试。')
+    } finally {
+      askController.current = null
+      if (!controller.signal.aborted && !handedOff.current) setAsking(false)
+    }
+  }
+  const [selected, setSelected] = useState<TaskRow | TaskDetailTarget | null>(initialTask ?? null)
   const [revision, setRevision] = useState(0)
   const list = useRef<HTMLDivElement>(null)
   const back = () => {
@@ -24,12 +46,13 @@ export function TaskDialog({ api, onClose, readOnly = false }: { api: CanvasApi;
   }
   return <UiModal label={selected ? '任务详情' : '任务'} onClose={onClose} wide className="dc-tasks-modal">
     <div className="dc-task-dialog-body">
-      <div ref={list} className="dc-task-list-view" hidden={!!selected}><TaskCatalog api={api} onDetail={setSelected} revision={revision} /></div>
-      {selected && <TaskDetails key={selected.id} api={api} row={selected} readOnly={readOnly} onBack={back} onChanged={() => setRevision((old) => old + 1)} />}
+      {askError && <p role="alert">{askError}</p>}
+      <div ref={list} className="dc-task-list-view" hidden={!!selected}><TaskCatalog api={api} onDetail={setSelected} revision={revision} onAsk={(target) => void ask(target)} asking={asking} /></div>
+      {selected && <TaskDetails key={selected.id} api={api} row={selected} readOnly={readOnly} onBack={back} onAsk={(target) => void ask(target)} asking={asking} onChanged={() => setRevision((old) => old + 1)} />}
     </div>
   </UiModal>
 }
-export function TaskCatalog({ api, onDetail, revision = 0 }: { api: CanvasApi; onDetail: (row: TaskRow) => void; revision?: number }) {
+export function TaskCatalog({ api, onDetail, revision = 0, onAsk, asking = false }: { api: CanvasApi; onDetail: (row: TaskRow) => void; revision?: number; onAsk?: (row: TaskDetailTarget) => void; asking?: boolean }) {
   const [draft, setDraft] = useState(initialDraft)
   const [range, setRange] = useState<DateTimeRange>({})
   const [query, setQuery] = useState<TaskSearchQuery>(initialQuery)
@@ -107,7 +130,8 @@ export function TaskCatalog({ api, onDetail, revision = 0 }: { api: CanvasApi; o
             <td><span className={`dc-task-status-pill ${row.status}`}>{TaskStatusLabels[row.status]}</span></td>
             <td><time dateTime={new Date(row.updatedAt).toISOString()}>{formatTime(row.updatedAt)}</time></td>
             <td><time dateTime={new Date(row.createdAt).toISOString()}>{formatTime(row.createdAt)}</time></td>
-            <td><UiButton className="dc-link-button" data-task-id={row.id} onClick={() => onDetail(row)}>查看详情</UiButton></td>
+            <td><div className="dc-task-row-actions"><UiButton className="dc-link-button" data-task-id={row.id} onClick={() => onDetail(row)}>查看详情</UiButton>
+              {canAskTaskAgent(row.status) && <UiButton className="dc-link-button" disabled={asking} onClick={() => onAsk?.(row)}>询问 Agent</UiButton>}</div></td>
           </tr>)}</tbody>
       </table>
     </div>
@@ -118,12 +142,22 @@ export function TaskCatalog({ api, onDetail, revision = 0 }: { api: CanvasApi; o
     </div>
   </section>
 }
-function TaskDetails({ api, row, onBack, onChanged, readOnly }: { api: CanvasApi; row: TaskRow; onBack: () => void; onChanged: () => void; readOnly?: boolean }) {
+function TaskDetails({ api, row, onBack, onChanged, readOnly, onAsk, asking }: { api: CanvasApi; row: TaskRow | TaskDetailTarget; onBack: () => void; onChanged: () => void; readOnly?: boolean; onAsk?: (row: TaskDetailTarget) => void; asking?: boolean }) {
+  const [metadata, setMetadata] = useState<TaskRow | null>('nodeName' in row ? row : null)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
   const [retry, setRetry] = useState(0)
+  const [copying, setCopying] = useState<'request' | 'response' | null>(null)
+  const [copyFeedback, setCopyFeedback] = useState<{ message: string; failed: boolean } | null>(null)
+  const copyController = useRef<AbortController | null>(null)
+  useEffect(() => () => copyController.current?.abort(), [])
+  useEffect(() => {
+    if (!copyFeedback) return
+    const timer = setTimeout(() => setCopyFeedback(null), 2500)
+    return () => clearTimeout(timer)
+  }, [copyFeedback])
   const back = useRef<HTMLButtonElement>(null)
   useEffect(() => { back.current?.focus() }, [])
   useEffect(() => {
@@ -132,6 +166,10 @@ function TaskDetails({ api, row, onBack, onChanged, readOnly }: { api: CanvasApi
     void api.taskDetail(row.canvasId, row.id, controller.signal).then((next) => { if (live) setDetail(next) })
       .catch((reason) => { if (live && !controller.signal.aborted) setError(reason instanceof Error ? reason.message : '详情加载失败') })
       .finally(() => { if (live) setLoading(false) })
+    if (!('nodeName' in row)) void api.searchTasks({ taskId: row.id, page: 1, pageSize: 10 }, controller.signal).then((page) => {
+      const found = page.items.find((item) => item.id === row.id && item.canvasId === row.canvasId)
+      if (live) setMetadata(found ?? null)
+    }).catch(() => {})
     return () => { live = false; controller.abort() }
   }, [api, row.id, row.canvasId, retry])
   const act = async (action: TaskAction) => {
@@ -142,30 +180,51 @@ function TaskDetails({ api, row, onBack, onChanged, readOnly }: { api: CanvasApi
     catch (reason) { setError(reason instanceof Error ? reason.message : '任务操作失败') }
     finally { setActing(false) }
   }
-  const task = detail?.task; const status = task?.status ?? row.status
+  const copy = async (part: 'request' | 'response') => {
+    const controller = new AbortController(); copyController.current = controller
+    setCopying(part); setCopyFeedback(null)
+    try {
+      const { text } = await api.taskExchange(row.canvasId, row.id, part, controller.signal)
+      if (controller.signal.aborted) return
+      await copyText(text)
+      if (!controller.signal.aborted) setCopyFeedback({ message: `${part === 'request' ? '原始请求' : '原始响应'}已复制`, failed: false })
+    } catch { if (!controller.signal.aborted) setCopyFeedback({ message: '复制失败，请重试', failed: true }) }
+    finally { if (!controller.signal.aborted) setCopying(null) }
+  }
+  const task = detail?.task; const status = task?.status ?? metadata?.status
+  const failure = (task && !['failed', 'unknown', 'save_failed', 'abandoned'].includes(task.status) ? undefined : detail?.failureMessage || task?.error
+    || (status && ['failed', 'unknown', 'save_failed'].includes(status)
+      ? [...(detail?.attempts ?? [])].reverse().find((attempt) => attempt.outcome === 'failed')?.error || '未记录具体失败原因，请查看原始接口内容'
+      : undefined))?.replace(/^(?:Error|ProviderFailure|CanvasError):\s*/, '')
   return <section className="dc-task-detail-view">
     <header><UiButton ref={back} variant="outline" onClick={onBack}>‹ 返回列表</UiButton><h2>任务详情</h2></header>
     <div className="dc-task-detail-scroll">
     {error && <p role="alert">{error}<UiButton onClick={() => setRetry((old) => old + 1)}>重试</UiButton></p>}
     <dl className="dc-task-detail-meta">
       <div><dt>任务 ID</dt><dd className="dc-task-id">{row.id}</dd></div>
-      <div><dt>任务状态</dt><dd><span className={`dc-task-status-pill ${status}`}>{TaskStatusLabels[status]}</span></dd></div>
-      <div><dt>文件夹名称</dt><dd>{row.folderName}</dd></div><div><dt>画布名称</dt><dd>{row.canvasName}</dd></div>
-      <div><dt>生成节点名称</dt><dd>{row.nodeName}</dd></div><div><dt>任务类型</dt><dd>{types.find((type) => type.value === row.type)?.label}</dd></div>
-      <div><dt>模型名称</dt><dd>{detail?.modelName ?? row.modelName}</dd></div><div><dt>提供商</dt><dd>{detail?.providerName ?? row.providerName}</dd></div>
-      <div><dt>更新时间</dt><dd>{formatTime(task?.updatedAt ?? row.updatedAt)}</dd></div><div><dt>提交时间</dt><dd>{formatTime(row.createdAt)}</dd></div>
+      <div><dt>任务状态</dt><dd><span className={`dc-task-status-pill ${status ?? ''}`}>{status ? TaskStatusLabels[status] : '—'}</span></dd></div>
+      <div><dt>文件夹名称</dt><dd>{metadata?.folderName ?? '—'}</dd></div><div><dt>画布名称</dt><dd>{metadata?.canvasName ?? '—'}</dd></div>
+      <div><dt>生成节点名称</dt><dd>{metadata?.nodeName ?? '—'}</dd></div><div><dt>任务类型</dt><dd>{types.find((type) => type.value === metadata?.type)?.label ?? '—'}</dd></div>
+      <div><dt>模型名称</dt><dd>{detail?.modelName ?? metadata?.modelName ?? '—'}</dd></div><div><dt>提供商</dt><dd>{detail?.providerName ?? metadata?.providerName ?? '—'}</dd></div>
+      <div><dt>更新时间</dt><dd>{task || metadata ? formatTime(task?.updatedAt ?? metadata!.updatedAt) : '—'}</dd></div><div><dt>提交时间</dt><dd>{task || metadata ? formatTime(task?.createdAt ?? metadata!.createdAt) : '—'}</dd></div>
     </dl>
     {loading ? <p role="status">载入详情…</p> : detail && <>
-      {task && <div className="dc-task-detail-block"><h3>提交内容</h3><p>模型：{task.snapshot.model.name}</p>
-        <p className="dc-task-detail-prompt">{task.snapshot.prompt}</p><pre>{JSON.stringify(task.snapshot.params, null, 2)}</pre></div>}
-      <div className="dc-task-detail-block"><h3>执行结果</h3>
+      <div className="dc-task-diagnostic-actions">
+        {canAskTaskAgent(status) && <UiButton variant="outline" disabled={asking || acting} onClick={() => onAsk?.(row)}>询问 Agent</UiButton>}
+        <UiButton variant="outline" disabled={!!copying || !detail.providerExchange?.request} onClick={() => void copy('request')}>复制原始请求</UiButton>
+        <UiButton variant="outline" disabled={!!copying || !detail.providerExchange?.response} onClick={() => void copy('response')}>复制原始响应</UiButton>
+        {copyFeedback && <span className={`dc-task-copy-feedback ${copyFeedback.failed ? 'failed' : ''}`} role={copyFeedback.failed ? 'alert' : 'status'}>{copyFeedback.message}</span>}
+        {!detail.providerExchange?.request && <span className="dc-task-diagnostic-hint">该任务未记录原始接口内容</span>}
+      </div>
+      {failure ? <div className="dc-task-detail-block"><h3>失败原因</h3>
+        <p className="dc-task-error" data-dc-text-selectable="true">{failure}</p>
+      </div> : <div className="dc-task-detail-block"><h3>执行结果</h3>
         {detail.externalTaskId && <p>外部任务 ID：<span className="dc-task-id">{detail.externalTaskId}</span></p>}
         {detail.externalCompletedAt !== null && <p>外部完成时间：{formatTime(detail.externalCompletedAt)}</p>}
         {detail.successAt !== null && <p>本地保存成功：{formatTime(detail.successAt)}</p>}
-        {detail.failureMessage && <p className="dc-task-error">{detail.failureStage} · {detail.failureCode}：{detail.failureMessage}</p>}
-        <p>执行步骤：{detail.attempts.map((attempt) => `${attempt.step}（${attempt.outcome ?? '处理中'}）`).join(' → ') || detail.phase}</p>
-      </div>
-      {['unknown', 'save_failed'].includes(status) && <div className="dc-task-actions">
+        <p>{status ? TaskStatusLabels[status] : '—'}</p>
+      </div>}
+      {status && ['unknown', 'save_failed'].includes(status) && <div className="dc-task-actions">
         {status === 'save_failed' && <UiButton disabled={acting || readOnly} variant="outline" onClick={() => void act('retry-save')}>重试保存结果</UiButton>}
         {status === 'unknown' && detail.externalTaskId && <UiButton disabled={acting || readOnly} variant="outline" onClick={() => void act('resume-query')}>恢复查询</UiButton>}
         <UiButton disabled={acting || readOnly} variant="outline" onClick={() => void act('abandon')}>结束本地等待</UiButton>

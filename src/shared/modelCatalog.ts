@@ -81,6 +81,17 @@ const klingModels = [PROVIDERS[2], PROVIDERS[11]].map((provider, channel) => ({
   kind: 'video' as const, name: 'Kling 4.0', model_id: 'kling-4.0', api_base: provider.apiBase, protocol: 'kling-video' as const,
 }))
 export const BUILTIN_MODELS = [...gptModels, ...bananaModels, ...seedreamModels, ...seedanceModels, ...wanModels, ...minimaxModels, ...klingModels]
+/** Reviewed method families follow the integrated adapter, never a display-name guess. */
+export const MODEL_PROMPT_FAMILIES = {
+  'openai-image': 'gpt-image', 'gemini-image': 'banana', 'seedream-image': 'seedream',
+  'seedance-video': 'seedance', 'minimax-video': 'minimax', 'wan-video': 'wan', 'kling-video': 'kling',
+} as const
+export type ModelPromptFamily = typeof MODEL_PROMPT_FAMILIES[keyof typeof MODEL_PROMPT_FAMILIES]
+export function modelPromptFamily(model: { protocol: string; kind: string }): ModelPromptFamily | null {
+  const family = MODEL_PROMPT_FAMILIES[model.protocol as keyof typeof MODEL_PROMPT_FAMILIES]
+  return family && (model.kind === 'image' ? model.protocol.endsWith('-image') : model.kind === 'video' && model.protocol.endsWith('-video'))
+    ? family : null
+}
 export function isMultimodalVideo(model: { protocol: string }): boolean {
   return ['seedance-video', 'wan-video', 'minimax-video', 'kling-video'].includes(model.protocol)
 }

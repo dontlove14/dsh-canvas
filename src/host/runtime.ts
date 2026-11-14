@@ -10,6 +10,11 @@ import { renderMock } from './mockGeneration'
 import { isBananaImage, isSeedreamImage, isMultimodalVideo } from '../shared/modelCatalog'
 
 export interface RuntimeConfig { maxConcurrentTasks: number; pollIntervalMs: number; requestTimeoutMs: number; imageRequestTimeoutMs?: number; maxMediaBytes: number; maxReferenceBytes: number }
+function taskProgramError(error: unknown): boolean {
+  return error instanceof Error && (error.cause === 'canvas:program-error' ||
+    (error instanceof TypeError || error instanceof ReferenceError) &&
+    /Cannot read properties of (?:undefined|null)|Cannot destructure property|is not a function|is not defined/i.test(error.message))
+}
 /** Long-lived host lifecycle. Neither a request signal nor a Peer owns this controller. */
 export class CanvasRuntime {
   dispatchGate?: <T>(taskId: string, operation: () => Promise<T>) => Promise<T>
@@ -81,6 +86,7 @@ export class CanvasRuntime {
           return
         }
         const message = this.store.redact(error instanceof Error ? error.message : '任务执行失败', [data?.key ?? ''])
+        await this.store.recordTaskFailure(task.id, error instanceof Error ? error.message : '任务执行失败', [data?.key ?? ''], taskProgramError(error)).catch(() => {})
         const saving = !!data?.outputs || current.status === 'saving'
         let status: TaskStatus = saving ? 'save_failed' : 'failed'
         if (current.providerTaskId && !data?.outputs && !saving) status = error instanceof ProviderFailure && error.definitive ? 'unknown' : current.status
@@ -124,7 +130,7 @@ export class CanvasRuntime {
         await this.store.verifyReferences(task.id)
         await this.patch(task, { status: 'generating', progress: 5 })
         result = { status: 'completed', outputs: await this.attempt(task, 'mock-render', () => renderMock(task, this.store, this.controller.signal, (progress) => this.patch(task, { progress }))) }
-      } else if (task.providerTaskId) result = await this.attempt(task, 'poll', () => this.providers.poll(task.snapshot, data.key, task.providerTaskId!))
+      } else if (task.providerTaskId) result = await this.attempt(task, 'poll', () => this.providers.forTask(task.id, 'poll').poll(task.snapshot, data.key, task.providerTaskId!))
       else {
         if (data.issued) { await this.patch(task, { status: 'failed', error: '之前的提交未取得可用结果；不会自动重提' }); return }
         await this.store.verifyReferences(task.id)
@@ -134,11 +140,12 @@ export class CanvasRuntime {
           await this.store.writeTaskPrivate(task.id, data)
           await this.patch(task, { status: 'generating' })
           // Release the admission queue once outbound work has started; polling and result saving outlive takeover.
-          return { pending: this.attempt(task, 'submit', () => this.providers.submit(task.snapshot, data.key, prepared)) }
+          return { pending: this.attempt(task, 'submit', () => this.providers.forTask(task.id, 'submit').submit(task.snapshot, data.key, prepared)) }
         }
         const accepted = this.dispatchGate ? await this.dispatchGate(task.id, submit) : await submit()
         result = await accepted.pending
       }
+      if (result.status === 'failed') await this.store.recordTaskFailure(task.id, result.error ?? '外部生成失败', [data.key]).catch(() => {})
       await this.patch(task, { ...(result.id ? { providerTaskId: result.id } : {}), status: result.outputs ? 'saving' : result.status, progress: result.progress, error: result.error ? this.store.redact(result.error, [data.key]) : undefined }, [
         sql('UPDATE task_details SET external_status=?,next_run_at=? WHERE task_id=?', [result.status, Date.now() + this.pollDelay(task), task.id]),
         ...(result.status === 'failed' ? [sql("UPDATE task_details SET phase='failed',failure_stage='provider',failure_code=?,failure_message=? WHERE task_id=?", [this.store.redact(result.errorCode ?? 'EXTERNAL_FAILED', [data.key]), this.store.redact(result.error ?? '外部生成失败', [data.key]), task.id])] : []),
@@ -152,12 +159,13 @@ export class CanvasRuntime {
     }
     await this.patch(task, { status: 'saving', error: undefined })
     const saveErrors: string[] = []
+    let firstProgramError = false
     for (const output of data.outputs!) {
       try {
         const existing = await this.store.publishedAsset(task.workspaceId, output.id)
         const asset = existing ?? await this.attempt(task, 'publish', async () => {
           const staged = await this.store.db.get('SELECT id FROM canvas_assets WHERE canvas_id=? AND id=?', [task.workspaceId, output.id])
-          const source = staged ? Readable.from([]) : await this.providers.outputStream(output, task.snapshot, data.key)
+          const source = staged ? Readable.from([]) : await this.providers.forTask(task.id, 'publish').outputStream(output, task.snapshot, data.key)
           const [width, height] = isTtsSnapshot(task.snapshot) ? [] : task.snapshot.params.size.split('x').map(Number)
           const dimensions = !isTtsSnapshot(task.snapshot) && isMockModel(task.snapshot.model) ? { width, height, ...(task.snapshot.model.kind === 'video' ? { duration: task.snapshot.params.seconds } : {}) }
             : (isBananaImage(task.snapshot.model) || isSeedreamImage(task.snapshot.model)) && output.width && output.height ? { width: output.width, height: output.height } : {}
@@ -170,10 +178,11 @@ export class CanvasRuntime {
         })
       } catch (error) {
         if (this.controller.signal.aborted) throw error
+        if (!saveErrors.length) firstProgramError = taskProgramError(error)
         saveErrors.push(this.store.redact(error instanceof Error ? error.message : '保存失败', [data.key]))
       }
     }
-    if (saveErrors.length) throw new Error(`${saveErrors.length} 份结果保存失败：${saveErrors[0]}`)
+    if (saveErrors.length) throw new Error(`${saveErrors.length} 份结果保存失败：${saveErrors[0]}`, { cause: firstProgramError ? 'canvas:program-error' : undefined })
     const expected = !isTtsSnapshot(task.snapshot) && task.snapshot.model.kind === 'image' ? task.snapshot.params.n : data.outputs!.length
     const partial = data.outputs!.length !== expected
     const error = partial ? `部分失败：请求 ${expected} 张，已保存 ${data.outputs!.length} 张；未自动重提` : undefined

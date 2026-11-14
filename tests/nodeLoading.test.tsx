@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { ReactFlowProvider, type useStoreApi } from '@xyflow/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CanvasWorkspace } from '../src/client/Canvas'
-import { NodeLoading, NodeLoadingBoundary, NodeLoadingContext } from '../src/client/NodeLoading'
+import { NodeLoading, NodeLoadingBoundary, NodeLoadingContext, TaskDetailNavigationContext } from '../src/client/NodeLoading'
 import { GenerationNode } from '../src/client/GenerationNode'
 import { VideoPlayer } from '../src/client/VideoPlayer'
 import { AudioPlayer } from '../src/client/AudioPlayer'
@@ -83,8 +83,24 @@ function mount(element: React.ReactNode) {
 const task = (status: TaskStatus): TaskSummary => ({
   id: 'task', nodeId: 'node', workspaceId: 'w', status, resultIds: [], progress: 42, createdAt: 1, updatedAt: 1,
 })
+describe('failure icon task navigation', () => {
+  it('routes the clicked historical task identity without selecting or dragging its node', () => {
+    const open = vi.fn(), nodeClick = vi.fn()
+    const historical = { ...task('failed'), id: 'historical-failure', workspaceId: 'its-canvas' }
+    const { container } = mount(<TaskDetailNavigationContext.Provider value={open}>
+      <article onClick={nodeClick}><NodeLoading task={historical} title="历史图片" compact /></article>
+    </TaskDetailNavigationContext.Provider>)
+    const button = container.querySelector<HTMLButtonElement>('.dc-node-failure-button')!
+    expect(button.getAttribute('aria-label')).toBe('历史图片：查看任务详情')
+    expect(button.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 1024 1024')
+    expect(button.querySelectorAll('path')).toHaveLength(4)
+    act(() => button.click())
+    expect(open).toHaveBeenCalledWith({ id: 'historical-failure', workspaceId: 'its-canvas' })
+    expect(nodeClick).not.toHaveBeenCalled()
+  })
+})
 function orbFrames() { return [...frames.values()].filter((frame) => frame.name === 'loop').length }
-async function workspace() {
+async function workspace(status: TaskStatus = 'generating') {
   const shapes: Array<[NodeKind, boolean]> = [
     ['image-generation', false], ['image-generation', true], ['video-generation', false], ['video-generation', true],
     ['tts-generation', false], ['tts-generation', true],
@@ -102,7 +118,7 @@ async function workspace() {
   }] : [])
   const snapshot: CanvasSnapshot = {
     version: 1, workspaceId: 'w', graphRevision: 1, graph: { ...emptyGraph(), nodes }, assets,
-    tasks: nodes.map((node) => ({ ...task('generating'), id: `task-${node.id}`, nodeId: node.id, resultIds: node.assetId ? [node.assetId] : [] })),
+    tasks: nodes.map((node) => ({ ...task(status), id: `task-${node.id}`, nodeId: node.id, resultIds: node.assetId ? [node.assetId] : [] })),
     updatedAt: 1, commitHash: 'a'.repeat(64), hashes: { nodes: {}, edges: {}, viewport: '' },
   }
   const api = new CanvasApi()
@@ -116,6 +132,26 @@ async function workspace() {
   return { container, show, api }
 }
 describe('dependency-backed whole-node loading', () => {
+  it('opens the existing task modal from actual canvas node failures across image, video and TTS shells', async () => {
+    HTMLDialogElement.prototype.showModal = function () { this.open = true }
+    HTMLDialogElement.prototype.close = function () { this.open = false }
+    const { container, api } = await workspace('failed')
+    vi.spyOn(api, 'searchTasks').mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10, upperBound: 0 })
+    vi.spyOn(api, 'taskDetail').mockImplementation(async (_canvas, id) => ({
+      task: null, kind: 'generation', modelName: '测试模型', providerName: '测试供应商', phase: 'failed',
+      failureStage: 'submit', failureCode: 'PROVIDER_ERROR', failureMessage: `原始失败原因 ${id}`,
+      externalTaskId: null, externalCompletedAt: null, successAt: null, attempts: [],
+    }))
+    for (const index of [0, 2, 4]) {
+      const card = container.querySelector(`[data-test-node="node-${index}"]`)!
+      await act(async () => card.querySelector<HTMLButtonElement>('.dc-node-failure-button')!.click())
+      expect(api.taskDetail).toHaveBeenLastCalledWith('w', `task-node-${index}`, expect.any(AbortSignal))
+      expect(container.querySelector('.dc-task-error')?.textContent).toBe(`原始失败原因 task-node-${index}`)
+      const close = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.getAttribute('aria-label') === '关闭')!
+      await act(async () => close.click())
+      expect(container.querySelector('.dc-task-detail-view')).toBeNull()
+    }
+  })
   it('redraws the real Orb at screen DPR × actual XYFlow zoom without changing CSS size or remounting media', async () => {
     vi.stubGlobal('devicePixelRatio', 2)
     const { container, api } = await workspace()

@@ -23,6 +23,16 @@ export class AgentSpaceGate {
     this.request = { token: ++this.token, phase: 'confirm', valid: () => true, cancel: async () => undefined, resolve: () => {} }
     return this.confirm()
   }
+  /** The failed-task button already authorizes this new preset; keep the existing resource preparation. */
+  async prepareAuthorized(signal: AbortSignal): Promise<boolean> {
+    signal.throwIfAborted()
+    if (this.selecting || this.request) throw new Error('当前正在选择 Agent，请完成后再询问。')
+    const pending = this.ask(async () => undefined, () => !signal.aborted)
+    const cancel = () => this.dismiss()
+    signal.addEventListener('abort', cancel, { once: true })
+    try { void this.confirm(); return await pending }
+    finally { signal.removeEventListener('abort', cancel) }
+  }
   readonly subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   readonly getSnapshot = () => this.request
   private notify() { for (const listener of this.listeners) listener() }

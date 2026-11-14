@@ -9,6 +9,8 @@ import { hash } from '../persistence/database'
 import { agentDisplayName } from '../../shared/collaboration'
 import { validateVoiceDraft } from './voiceTools'
 import { executionResources, executionGroup, independentCreateBatches } from './executionScheduler'
+import { taskSkills, capabilities } from './capabilities'
+import { planningKinds, matchingPromptSkills, MODEL_PROMPT_SKILLS } from './modelPromptSkills'
 
 const DraftOutput = { type: 'object' as const, properties: {
   kind: { type: 'string' as const, enum: ['brief', 'asset-spec', 'storyboard', 'shot-plan', 'audio-plan', 'review'] },
@@ -27,20 +29,26 @@ const ExecutionOutput = { type: 'object' as const, properties: {
 }, required: ['status', 'summary'], additionalProperties: false }
 export function installDelegationTools(deps: CreativeToolsContext) {
   const { ctx, coordinator, tool, admission, projectFor, workspace, document } = deps
-  tool('canvas_specialist', '按批次委派叙事、资产、镜头、音频、音色查找或审查子 Agent。仅音色查找角色读取 Fish 官网；专业角色保存草稿，主 Agent 负责协调及用户决定。', CreativeTaskSchema.extend(StepNote), async (args, exec) => {
+  tool('canvas_specialist', `按批次委派专业任务。正式shots任务先选视频模型，assets生成规格先选图片模型；modelKinds声明其他模型相关任务，宿主自动补必需类型并注入实时能力/对应提示词Skill。换模型用新批次复核。导演/序列/画面归shots，专业角色只保存成果。各角色Skill目录：${JSON.stringify(Object.fromEntries(['story', 'assets', 'shots', 'audio', 'voice', 'review'].map((role) => [role, capabilities(role as 'story').skills])))}`, CreativeTaskSchema.extend(StepNote), async (args, exec) => {
     admission(exec)
+    const planningModels = planningKinds(args.role, args.skillNames, args.modelKinds).map((kind) => coordinator.generationModels.pin(exec.agent, kind))
+    const matching = matchingPromptSkills(args.role, planningModels)
+    if (args.skillNames?.some((name) => Object.values(MODEL_PROMPT_SKILLS).includes(name) && !matching.includes(name)))
+      throw new CanvasError('委派的提示词方法与用户已选模型不匹配', 409, 'AGENT_MODEL_SKILL_MISMATCH')
+    const skillNames = taskSkills(args.role, [...args.skillNames ?? [], ...matching])
     const c = coordinator.session(exec.agent.id).canvas, project = await projectFor(exec, c)
     const root = coordinator.rootAgent(exec.agent), cwd = await workspace.root(root, exec.signal)
     const checkWorkspace = async () => {
       admission(exec)
+      coordinator.generationModels.assertPlan(exec.agent, planningModels)
       if (await workspace.root(root, exec.signal) !== cwd) throw new CanvasError('成果交接期间工作区已切换', 409, 'WORKSPACE_CHANGED')
     }
     const key = `${project.id}:specialist:${args.operationId}`, baseRevision = c ? coordinator.canvas.store.state(c.canvasId).graphRevision : null
-    const binding = { projectId: project.id, taskId: args.operationId, sourceIds: args.sourceIds, artifactIds: args.artifactIds, nodeIds: args.nodeIds, assetIds: args.assetIds }
-    const value = await coordinator.specialist(exec.agent, key, args, async () => {
+    const binding = { projectId: project.id, taskId: args.operationId, sourceIds: args.sourceIds, artifactIds: args.artifactIds, nodeIds: args.nodeIds, assetIds: args.assetIds, skillNames, planningModels }
+    const value = await coordinator.specialist(exec.agent, key, { ...args, planningModels }, async () => {
       const state = c ? coordinator.canvas.store.state(c.canvasId) : null
       if (args.nodeIds.some((id) => !state?.graph.nodes.some((n) => n.id === id)) || args.assetIds.some((id) => !state?.assets.some((a) => a.id === id))) throw new CanvasError('专业任务引用的节点或素材不存在')
-      const run = coordinator.creative.begin(project.id, args.operationId, args.role, args, args.task, args.sourceIds, args.artifactIds)
+      const run = coordinator.creative.begin(project.id, args.operationId, args.role, { ...args, planningModels }, args.task, args.sourceIds, args.artifactIds)
       if (run.state !== 'running') throw new CanvasError('该批次已结束；请读取进度后以新任务 ID 继续', 409, 'SPECIALIST_INCOMPLETE')
       await coordinator.creative.persist()
       const id = randomUUID() as typeof exec.agent.id
@@ -104,7 +112,7 @@ export function installDelegationTools(deps: CreativeToolsContext) {
             status: artifact.status, sources: artifact.sources, needsReview: artifact.needsReview, file: artifact.file, baseRevision,
             ...('summary' in completion ? { summary: completion.summary } : {}),
             stale: !!c && coordinator.canvas.store.state(c.canvasId).graphRevision !== baseRevision,
-            artifactOutputIds: coordinator.creative.run(project.id, args.operationId)!.artifactOutputIds }
+            artifactOutputIds: coordinator.creative.run(project.id, args.operationId)!.artifactOutputIds, planningModels }
           coordinator.creative.update(project.id, args.operationId, 'completed', '本批次完成；认可状态以成果记录为准', value)
           await coordinator.creative.persist()
           return value
@@ -139,6 +147,7 @@ export function installDelegationTools(deps: CreativeToolsContext) {
     validateBatch(args, c.canvasId)
     const key = `${project.id}:execution-batch:${args.operationId}`
     return coordinator.specialist(exec.agent, key, args, async () => {
+      coordinator.videoSound.batch(exec.agent, c, args.commands)
       coordinator.creative.begin(project.id, args.operationId, 'executor', args, args.task, [], args.artifactIds)
       await coordinator.creative.persist()
       const id = randomUUID() as typeof exec.agent.id
@@ -195,6 +204,7 @@ export function installDelegationTools(deps: CreativeToolsContext) {
     const validate = () => { admission(exec); coordinator.assert(exec.agent, c) }
     // The original key/arguments gate replay before fan-out, including pre-upgrade receipts.
     return coordinator.specialist(exec.agent, key, args, async () => {
+      coordinator.videoSound.batch(exec.agent, c, args.commands)
       coordinator.creative.begin(project.id, args.operationId, 'executor', args, args.task, [], args.artifactIds)
       await coordinator.creative.persist()
       try {

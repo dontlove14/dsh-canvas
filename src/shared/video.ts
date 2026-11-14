@@ -3,6 +3,8 @@ import { isMultimodalVideo, WAN_VIDEO_LIMITS, MINIMAX_VIDEO_LIMITS, KLING_VIDEO_
 import { seedanceGenerationParams, seedanceReferenceLimit, validateSeedanceConnections, validateSeedanceInputs } from './seedance'
 import { klingGenerationParams, validateKlingConnections, validateKlingInputs } from './kling'
 
+import { videoReferenceDurations } from './videoConstraints'
+export { videoReferenceDurations } from './videoConstraints'
 type VideoModel = Pick<ModelRecord, 'protocol' | 'model_id'>
 /** Agent planning uses the same family limits as connection validators. No stored model fields. */
 export function videoReferenceLimits(model: Pick<PublicModel, 'protocol' | 'model_id' | 'capabilities'>) {
@@ -75,14 +77,16 @@ export function validateVideoInputs(params: GenerationParams, assets: readonly A
       && (asset.width < 256 || asset.width > 5760 || asset.height < 256 || asset.height > 5760
         || asset.width / asset.height < .4 || asset.width / asset.height > 2.5))
       throw new Error('MiniMax H3 参考画面宽高需在256至5760像素、比例在2:5至5:2之间')
-    if (asset.kind !== 'image' && asset.duration !== undefined
-      && (model.protocol === 'minimax-video' ? asset.duration < 2 || asset.duration > limits.totalDuration : asset.duration <= 0 || asset.duration > limits.totalDuration))
+    const duration = asset.kind === 'audio' ? videoReferenceDurations(model).perAudio : videoReferenceDurations(model).perVideo
+    if (asset.kind !== 'image' && asset.duration !== undefined && duration
+      && ((duration.minExclusive ? asset.duration <= duration.min : asset.duration < duration.min) || asset.duration > duration.max))
       throw new Error('参考音视频时长超出当前模型限制')
   }
   for (const kind of ['audio', 'video'] as const) {
     const total = assets.filter((asset) => asset.kind === kind).reduce((sum, asset) => sum + (asset.duration ?? 0), 0)
     if (total > limits.totalDuration) throw new Error('参考音视频同类总时长不能超过15秒')
-    if (kind === 'video' && model.protocol === 'wan-video' && total + (params.seconds ?? 0) > 30)
+    const combined = videoReferenceDurations(model).inputVideoPlusOutput
+    if (kind === 'video' && combined !== null && total + (params.seconds ?? 0) > combined)
       throw new Error('Wan 输入视频与输出视频总时长不能超过30秒')
   }
 }

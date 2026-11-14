@@ -298,6 +298,42 @@ describe('generation protocol and task state', () => {
     expect(failed.error).not.toContain('secret-test-key'); expect(failed.error).not.toContain('secret-other')
     await instance.store.deleteModel(generator.modelId!)
   })
+  it('copies the actual provider exchange with partial authentication masking and preserves raw errors across restart', async () => {
+    const rawError = `quota is not enough\n${'供应商原文 '.repeat(240)}`
+    let receivedBody = ''; let receivedAuth = ''; let calls = 0
+    const base = await stub((req: any, res: any) => {
+      calls++; receivedAuth = req.headers.authorization
+      req.on('data', (chunk: Buffer) => { receivedBody += chunk.toString() })
+      req.on('end', () => {
+        res.writeHead(400, { 'Content-Type': 'text/plain', 'X-Request-ID': 'provider-ticket-123' })
+        res.end(rawError)
+      })
+    })
+    const root = await temp(), instance = await service(root)
+    const { generator, state } = await addGenerator(instance, base)
+    const accepted = await instance.generate('w', generator.id, state.graphRevision)
+    await waitFor(instance, accepted.id, 'failed')
+    expect(receivedAuth).toBe('Bearer secret-test-key')
+    const detail = await instance.store.taskDetail('w', accepted.id)
+    expect(detail.failureMessage).toBe(rawError)
+    expect(detail.providerExchange).toEqual({ request: true, response: true })
+    const request = await instance.store.taskExchange('w', accepted.id, 'request')
+    expect(request.text).toContain(receivedBody)
+    expect(request.text).toContain(`POST ${base}/images/generations`)
+    expect(request.text).toContain('authorization: Bearer secr…[已脱敏]…-key')
+    expect(request.text).not.toContain('secret-test-key')
+    const response = await instance.store.taskExchange('w', accepted.id, 'response')
+    expect(response.text).toContain('x-request-id: provider-ticket-123')
+    expect(response.text).toContain(rawError)
+    expect(calls).toBe(1)
+    const wrong = await instance.handle(new Request(`http://local/api/canvas/v2/task?canvas=other&id=${accepted.id}&exchange=request`))
+    expect(wrong.status).toBe(404)
+    await instance.close()
+    const reopened = await service(root)
+    expect(await reopened.store.taskExchange('w', accepted.id, 'response')).toEqual(response)
+    expect((await reopened.store.taskDetail('w', accepted.id)).failureMessage).toBe(rawError)
+    expect(calls).toBe(1)
+  })
   it.each([{}, { data: [] }, { data: [{ b64_json: 'not-an-image' }] }])('ends a successful HTTP response with no usable output as failed', async (body) => {
     let calls = 0
     const base = await stub((_req: any, res: any) => { calls++; res.end(JSON.stringify(body)) })

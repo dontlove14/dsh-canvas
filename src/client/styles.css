@@ -181,6 +181,10 @@
 .dc-media-loading-fallback{width:100%;height:100%;border-radius:inherit;background:var(--dc-surface);display:grid;place-items:center;color:var(--dc-text)}
 .dc-node-failure{position:absolute;inset:0;border-radius:inherit;z-index:3;pointer-events:none;color:var(--dc-danger);background:color-mix(in srgb,var(--dc-surface) 96%,transparent);display:flex;align-items:center;justify-content:center;outline:1px solid var(--dc-danger);outline-offset:-1px}
 .dc-node-failure-icon{width:48px;height:48px;flex:none}
+.dc-node-failure-button{display:flex;align-items:center;justify-content:center;flex:none;padding:0;border:0;border-radius:50%;background:transparent;pointer-events:auto;cursor:pointer;touch-action:manipulation}
+.dc-node-failure-button:hover{filter:brightness(.95)}
+.dc-node-failure-button:focus-visible{outline:2px solid var(--dc-accent);outline-offset:4px}
+.dc-node-failure-button .dc-node-failure-icon{pointer-events:none}
 .dc-node-failure[data-compact] .dc-node-failure-icon{width:20px;height:20px}
 .dc-spinner{width:12px;height:12px;border:2px solid var(--dc-border-strong);border-top-color:var(--dc-accent);border-radius:50%;animation:dc-spin 1s linear infinite}
 @keyframes dc-spin{to{transform:rotate(360deg)}}
@@ -782,7 +786,12 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-task-table .task-provider{width:110px}
 .dc-task-table .task-status{width:110px}
 .dc-task-table .task-time{width:175px}
-.dc-task-table .task-action{width:100px}
+.dc-task-table .task-action{width:200px}
+.dc-task-row-actions{display:flex;align-items:center;justify-content:center;gap:10px}
+.dc-task-diagnosis{border:1px solid var(--dc-border);border-radius:8px;padding:14px;max-width:100%;overflow-wrap:anywhere}
+.dc-task-diagnosis small{display:block;margin-top:6px;color:var(--dc-secondary)}
+.dc-task-diagnosis p{margin:10px 0}
+.dc-task-issues-button{display:inline-block;border:1px solid var(--dc-border);border-radius:5px;padding:6px 10px;color:var(--dc-accent);text-decoration:none}
 .dc-task-table th{position:sticky;top:0;z-index:2;background:var(--dc-raised);font-weight:500;color:var(--dc-secondary);text-align:left}
 .dc-task-table th,.dc-task-table td{padding:13px 12px;border-bottom:1px solid var(--dc-border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dc-task-table tbody tr:nth-child(even){background:color-mix(in srgb,var(--dc-raised) 40%,var(--dc-surface))}
@@ -830,8 +839,9 @@ button.dc-ui-help-button.dc-ui-help-button{width:20px;height:20px;min-height:0;p
 .dc-task-detail-block{border:1px solid var(--dc-border);border-radius:8px;padding:16px}
 .dc-task-detail-block h3{margin:0 0 12px;font-size:14px}
 .dc-task-detail-block p{margin:8px 0;overflow-wrap:anywhere}
-.dc-task-detail-prompt{white-space:pre-wrap}
-.dc-task-detail-block pre{white-space:pre-wrap;background:var(--dc-input);border-radius:6px;padding:12px;margin-bottom:0}
+.dc-task-detail-block .dc-task-error{white-space:pre-wrap}
+.dc-task-diagnostic-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.dc-task-diagnostic-hint{color:var(--dc-muted);font-size:12px}
 .dc-editor-bottom .dc-video-mode{width:auto;flex:none;max-width:120px;font-size:11px}
 .dc-video-mode-auto{flex:none;font-size:11px;color:var(--dc-secondary);white-space:nowrap;padding:0 4px}
 .dc-video-mode .dc-ui-select-trigger{height:28px;font-size:11px;padding:0 6px;gap:4px}

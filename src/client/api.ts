@@ -84,6 +84,9 @@ export class CanvasApi {
   ttsSettings(): Promise<PublicTtsSettings> { return this.request('tts-settings', {}) }
   saveTtsSettings(input: TtsSettingsInput): Promise<PublicTtsSettings> { return this.request('tts-settings', {}, this.json(input)) }
   taskDetail(canvas: string, id: string, signal?: AbortSignal): Promise<TaskDetail> { return this.request('task', { canvas, id }, { signal }) }
+  taskExchange(canvas: string, id: string, exchange: 'request' | 'response', signal?: AbortSignal): Promise<{ text: string }> {
+    return this.request('task', { canvas, id, exchange }, { signal, cache: 'no-store' })
+  }
   async audioResult(handle: ChatAudioHandle, signal: AbortSignal): Promise<ChatAudioResult> {
     return ChatAudioResultSchema.parse(await this.request('audio-result', { canvas: handle.canvasId,
       ...(handle.taskId ? { taskId: handle.taskId } : {}), ...(handle.assetId ? { assetId: handle.assetId } : {}) }, { signal, cache: 'no-store' }))

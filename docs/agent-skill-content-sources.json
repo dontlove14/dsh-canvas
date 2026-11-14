@@ -1,0 +1,317 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-11-13",
+  "integration": "Reviewed method ideas rewritten for existing canvas roles; no external tools or runtime downloads",
+  "updatedRoles": ["shots", "story", "audio", "review", "assets", "main", "voice", "executor"],
+  "updatedSkillCount": 32,
+  "skillCount": 36,
+  "latestUpdate": {
+    "version": "0.2.153",
+    "roles": ["main", "assets", "shots", "review"],
+    "scope": "model-families",
+    "skills": ["canvas-gpt-image-prompt", "canvas-banana-image-prompt", "canvas-seedream-image-prompt", "canvas-seedance-video-prompt", "canvas-minimax-video-prompt", "canvas-wan-video-prompt", "canvas-kling-video-prompt"],
+    "workbooks": 7,
+    "retainedAuthority": "Existing 8 roles and exact tools; model-first planning pins current selection and capabilities, methods add no authority"
+  },
+  "modelPromptReview": {
+    "entry": "https://clawhub.ai/search?q=seedance&type=skills",
+    "primaryChecks": [
+      {"url": "https://cookbook.openai.com/examples/multimodal/image-gen-models-prompting-guide", "evidence": "Read prompting fundamentals; concrete composition, quoted text and change/preserve constraints. GPT Image 2 methods are family guidance, not claims about integrated 2.5 performance."},
+      {"url": "https://ai.google.dev/gemini-api/docs/nanobanana?hl=zh-cn", "evidence": "Read official image generation/editing guide and text examples; independently authored visual brief and edit guidance. Official capabilities are not automatically available through this plugin."}
+    ],
+    "excluded": ["Third-party API/CLI/directories and automatic generation", "Fixed model limits and unsupported edit/extend modes", "Mandatory English or JSON and quality keyword spam", "Banana no-text rule", "Guessed reference ordinals, voice_ids and audio-to-video workarounds", "Pixel masks, exact waveform or frame-sync guarantees", "Automatic model switching, result regeneration or retries"],
+    "capabilitySource": "Current configured PublicModel.capabilities plus shared connection/input validation definitions; no Markdown numeric table"
+  },
+  "contentPreparation": {
+    "baseVersion": "0.2.148",
+    "verificationMode": "source-only",
+    "installedAtThatStage": false,
+    "scope": "common",
+    "skills": ["canvas-creative-source-reading", "canvas-model-aware-references", "canvas-generation-prompt-craft", "canvas-saved-artifact-handoff"],
+    "workbooks": 4,
+    "retainedAuthority": "Existing 8-role capability, required-skill, source scope and exact execution policies"
+  },
+  "sources": [
+    {
+      "owner": "gpt-img-2", "slug": "gpt-image-2-prompt-architect", "path": "SKILL.md", "version": "1.1.0",
+      "url": "https://clawhub.ai/api/v1/skills/gpt-image-2-prompt-architect/file?path=SKILL.md&ownerHandle=gpt-img-2",
+      "sha256": "2614247e574d9f4808360eee2cc659450c050521918d00ba9868c3a65880e037",
+      "reportedLicense": "MIT-0", "contentLicense": "not separately declared", "usedFor": ["canvas-gpt-image-prompt"],
+      "adopted": "Composition, precise quoted text, product geometry, preserve/change and motion-ready stills; independently rewritten"
+    },
+    {
+      "owner": "minilozio", "slug": "nano-banana-prompting", "path": "SKILL.md", "version": "1.0.1",
+      "url": "https://clawhub.ai/api/v1/skills/nano-banana-prompting/file?path=SKILL.md&ownerHandle=minilozio",
+      "sha256": "63165d1525db596d47c4d572cff6397f989629563d443efed4793b2e9300914c",
+      "reportedLicense": "not declared", "contentLicense": "not declared", "usedFor": [],
+      "assessment": "Evaluation only. Incorrect no-text rule and mandatory JSON/English rejected; Banana content independently written against official guidance."
+    },
+    {
+      "owner": "sallyface0", "slug": "jimeng-prompter", "path": "SKILL.md", "version": "3.1.0",
+      "url": "https://clawhub.ai/api/v1/skills/jimeng-prompter/file?path=SKILL.md&ownerHandle=sallyface0",
+      "sha256": "a668c79824980a0dac12a317ded25314ea32efe637384eeaa9b65500c66c625a",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-seedream-image-prompt"],
+      "adopted": "Subject/state/features, typography position and evidence-based local calibration; no fixed limits, word count, old-model selection or claimed quality uplift"
+    },
+    {
+      "owner": "zhongkedy-del", "authorAttribution": "coopeai.com", "slug": "seedance-2-prompt", "path": "SKILL.md", "version": "1.0.2",
+      "url": "https://clawhub.ai/api/v1/skills/seedance-2-prompt/file?path=SKILL.md&ownerHandle=zhongkedy-del",
+      "sha256": "d89ef5abbd5b184589068c6e7b805eaca3072cd677ad099798072687a1b2cdf2",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-seedance-video-prompt"],
+      "adopted": "Reference ownership, subject/action/camera/speed/sound and timed continuity; no copied limits, ordinals, provider or extension workflows"
+    },
+    {
+      "owner": "megasu", "slug": "minimax-h3-studio", "path": "SKILL.md", "version": "0.1.0",
+      "url": "https://clawhub.ai/api/v1/skills/minimax-h3-studio/file?path=SKILL.md&ownerHandle=megasu",
+      "sha256": "f960b87039c0fa0bb0305a387ba378b7c95e36a5b7eaf12a1acb942f000cb508",
+      "reportedLicense": "MIT-0", "contentLicense": "not separately declared", "usedFor": ["canvas-minimax-video-prompt"]
+    },
+    {
+      "owner": "megasu", "slug": "minimax-h3-studio", "path": "references/h3-prompt-writing/流程.md", "version": "0.1.0",
+      "url": "https://clawhub.ai/api/v1/skills/minimax-h3-studio/file?path=references%2Fh3-prompt-writing%2F%E6%B5%81%E7%A8%8B.md&ownerHandle=megasu",
+      "sha256": "20d32e784489776f50c63483c81dfddd9ce883462d8e375a3b4f0fe60a39bb04",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-minimax-video-prompt"],
+      "adopted": "Plain prompt sections, real subject/reference ownership and retention; no tools or external workflow"
+    },
+    {
+      "owner": "megasu", "slug": "minimax-h3-studio", "path": "references/h3-prompt-writing/references/base-en.txt", "version": "0.1.0",
+      "url": "https://clawhub.ai/api/v1/skills/minimax-h3-studio/file?path=references%2Fh3-prompt-writing%2Freferences%2Fbase-en.txt&ownerHandle=megasu",
+      "sha256": "2cfebc096a6e08370f288d468d90b60f7f9bcb938f94bf090816e910e48e75fc",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-minimax-video-prompt"],
+      "adopted": "Integrated action and sound, overall soundscape and music as Chinese sections in one prompt string"
+    },
+    {
+      "owner": "megasu", "slug": "minimax-h3-studio", "path": "references/h3-prompt-writing/references/ref-en.txt", "version": "0.1.0",
+      "url": "https://clawhub.ai/api/v1/skills/minimax-h3-studio/file?path=references%2Fh3-prompt-writing%2Freferences%2Fref-en.txt&ownerHandle=megasu",
+      "sha256": "1e574f356716ad55612247ffb7bbccbcdb484ad96599d63c7dca1af186b1fab7",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-minimax-video-prompt"],
+      "adopted": "Subject definitions, summary, retention, timed detail and sound ownership; no invented Subject/Picture markers or fields"
+    },
+    {
+      "owner": "wangminrui2022", "slug": "h3-video-editing-prompt", "path": "SKILL.md", "version": "1.0.1",
+      "url": "https://clawhub.ai/api/v1/skills/h3-video-editing-prompt/file?path=SKILL.md&ownerHandle=wangminrui2022",
+      "sha256": "62849f6d0a444ca2f5d3dc6daca7eec1b194339878530260ec93d637bd383391",
+      "reportedLicense": "MIT-0", "contentLicense": "not separately declared", "usedFor": ["canvas-minimax-video-prompt"],
+      "adopted": "Appearance versus performance source, contact/crop/occlusion and sound-reference goals; no masks or exact frame/waveform guarantees"
+    },
+    {
+      "owner": "gpt-img-2", "slug": "wan-3-video-prompt-architect", "path": "SKILL.md", "version": "1.0.0",
+      "url": "https://clawhub.ai/api/v1/skills/wan-3-video-prompt-architect/file?path=SKILL.md&ownerHandle=gpt-img-2",
+      "sha256": "83ce6773fba1bbf3b04851d6f6e048d6d4ca6012ca8f55a6854fce33f647d2a6",
+      "reportedLicense": "MIT-0", "contentLicense": "not separately declared", "usedFor": ["canvas-wan-video-prompt"],
+      "adopted": "Concrete physical action paths, spatial/camera anchors and first/last continuity; source site's limits excluded"
+    },
+    {
+      "owner": "vargai", "slug": "kling-4-prompting", "path": "SKILL.md", "version": "1.0.7",
+      "url": "https://clawhub.ai/api/v1/skills/kling-4-prompting/file?path=SKILL.md&ownerHandle=vargai",
+      "sha256": "1bb49b63339331ab9b59cc5b1742521845e266986258a3eb1ac3c4ecf3f39d99",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-kling-video-prompt"],
+      "adopted": "Prepared readable composition, concise director/action/camera/sound instructions; no fal/Varg fields, audio conversion, trim or render workflow"
+    },
+    {
+      "owner": "arminnaimi", "slug": "agent-team-orchestration", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/agent-team-orchestration/file?path=SKILL.md&ownerHandle=arminnaimi",
+      "sha256": "ee8204c92884c727eae1c8c4007df5bc7aaa36595859cd462112982b5ffe1b4c",
+      "reportedLicense": "MIT-0", "contentLicense": "not separately declared",
+      "usedFor": ["canvas-production-orchestration", "canvas-plan-review-and-handoff"]
+    },
+    {
+      "owner": "arminnaimi", "slug": "agent-team-orchestration", "path": "references/patterns.md",
+      "url": "https://clawhub.ai/api/v1/skills/agent-team-orchestration/file?path=references%2Fpatterns.md&ownerHandle=arminnaimi",
+      "sha256": "3a5a86677c57ca8d4824d601ade32e708e857cfe313b82ea40f302153b86a3d6",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-production-orchestration"]
+    },
+    {
+      "owner": "arminnaimi", "slug": "agent-team-orchestration", "path": "references/task-lifecycle.md",
+      "url": "https://clawhub.ai/api/v1/skills/agent-team-orchestration/file?path=references%2Ftask-lifecycle.md&ownerHandle=arminnaimi",
+      "sha256": "63cbf0ff43054500843d6728982b45ef25ca0aea05587119a2be98833d583b28",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-production-orchestration", "canvas-plan-review-and-handoff", "canvas-saved-artifact-handoff"]
+    },
+    {
+      "owner": "arminnaimi", "slug": "agent-team-orchestration", "path": "references/communication.md",
+      "url": "https://clawhub.ai/api/v1/skills/agent-team-orchestration/file?path=references%2Fcommunication.md&ownerHandle=arminnaimi",
+      "sha256": "4897d9a6c0e19df2c39d5bff592263f01b45fc6902a5d939a9572d9aae34c213",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-production-orchestration", "canvas-plan-review-and-handoff", "canvas-saved-artifact-handoff"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-produce", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-produce/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "7f46b64e6276196aa4790de3857182013af2b25347df77cbaf073313e071d25d",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT",
+      "licenseNote": "Retain reported page and body license separately; use independently rewritten preview, input and original-receipt methods only",
+      "usedFor": ["canvas-plan-review-and-handoff", "canvas-execution-manifest-planning", "canvas-model-aware-references", "canvas-saved-artifact-handoff"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-produce", "path": "references/adapter-contract.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-produce/file?path=references%2Fadapter-contract.md&ownerHandle=worldwonderer",
+      "sha256": "07da20b1953c4495e950006d9c862f6941b85d0d6ff643b640941096c21b8841",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-execution-manifest-planning", "canvas-model-aware-references", "canvas-saved-artifact-handoff"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-assets", "path": "references/voice-direction.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-assets/file?path=references%2Fvoice-direction.md&ownerHandle=worldwonderer",
+      "sha256": "1a3400d6c24f26e6351abb98982365ad407d476832800ae715a47d5e25aa5d2d",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-voice-choice-and-audition"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-assets", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-assets/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "7f3f23503f70fb1255f7ee0837e4e49d970eb19f5955067b39a5e2340db3ca54",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT",
+      "licenseNote": "ClawHub page and body differ; preserve attribution and MIT terms for the reviewed body, independently rewrite project methods",
+      "usedFor": ["canvas-visual-asset-design", "canvas-asset-consistency"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-assets", "path": "references/identity-vs-variant.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-assets/file?path=references%2Fidentity-vs-variant.md&ownerHandle=worldwonderer",
+      "sha256": "f38eb4ea8730d903e2b8d0b0c23012566542d8f96994aebb3d28c0a6eb21d789",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-visual-asset-design", "canvas-asset-consistency"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-assets", "path": "references/continuity-lock.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-assets/file?path=references%2Fcontinuity-lock.md&ownerHandle=worldwonderer",
+      "sha256": "d285311951813f62184f73193247585603275c24e3ceee1b63825467194097ce",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-asset-consistency", "canvas-model-aware-references"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-assets", "path": "references/location-and-view.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-assets/file?path=references%2Flocation-and-view.md&ownerHandle=worldwonderer",
+      "sha256": "26529f1d104a99712179293d17dd787e6b0dcafd206d3949970e5b8c069a1ba4",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-visual-asset-design", "canvas-asset-consistency"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-image-prompts", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-image-prompts/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "25b1af4d203c20918fddd31054716e9ce5862cf66b289564fd6e9d37fd295634",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT",
+      "licenseNote": "ClawHub page and body differ; preserve attribution and MIT terms for the reviewed body, independently rewrite project methods",
+      "usedFor": ["canvas-asset-generation-spec", "canvas-model-aware-references", "canvas-generation-prompt-craft"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-image-prompts", "path": "references/common-recipe.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-image-prompts/file?path=references%2Fcommon-recipe.md&ownerHandle=worldwonderer",
+      "sha256": "4027f38c6fc95dd14792b834cd2519c6292eceb52943e243ea44d29aa1f34d76",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-asset-generation-spec", "canvas-model-aware-references", "canvas-generation-prompt-craft"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-image-prompts", "path": "references/edit-and-revision.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-image-prompts/file?path=references%2Fedit-and-revision.md&ownerHandle=worldwonderer",
+      "sha256": "d9e312e7c67ab186a92776be57617e85a0e23c8697e21f5e4f6fdcf38fea7e74",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-asset-generation-spec", "canvas-generation-prompt-craft"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-image-prompts", "path": "references/production-sheet-recipes.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-image-prompts/file?path=references%2Fproduction-sheet-recipes.md&ownerHandle=worldwonderer",
+      "sha256": "a15e4c5c60bf4d3901371820a0e79444a54831736c0a10bdf3ac9f978aadd4a6",
+      "reportedLicense": "MIT-0", "contentLicense": "MIT", "usedFor": ["canvas-asset-generation-spec", "canvas-generation-prompt-craft"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-develop", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-develop/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "f8be5016b86865179cbb2694ef5bde5c0aff64144ea8d358ceb07f2d7563011f",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-narrative-structure"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-develop", "path": "references/director-brief-craft.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-develop/file?path=references%2Fdirector-brief-craft.md&ownerHandle=worldwonderer",
+      "sha256": "b043625810c7bce95766f97cf36efe92e2cfb0b76bf0fc3dab81d75a1e11ee44",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-director-intent"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-write", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-write/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "6f45a000cb1432a293883e773a2d30568a37138ce4cdcbbfa7088be08bca5d6c",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-script-writing"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-write", "path": "references/scene-sound-dramaturgy.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-write/file?path=references%2Fscene-sound-dramaturgy.md&ownerHandle=worldwonderer",
+      "sha256": "7d22780e6b7921af6ebbf0d20e9e63d9d59ff82b1fb188f1401fee27e219addd",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-shot-sound-design"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "story-long-analyze", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/story-long-analyze/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "f3e9def4cc3d26d58a6426d8e3c8c924a0576da64e935f85b4c6804ac7f025aa",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-long-source-adaptation", "canvas-creative-source-reading"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "story-long-analyze", "path": "references/stage2-extraction.md",
+      "url": "https://clawhub.ai/api/v1/skills/story-long-analyze/file?path=references%2Fstage2-extraction.md&ownerHandle=worldwonderer",
+      "sha256": "2d7797dd958da2526f2f9312c5170f1dcafa275eb84cd5cda976af7c424f835e",
+      "reportedLicense": "MIT-0", "contentLicense": "not separately declared",
+      "usedFor": ["canvas-creative-source-reading"],
+      "adaptationNote": "Use evidence-based event units, source-vs-saved-results distinction and partial coverage only; retain specialist prose reads and UTF-16 host contracts, not external line ranges, chapter files or pipeline"
+    },
+    {
+      "owner": "aviclaw", "slug": "verify-before-done-avi", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/verify-before-done-avi/file?path=SKILL.md&ownerHandle=aviclaw",
+      "sha256": "ee8625dac3c5035c94ab4c4ed5f042acd290c639f9e241a23a1d3f63bedbbb71",
+      "reportedLicense": "MIT-0", "contentLicense": "not separately declared",
+      "usedFor": ["canvas-saved-artifact-handoff"],
+      "adaptationNote": "Use actual verification evidence and partial/blocked handoffs, without generic retry, respawn or external execution authority"
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-storyboard", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-storyboard/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "44c36c92988050910c07beb1cf0a94a844416efb5bbdfeacef868b7bf509e886",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-shot-sequence-design", "canvas-shot-composition"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-storyboard", "path": "references/blocking-playbooks.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-storyboard/file?path=references%2Fblocking-playbooks.md&ownerHandle=worldwonderer",
+      "sha256": "f941a7b352e0e5a5d480e805c526b2aefd88a9bbedd813d39ed6e9c1b52fb003",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-shot-composition", "canvas-reference-continuity-review"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-video-prompts", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-video-prompts/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "5839ceb13d66d6606c65459ffd4a211735c7b4bb517b9bb1e187b72d2129f0cd",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-video-shot-prompt", "canvas-model-aware-references", "canvas-generation-prompt-craft"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-video-prompts", "path": "references/camera-audio-continuity.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-video-prompts/file?path=references%2Fcamera-audio-continuity.md&ownerHandle=worldwonderer",
+      "sha256": "ab150f05099c28845423fc77eb030b236d0548391d9e9c617c531aa8e6acf96c",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-video-shot-prompt", "canvas-dialogue-and-narration", "canvas-reference-continuity-review", "canvas-model-aware-references", "canvas-generation-prompt-craft"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-review", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-review/file?path=SKILL.md&ownerHandle=worldwonderer",
+      "sha256": "c42dfbc411c228a06ef3fcbac772cf60fb4cdef878044e24e29fab5a57e4c14a",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-production-review", "canvas-sound-and-delivery-review"]
+    },
+    {
+      "owner": "worldwonderer", "slug": "short-drama-review", "path": "references/review-method.md",
+      "url": "https://clawhub.ai/api/v1/skills/short-drama-review/file?path=references%2Freview-method.md&ownerHandle=worldwonderer",
+      "sha256": "b0c873726186d3d73d344e72abe506df8fb65bcc02166b501721a404a09f582a",
+      "reportedLicense": "MIT-0", "usedFor": ["canvas-production-review"]
+    },
+    {
+      "owner": "vargai", "slug": "video-sound", "path": "SKILL.md",
+      "url": "https://clawhub.ai/api/v1/skills/video-sound/file?path=SKILL.md&ownerHandle=vargai",
+      "sha256": "b9846d69e66bb41c713b96c7693979d482a836c815ce19843ea468b6986bfb35",
+      "reportedLicense": "MIT", "usedFor": ["canvas-shot-sound-design", "canvas-dialogue-and-narration", "canvas-tts-specification", "canvas-sound-and-delivery-review"]
+    }
+  ],
+  "adaptations": [
+    "Keep the existing 8 roles and original 28 method names; add one main-only diagnostic method and exact read tool under ADR-0107 without changing existing required methods or write authority",
+    "Keep Chinese prompt defaults and native video sound on unless the user explicitly authorizes silent targets",
+    "Use actual Canvas asset, artifact and task identities instead of external REF/PLAN/file conventions",
+    "Move director methods to shots, keep story responsible for narrative and script only",
+    "Do not import external providers, shell commands, automatic audio judging, transcription, mixing or regeneration",
+    "Use examples as teaching material only; never as project facts or model performance guarantees",
+    "Keep asset identity, persistent variants, scene geography and shot transients separate; preserve exact historical dependencies",
+    "Use local visual edit target/change/preserve/continuity impact as draft methods, without adding image cleaning or generation authority",
+    "Keep main methods task-loaded with no default body or workbook injection; specialists cannot read the new main resources",
+    "Adapt role routing, dependencies and concise evidence handoffs without external task-state changes, shared-directory overwrites or automatic respawn",
+    "Use current exact tool/input contracts and original receipts instead of external jobs, retry keys, blanket re-confirmation or future-ID placeholders",
+    "Use voice directions for planning and user comparison only; preserve user-supplied ID direct use, original TTS tasks and user auditory evidence",
+    "Keep shared resources scoped to the existing role matrix, including executor handoff-only access; sharing method content does not share tools",
+    "Use actual UTF-16 half-open citations and prose next, distinguish directory cursors, current-batch reads and saved-artifact dependencies",
+    "Trace generated references through their actual historical dependencies, count the selected mode's inputs and preserve same-save prompt tokens and real edges",
+    "Separate static images, timed actions, reference control and sound; local revisions use new artifact identities without rerendering saved files",
+    "Verify actual save receipts and exact same-content reuse; unknown results and needsReview do not grant approval, retries or historical rewrites",
+    "Retain source-only preparation as historical evidence; publish 0.2.149 only after user-authorized installation, restart and exact package/runtime verification"
+  ]
+}

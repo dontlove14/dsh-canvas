@@ -10,6 +10,7 @@ export const DocumentSchema = z.object({
 }).strict()
 export const SpecialistRoleSchema = z.enum(['story', 'assets', 'shots', 'audio', 'review', 'voice'])
 export const AgentRoleSchema = z.union([z.literal('main'), z.literal('executor'), SpecialistRoleSchema])
+export type AgentRole = z.infer<typeof AgentRoleSchema>
 /** Registered for native spawn resolution, omitted from the user's preset chooser. */
 export const INTERNAL_CANVAS_PRESETS: readonly string[] = [...SpecialistRoleSchema.options, 'executor'].map((role) => `canvas-${role}`)
 export type SpecialistRole = z.infer<typeof SpecialistRoleSchema>

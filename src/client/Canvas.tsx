@@ -43,10 +43,10 @@ import { AudioPlayer } from './AudioPlayer'
 import { TtsNode } from './TtsNode'
 import { TtsEditor } from './TtsEditor'
 import { TtsIcon } from './TtsIcon'
-import { TaskDialog } from './TaskDialog'
+import { TaskDialog, type TaskDetailTarget } from './TaskDialog'
 import { nodeEditorPosition, readonlyEditorBounds } from './nodeOverlayLayout'
 import { RelationshipEdge, relationshipEdges, type RelationshipFlowEdge } from './RelationshipEdge'
-import { NodeLoading, NodeLoadingContext, useNodeLoadingEnvironment } from './NodeLoading'
+import { NodeLoading, NodeLoadingContext, TaskDetailNavigationContext, useNodeLoadingEnvironment } from './NodeLoading'
 import { createLoadingResolutionStore, LoadingResolutionContext } from './loadingResolution'
 import { HistoryNode } from './HistoryNode'
 import { generationHistory, historyFrame, historyEditorAnchor, resultHandle, EMPTY_HISTORY_DIMENSIONS, type GenerationCard, type HistoryDimensions } from './generationHistory'
@@ -267,6 +267,10 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
   }, [api, workspace])
   const uploading = preparingUploads > 0 || uploadActivity.length > 0
   const [showTasks, setShowTasks] = useState(false)
+  const [taskDetailTarget, setTaskDetailTarget] = useState<TaskDetailTarget | undefined>()
+  const openTaskDetail = useCallback((task: Pick<TaskSummary, 'id' | 'workspaceId'>) => {
+    setTaskDetailTarget({ id: task.id, canvasId: task.workspaceId }); setShowTasks(true)
+  }, [])
   const [leaving, setLeaving] = useState(false)
   const container = useRef<HTMLDivElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -562,11 +566,11 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     } catch (error) { report(error); setLeaving(false) }
   }
   const selectionEnvironment = useMemo(() => ({ selecting: marquee.selecting, selectedIds: selected, readOnly }), [marquee.selecting, selected, readOnly])
-  return <ReviewContext.Provider value={reviewEnvironment}><LoadingResolutionContext.Provider value={loadingResolution}><NodeLoadingContext.Provider value={loadingEnvironment}><CanvasSelectionContext.Provider value={selectionEnvironment}><div className="dc-root" ref={loadingRoot} data-agent-readonly={readOnly}>
+  return <TaskDetailNavigationContext.Provider value={openTaskDetail}><ReviewContext.Provider value={reviewEnvironment}><LoadingResolutionContext.Provider value={loadingResolution}><NodeLoadingContext.Provider value={loadingEnvironment}><CanvasSelectionContext.Provider value={selectionEnvironment}><div className="dc-root" ref={loadingRoot} data-agent-readonly={readOnly}>
     <header className="dc-header"><UiButton className="dc-ui-back" autoFocus={active} disabled={uploading || submitting || leaving} title={uploading ? '请等待文件接收完成' : submitting ? '请等待任务提交完成' : '保存并返回项目列表'} onClick={() => void returnToProjects()}>← <span>{leaving ? '保存中…' : '项目列表'}</span></UiButton>
       <div className="dc-title dc-workspace-title"><div><strong title={title}>{title}</strong><small>无限画布</small></div></div>
       <AgentControlBar api={api} canvasId={workspace} sessionId={sessionId} control={state?.agentControl} flush={canvas.flush} refresh={canvas.refresh} report={report} disabled={uploading || submitting || leaving || !state} />
-      <div className="dc-header-actions"><span className={`dc-save-status ${canvas.conflict ? 'warning' : ''}`}>{canvas.saveStatus}</span><UiButton variant="outline" onClick={() => setShowTasks(true)}>任务</UiButton><UiButton variant="outline" onClick={() => { setSettingsTab('storage'); setShowSettings(true) }}>⚙ 设置</UiButton></div>
+      <div className="dc-header-actions"><span className={`dc-save-status ${canvas.conflict ? 'warning' : ''}`}>{canvas.saveStatus}</span><UiButton variant="outline" onClick={() => { setTaskDetailTarget(undefined); setShowTasks(true) }}>任务</UiButton><UiButton variant="outline" onClick={() => { setSettingsTab('storage'); setShowSettings(true) }}>⚙ 设置</UiButton></div>
     </header>
     <CanvasTextSelectionProvider><div className="dc-canvas-area" ref={container} tabIndex={-1} data-gpu-compositing={gpu.enabled ? 'enabled' : 'disabled'} data-gpu-reason={gpu.reason}
       data-marquee-selecting={marquee.selecting}
@@ -681,14 +685,14 @@ export function CanvasWorkspace({ api, workspace, title, onBack, active = true, 
     {active && showSettings && <Modal label="无限画布" className="dc-settings-modal" onClose={() => { setShowSettings(false); loadModels(); void reviewState.refresh() }}><CanvasSettings api={api} showTitle={false} initialTab={settingsTab} onChanged={() => { loadModels(); void reviewState.refresh() }} /></Modal>}
     {active && reviewAsset && <SeedanceReviewDialog key={reviewAsset.id} asset={reviewAsset} onClose={() => setReviewAsset(undefined)}
       onSettings={() => { setReviewAsset(undefined); setSettingsTab('review'); setShowSettings(true) }} />}
-    {active && showTasks && <TaskDialog api={api} readOnly={readOnly} onClose={() => setShowTasks(false)} />}
+    {active && showTasks && <TaskDialog api={api} initialTask={taskDetailTarget} readOnly={readOnly} onClose={() => { setShowTasks(false); setTaskDetailTarget(undefined) }} />}
     {active && preview && (preview.kind === 'audio'
       ? <Modal label={preview.filename} onClose={() => setPreview(null)} wide><Media asset={preview} api={api} workspace={workspace} /></Modal>
       : <UiMediaModal label={preview.filename} onClose={() => setPreview(null)}>
         {preview.kind === 'image' ? <SignedImage className="dc-preview-image" api={api} canvas={workspace} assetId={preview.id} variant="original" alt={preview.filename} draggable={false} />
           : <VideoPlayer key={preview.id} src={api.media(workspace, preview.id)} api={api} canvas={workspace} assetId={preview.id} autoPlay preview label={preview.filename} />}
       </UiMediaModal>)}
-  </div></CanvasSelectionContext.Provider></NodeLoadingContext.Provider></LoadingResolutionContext.Provider></ReviewContext.Provider>
+  </div></CanvasSelectionContext.Provider></NodeLoadingContext.Provider></LoadingResolutionContext.Provider></ReviewContext.Provider></TaskDetailNavigationContext.Provider>
 }
 
 interface EditorProps {

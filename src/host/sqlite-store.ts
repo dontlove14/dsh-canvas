@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, writeFile, rm, realpath, stat } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, rm, realpath, stat, open } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import lockfile from 'proper-lockfile'
@@ -19,6 +20,8 @@ import { FISH_TTS_ENDPOINT, TtsParamsSchema, TtsSettingsInputSchema, type TtsSet
 import { STORAGE_REQUIRED, type ObjectLocator, type ObjectStorageSettings, type StorageInput, type MediaVariant } from '../shared/objectStorage'
 import { ObjectStorage } from './object-storage/service'
 import type { StorageFactory, StorageRecord, StorageCredentials } from './object-storage/types'
+import { formatProviderExchange, redactDiagnosticText, type ProviderExchange, type ProviderExchangeStep } from '../shared/taskDiagnostics'
+import { canAskTaskAgent, exchangeFailureEvidence, safeFailureText, type FailureExchangeEvidence, type TaskFailureEvidence } from '../shared/taskFailure'
 
 const TtsConfigSchema = z.object({
   endpoint: TtsSettingsInputSchema.shape.endpoint, revision: z.number().int().positive(),
@@ -727,8 +730,118 @@ export class SqliteStore {
     const row = await this.db.get('SELECT d.*,c.kind FROM task_details d JOIN task_catalog c ON c.id=d.task_id WHERE c.canvas_id=? AND c.id=?', [canvas, id])
     if (!row) throw new CanvasError('任务不存在', 404)
     const task = this.state(canvas).tasks.find((t) => t.id === id)
+    const recorded = await this.hasProviderExchange(id)
+    const failure = await this.readJson(`task-http/${z.string().uuid().parse(id)}-failure.json`, null)
     return { ...taskModelIdentity(row.snapshot_json ? JSON.parse(row.snapshot_json).model : undefined),
-      task: task ?? null, kind: row.kind, phase: row.phase, externalTaskId: row.external_task_id, externalCompletedAt: row.external_completed_at, successAt: row.success_at, failureStage: row.failure_stage, failureCode: row.failure_code, failureMessage: row.failure_message, attempts: await this.db.all('SELECT step,issued_at,finished_at,outcome,error FROM task_attempts WHERE task_id=? ORDER BY issued_at', [id]) }
+      task: task ?? null, kind: row.kind, phase: row.phase, externalTaskId: row.external_task_id, externalCompletedAt: row.external_completed_at, successAt: row.success_at, failureStage: row.failure_stage, failureCode: row.failure_code, failureMessage: row.failure_message ? failure?.message ?? row.failure_message : null,
+      providerExchange: { request: recorded, response: recorded },
+      attempts: await this.db.all('SELECT step,issued_at,finished_at,outcome,error FROM task_attempts WHERE task_id=? ORDER BY issued_at', [id]) }
+  }
+  private providerExchangePath(id: string, step: ProviderExchangeStep): string {
+    return join(this.root, 'task-http', `${z.string().uuid().parse(id)}-${z.enum(['submit', 'poll', 'publish']).parse(step)}.json`)
+  }
+  private async hasProviderExchange(id: string): Promise<boolean> {
+    for (const step of ['submit', 'poll', 'publish'] as const)
+      if (await stat(this.providerExchangePath(id, step)).then(() => true).catch(() => false)) return true
+    return false
+  }
+  async recordProviderExchange(id: string, exchange: ProviderExchange): Promise<void> {
+    const path = this.providerExchangePath(id, exchange.step)
+    await mkdir(join(this.root, 'task-http'), { recursive: true, mode: 0o700 })
+    await atomicJson(path, exchange)
+    // Keep a compact projection so diagnosis never reads a large request/media body.
+    await atomicJson(join(this.root, 'task-http', `${z.string().uuid().parse(id)}-evidence-${exchange.step}.json`), exchangeFailureEvidence(exchange))
+  }
+  async recordTaskFailure(id: string, message: string, keys: string[], programError = false): Promise<void> {
+    await mkdir(join(this.root, 'task-http'), { recursive: true, mode: 0o700 })
+    await atomicJson(join(this.root, 'task-http', `${z.string().uuid().parse(id)}-failure.json`),
+      { message: redactDiagnosticText(message, keys), ...(programError ? { programError: true } : {}) })
+  }
+  async taskExchange(canvas: string, id: string, part: 'request' | 'response'): Promise<{ text: string }> {
+    const row = await this.db.get('SELECT id FROM task_catalog WHERE canvas_id=? AND id=?', [canvas, id])
+    if (!row) throw new CanvasError('任务不存在', 404)
+    const exchanges: ProviderExchange[] = []
+    for (const step of ['submit', 'poll', 'publish'] as const) {
+      try { exchanges.push(JSON.parse(await readFile(this.providerExchangePath(id, step), 'utf8'))) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    }
+    if (!exchanges.length) throw new CanvasError('该任务未记录原始接口内容', 404)
+    return { text: exchanges.map((exchange) => formatProviderExchange(exchange, part)).join('\n\n────────────────────\n\n') }
+  }
+  /** Owner-scoped exact task read, independent of canvas edit delegation; no secret/snapshot access. */
+  async taskFailureEvidence(id: string, signal: AbortSignal, valid: () => void): Promise<TaskFailureEvidence> {
+    id = z.string().uuid().parse(id).toLowerCase()
+    const query = () => this.db.get(`SELECT t.canvas_id,t.status,t.kind,t.updated_at,d.phase,d.failure_stage,d.failure_code,d.failure_message,
+      json_extract(d.snapshot_json,'$.model.name') AS model_name,
+      json_extract(d.snapshot_json,'$.model.api_base') AS model_base,
+      json_extract(d.snapshot_json,'$.model.protocol') AS model_protocol
+      FROM task_catalog t JOIN canvases c ON c.id=t.canvas_id JOIN task_details d ON d.task_id=t.id
+      WHERE t.id=? AND c.owner_id=? AND c.deleted_at IS NULL`, [id, this.owner])
+    const check = () => { signal.throwIfAborted(); valid() }
+    check()
+    const row = await query()
+    check()
+    if (!row) throw new CanvasError('任务不存在或当前无法访问', 404, 'TASK_NOT_FOUND')
+    const status = statusFromDb[row.status]
+    if (!canAskTaskAgent(status)) throw new CanvasError('该任务当前不是失败状态，请查看任务最新结果', 409, 'TASK_NOT_FAILED')
+    let recordsIncomplete = false
+    const safe = (text: string, limit = 1200) => safeFailureText(this.redact(text), limit)
+    const bounded = async (path: string, limit: number): Promise<any> => {
+      check()
+      let handle
+      try {
+        handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+        const info = await handle.stat()
+        if (!info.isFile() || info.size > limit) { recordsIncomplete = true; return null }
+        const data = Buffer.alloc(info.size + 1)
+        const { bytesRead } = await handle.read(data, 0, data.length, 0)
+        if (bytesRead > limit) { recordsIncomplete = true; return null }
+        check()
+        return JSON.parse(data.subarray(0, bytesRead).toString('utf8'))
+      } catch (error) {
+        check()
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') recordsIncomplete = true
+        return null
+      } finally { await handle?.close() }
+    }
+    const exchanges: FailureExchangeEvidence[] = []
+    const schema = z.object({
+      step: z.enum(['submit', 'poll', 'publish']), time: z.number().finite(), status: z.number().int().optional(),
+      code: z.string().optional(), message: z.string().optional(), requestId: z.string().optional(), incomplete: z.boolean(),
+    }).strict()
+    for (const step of ['submit', 'poll', 'publish'] as const) {
+      const compact = await bounded(join(this.root, 'task-http', `${id}-evidence-${step}.json`), 16000)
+      let candidate = schema.safeParse(compact)
+      if (!candidate.success) {
+        const original = await bounded(this.providerExchangePath(id, step), 256000)
+        if (original) {
+          try { candidate = schema.safeParse(exchangeFailureEvidence(original)) } catch { recordsIncomplete = true }
+        }
+      }
+      if (candidate.success && candidate.data.step === step) {
+        const item = candidate.data
+        exchanges.push({ ...item, ...(item.message ? { message: safe(item.message) } : {}),
+          ...(item.code ? { code: safe(item.code, 160) } : {}),
+          ...(item.requestId ? { requestId: safe(item.requestId, 160) } : {}) })
+      }
+    }
+    const failure = await bounded(join(this.root, 'task-http', `${id}-failure.json`), 24000)
+    const attempts = await this.db.all('SELECT step,outcome,error FROM task_attempts WHERE task_id=? ORDER BY issued_at DESC LIMIT 8', [id])
+    check()
+    if (hash(await query()) !== hash(row)) throw new CanvasError('任务状态已变化，请查询最新结果', 409, 'TASK_DIAGNOSIS_STALE')
+    check()
+    const task = this.state(row.canvas_id).tasks.find((task) => task.id === id)
+    const identity = taskModelIdentity({ name: row.model_name, api_base: row.model_base, protocol: row.model_protocol })
+    return {
+      taskId: id, status, kind: row.kind, modelName: safeFailureText(identity.modelName, 160), providerName: identity.providerName,
+      phase: safeFailureText(row.phase ?? '', 160), failureStage: row.failure_stage ? safeFailureText(row.failure_stage, 160) : null,
+      failureCode: row.failure_code ? safeFailureText(row.failure_code, 160) : null,
+      failureMessage: row.failure_message ? safe(typeof failure?.message === 'string' ? failure.message : row.failure_message) : task?.error ? safe(task.error) : null,
+      savedResults: task?.resultIds.length ?? 0, exchanges,
+      attempts: attempts.map((item) => ({ step: safeFailureText(item.step, 160), outcome: item.outcome ? safeFailureText(item.outcome, 160) : null,
+        error: item.error ? safe(item.error) : null })),
+      recordsIncomplete, programError: failure?.programError === true,
+    }
   }
   private async moveStatements(canvas: string, nodeIds?: string[], targetStorage?: string, state = this.state(canvas), revisionIncrement = 0): Promise<Statement[]> {
     const target = await this.db.get('SELECT target_storage_id,layout_revision FROM canvases WHERE id=?', [canvas])

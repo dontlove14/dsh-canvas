@@ -172,7 +172,9 @@ describe('FishTTS durable generation', () => {
     const task = await wait(service, summary.id, 'completed')
     const [address, init] = fetch.mock.calls[0]
     expect(address).toBe(FISH_TTS_ENDPOINT)
-    expect(init.headers).toEqual({ Authorization: 'Bearer tts-test-secret', 'Content-Type': 'application/json', model: 's1' })
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer tts-test-secret')
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json')
+    expect(new Headers(init.headers).get('model')).toBe('s1')
     expect(JSON.parse(init.body as string)).toEqual({ text: tts.prompt, reference_id: 'voice-123', prosody: { speed: 1.2, volume: -2 }, format: 'mp3' })
     expect(task.snapshot.referenceIds).toEqual([])
     const asset = service.store.state('w').assets[0]
@@ -224,7 +226,8 @@ describe('FishTTS durable generation', () => {
     expect((await service.store.taskPrivate(accepted.id)).key).toBe('old-test-key')
     await service.close()
     const reopened = await instance(service.config.dataDir); await wait(reopened, accepted.id, 'completed')
-    expect(fetch).toHaveBeenCalledWith(FISH_TTS_ENDPOINT, expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer old-test-key' }) }))
+    expect(fetch.mock.calls[0][0]).toBe(FISH_TTS_ENDPOINT)
+    expect(new Headers(fetch.mock.calls[0][1].headers).get('authorization')).toBe('Bearer old-test-key')
     expect(reopened.store.ttsSettings().endpoint).toBe(FISH_TTS_ENDPOINT)
     const before = reopened.store.ttsService().credentialRef
     await reopened.store.saveTtsSettings({ endpoint: FISH_TTS_ENDPOINT, revision: 2 })

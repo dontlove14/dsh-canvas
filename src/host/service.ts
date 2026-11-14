@@ -493,7 +493,12 @@ export class CanvasService {
       }
       if (suffix === 'task') {
         const id = await requireCanvas()
-        if (request.method === 'GET') return json(await this.store.taskDetail(id, IdSchema.parse(url.searchParams.get('id'))))
+        if (request.method === 'GET') {
+          const taskId = IdSchema.parse(url.searchParams.get('id'))
+          const part = url.searchParams.get('exchange')
+          return json(part === null ? await this.store.taskDetail(id, taskId)
+            : await this.store.taskExchange(id, taskId, z.enum(['request', 'response']).parse(part)))
+        }
         if (request.method === 'POST') {
           const body = z.object({ id: IdSchema, action: z.enum(['retry-save', 'resume-query', 'abandon']) }).strict().parse(await request.json())
           await this.taskAction(id, body.id, body.action); return json({ ok: true })

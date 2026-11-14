@@ -115,7 +115,9 @@ describe('GPT Image 2.5 requests and durable outcomes', () => {
     await wait(instance, task.id, 'completed')
     const [url, init] = fetch.mock.calls[0]
     expect(url).toBe(`${BUILTIN_MODELS[index].api_base}/images/generations`)
-    expect(init.headers).toEqual({ 'Content-Type': 'application/json', Authorization: `Bearer key-${index}` })
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json')
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer key-${index}`)
+    expect(new Headers(init.headers).get('content-length')).toBe(String(Buffer.byteLength(init.body as string)))
     expect(JSON.parse(init.body as string)).toEqual({ model: BUILTIN_MODELS[index].model_id, prompt: 'a tree', size: '2048x1152', n: 1, quality: 'max', background: 'transparent', output_format: 'png' })
     expect(fetch).toHaveBeenCalledTimes(1)
   })

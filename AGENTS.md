@@ -1,5 +1,11 @@
 # 开发交付规则
 
+- 先选模型的创作与模型族提示词按[ADR-0108](docs/adr/0108-model-first-planning-and-family-prompt-skills.md)：正式shots前确认视频模型，assets生图规格前确认图片模型；独立故事/外观概念可先做。能力动态读取当前已配置型号与同源校验，不维护Markdown数值表；宿主按所选族自动加载提示词Skill并绑定真实批次，换型/能力变化阻止过期保存与交接。叙事镜头与生成片段分开，同场连续且必要参考并集合法优先一次生成，必须拆分说明原因，不强制上限；新增型号沿正常接入，新族同步方法/权限/反例和来源，图/DDL/历史身份不迁移。
+
+- 失败任务诊断按[ADR-0107](docs/adr/0107-scoped-task-diagnosis-and-fresh-conversation.md)：“询问 Agent”仅failed/save_failed，列表与详情共用全新无限画布会话流程，旧预设/草稿保持。主级只读工具按最新真实用户精确taskId及宿主可访问任务授权，不接管画布、不读凭据/提示词/媒体、不自动重试；三类结论有证据，插件问题反馈地址由宿主固定。
+
+- Agent 能力按[ADR-0104](docs/adr/0104-agent-skills-and-host-authority.md)三层设计：角色提示词只保留身份/职责/协作与硬边界；专业方法按本角色本批Skill加载；读写由宿主身份、资源授权及精确工具权限控制。以后新增子Agent或增加能力必须一起维护AGENT_CAPABILITIES、Skill触发/必备/随包哈希、restrict/guard、授权及反例检查和文档，不以提示词或加载Skill自动扩权。导演/序列/画面归shots细分Skill；视频声音默认开启，仅真实用户明确无声且宿主绑定精确目标才可false，无音色/无音频参考/独立TTS不构成静音依据。执行者仍只按精确清单，图/DDL/历史任务与成果身份不迁移。参见[治理Skill](.trae/skills/agent-capability-governance/SKILL.md)。
+
 - Agent 空间同角色展示按[ADR-0103](docs/adr/0103-agent-space-one-figure-per-role.md)：展开办公室和缩小站台均每角色一个形象，无论多少真实并行实例；任一本轮成员实际工作就保持工作，部分结束不重启工作循环，不同角色分别保留。原日志和逐实例画布光标不合并，交接按真实成员映射到稳定角色形象，不重播历史，不改任务/图/DDL。
 
 文档类型：操作指南；负责人：项目维护者 / 开发执行者；最近核对：2026-11-12。

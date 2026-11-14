@@ -1,5 +1,19 @@
 # 运行、配置与排障指南
 
+0.2.153增加7个模型族提示词Skill与7份工作表，合计36/32。正式分镜前由原生卡片确认视频型号与供应商，生图规格前确认图片型号；独立故事/外观概念可先做。能力动态来自当前集成且已配置模型和同源校验，专业Agent收到真实批次planningModels与匹配方法，换型或能力变化拦截过期保存/交接。序列区分镜头与生成片段，连续动作且必要参考并集合法优先一次生成，拆段有原因、不强制上限。未选模型/方法不匹配/旧批次分别报告选型所需、匹配错误或模型方案已过期；主级只复核受影响内容并开新批次，不重提旧生成。方法默认中文，原权限与有声策略保持。沿web / 3080完整check、双构建、同包安装重启与加载核验，成功前保留152回退；手验482–487，见[ADR-0108](adr/0108-model-first-planning-and-family-prompt-skills.md)。
+
+0.2.152修正“询问 Agent”只打开空会话的问题：新会话继承当前 / 最近已有工作区并核验cwd，原生打开完成后单独绑定发送的导航信号，避免自身selectPanel(null)中断发送。只给新binding准备完整taskId问题，发送一次；失败通过原生输入提示并在用户未改稿时恢复问题。无工作区不创建空对话，旧空会话不自动补发；原诊断权限与三类证据保持。沿web / 3080完整check、双构建、同包安装/重启与加载核验，成功前保留151回退；手验479–481，见[ADR-0107](adr/0107-scoped-task-diagnosis-and-fresh-conversation.md)。
+
+0.2.151在任务列表和详情追加“询问 Agent”，仅failed / save_failed显示；打开前及发送前核验任务状态。始终创建全新“无限画布”会话，关闭任务中心后自动发送完整任务ID；旧对话、草稿和预设保留，连续点击/取消/迟到不重复发送。主级新增只读诊断Skill与工作表，按最新真实用户指定ID和宿主可访问任务读取脱敏证据，不接管画布、不自动生成/恢复/重试保存。诊断分模型服务原因、插件程序问题和暂无法确定；只有程序问题提供固定Issues反馈按钮。当前29个Skill、25份工作表；精简证据sidecar沿task-http，旧大记录不读取或补造。沿web / 3080完整check、双构建、同包安装/重启和加载核验，成功前保留150回退；手验475–478，见[ADR-0107](adr/0107-scoped-task-diagnosis-and-fresh-conversation.md)。
+
+0.2.150任务详情移除提交内容，失败时直接显示“失败原因”正文；新增“复制原始请求 / 复制原始响应”，包含真实方法/地址、头和正文，鉴权保留首尾并脱敏中间。首次提交和最近查询/下载按同样顺序复制；二进制以Base64标明，历史/未发请求任务不伪造通信。记录在私有dataDir/task-http，详情不预加载大正文，不改变图/DDL/凭据/任务身份。节点失败入口使用用户SVG并直接打开对应历史任务，列表筛选分页保持。沿web / 3080检查、双构建、同包安装/重启和加载核验，成功前保留149回退；手验471–474，见[ADR-0106](adr/0106-task-failure-reasons-and-provider-exchange-copy.md)。
+
+0.2.149发布共享四项Skill：来源读取、模型参考、提示词、已保存成果交接各追加一份工作表，累计24份已完善方法/24份资源；八角色范围与宿主权限不变。准备阶段按用户要求先完成源码check、双构建与source-only核验，保留0.2.148；用户随后明确“现在可以重启服务了”，发布沿原web / 3080流程同步版本、重新构建核验、同包安装及正常重启，并核对HTTP实际preload、全部包内文件与原配置/数据。成功前保留148回退包，见[ADR-0105](adr/0105-reviewed-creative-skills-and-scoped-workbooks.md)，实际创作质量由用户手验467–470。
+
+0.2.148修复无限画布Agent发送消息立即返回400的问题：`canvas_skill`原来生成根级`oneOf`，ByteDance模型接口要求参数根明确为`type: object`。现对外声明`action`枚举与可选`name`，宿主仍严格校验load必须带name、list不接受name、未知字段和长度；八角色共用注册入口拒绝非对象根参数，保留原Skill、工具权限与成果身份。检查覆盖八角色真实工具wire参数及非法输入；沿web / 3080安装重启与加载核验，成功前保留147回退包；用户在原会话手验[466](manual-tests.md)，不自动重发原消息。
+
+0.2.147完善主Agent创作统筹、方案审阅与生成交接、精确执行清单、音色选择与真实试听4项Skill，追加4份主级工作表。累计20份工作表同包按需读取，保持28个名称、主级空默认组合、角色必备项与宿主工具权限；本轮终点、真实依赖/回执、已有授权、未来ID和声音选择按[ADR-0105](adr/0105-reviewed-creative-skills-and-scoped-workbooks.md)维护。沿已授权web / 3080完成check、双构建、同包安装 / 重启和HTTP加载核验；成功前保留146回退包，主级实际行为由用户手验[462–465](manual-tests.md)。
+
 0.2.143的Agent 空间同角色只显示一个人物，展开与缩小一致；部分实例结束时仍显示剩余实例工作，不同角色各自保留。原公开日志可核对实际实例，画布仍有各实例独立光标。沿已授权web / 3080检查、双构建、同包安装 / 重启和加载核验；成功前保留142回退包，用户手验[443–445](manual-tests.md)，见[ADR-0103](adr/0103-agent-space-one-figure-per-role.md)。
 
 0.2.142的canvas_execute默认分派多个已确定的独立新建节点，maxConcurrentAgents默认4且可配1–4；共用已有只读参考可以并行，serial、本批依赖和混合工作保持顺序。其他独立任务仍用canvas_execute_parallel。专业与执行共享预算，旧批次先查回执不重派；仅实际executor显示13×15指定箭头，结束独立移除，后台 / 重连不补播。沿已授权web / 3080检查、双构建、同包安装 / 重启、HTTP与原数据身份核验，成功前保留141回退包；用户手验[439–442](manual-tests.md)，见[ADR-0102](adr/0102-independent-create-default-dispatch-and-small-cursors.md)及[ADR-0101](adr/0101-parallel-canvas-executors-and-observed-cursors.md)。
@@ -52,7 +66,7 @@
 
 0.2.115新增私有`creative-projects.json`和`creative-sources/`，随现有dataDir/profile一起备份；保留旧agent-ledger、两库、对象存储、模型、凭据和任务身份。新创作sidecar不改变CanvasGraph/DDL。重启把running批次转interrupted，已有成果/读取范围保留，不自动启动子Agent或重提任务；通过creative_project核对并按新批次续作。SOURCE_STALE/CREATIVE_STATE_INVALID需恢复备份或核对资料，不能清空整个dataDir。原文快照与工作区成果不自动清理，容量满时先备份整理。
 
-文档类型：操作指南；负责人：项目维护者；最近核对：2026-11-05。复核周期和触发条件见[文档导航](index.md)。
+文档类型：操作指南；负责人：项目维护者；最近核对：2026-11-13。复核周期和触发条件见[文档导航](index.md)。
 
 0.2.114刷新3080后，插件项目首页左上角使用用户提供的鲸鱼Logo。资源裁掉大面积透明留白、清理极淡杂点并保留半透明边缘，以透明PNG随客户端打包；首页标识无底色和边框，适配明暗主题及窄侧栏。沿web / 3080同包更新，113保留至114安装 / 加载 / 原数据核验成功；手验409。
 
@@ -282,11 +296,29 @@ TTS也通过“配置模型”选择FishTTS / Model Link配置独立API Key，�
 
 根目录 `dsh-canvas-*.manifest.json`保留源码 / lib / 包hash身份；package / lock / tsconfig为构建输入。一次性回执与脚本放受限系统临时目录。封面依赖sharp与ffmpeg当前平台原生包，安装不能跳过optional依赖；当前验证macOS arm64。派生封面 / 波形持久对象在OSS，Host在受控临时目录解码后清理；失败检查平台依赖、格式 / 限额、OSS权限与空间，再刷新重试，不重提付费任务。
 
+用户明确只改源码时，保留已安装包与根发布manifest。npm run check完成首构建后，以同一个工作区外0700目录作为CANVAS_ARTIFACT_CHECK_DIR，运行record、再build、再verify；record/verify均显式设置CANVAS_ARTIFACT_SOURCE_ONLY=1，日志和一次性文件权限0600。verify把结果写为临时目录内`<name>-<version>.source-only.manifest.json`并标source-only/installed=false，默认发布路径不变。该结果只证明当前源码构建候选，不证明安装生效；只改源码阶段不调用打包/安装/重启流程。后续用户授权发布时递增版本、重新核验并使用默认发布输出，不能把准备阶段manifest当已安装证据。
+
 音频幅度复用ffmpeg，单次解码20秒超时 / 最多2小时采样；所有派生资源共享独立串行32身份队列、失败冷却30秒。波形失败先检查原音频与编码；波形不改变原素材。不要只删除云端派生对象而保留DB定位；首期没有对象清理入口。
 
 0.2.39起waveform GET / HEAD通过认证Host返回200同源JSON，无OSS跳转；修复“原音频能播、波形fetch被Bucket CORS拦截”。Host只读最多8192字节、有界内存缓存与并发合并，不落盘保存原音频。若仍提示波形不可用，核对实际加载0.2.39、云端派生内容 / 身份与OSS读取权限，不重生成音频。原媒体与preview跨域权限要求保持。所有生图模型按1:1、2:3、3:2、3:4、4:3、4:5、5:4、9:16、16:9、21:9排序，只显示参数允许项，不增加25:9或9:25；4K继续过滤非法项，见[ADR-0045](adr/0045-same-origin-waveforms-and-ratio-order.md)。
 
 ## 插件配置表
+
+0.2.145按[ADR-0105](adr/0105-reviewed-creative-skills-and-scoped-workbooks.md)完善shots/story/audio/review的13个方法，并为每份提供角色内只读工作表。保持28个名称、八角色、默认组合和工具权限；目录列出对应references路径，正文按任务加载、长例子用canvas_skill_resource读取。13份资源与正文均编入agent-preset.js，lib/agent-skills只作同包核验副本，不独立修改。来源升级先审阅并更新[身份记录](agent-skill-content-sources.json)，不在运行时下载外部内容。
+
+0.2.146资产角色增加asset-design-workbook、asset-continuity-workbook、asset-image-spec-workbook三份资源，目录返回各Skill精确references路径，按需通过canvas_skill_resource读取。文字规格与真实素材/认可分开，图片观察只用获授工具；变体不改变持续身份，场景反打不改固定地理。局部编辑给目标/变化/保持/影响，专业角色仅保存asset-spec，主级准备精确清单、执行者建节点、用户点击生图；不新增裁图/清理或供应商工具。
+
+0.2.147主级增加orchestration-workbook、plan-and-handoff-workbook、execution-manifest-workbook、voice-choice-workbook四份资源，required仍为空，目录及正文按任务读取，不自动注入工作表。任务只授精确输入并按真实前置派发，已保存/主级审阅/用户认可/媒体技术成功分开；普通授权内改稿不重复确认，图片/视频交接后结束本轮并由用户点击生成。执行清单用tool/input契约；dependsOn不提供未来ID插值，缺新节点/素材ID先核对前批真实回执。用户Fish ID直接使用，单参考原文与新朗读文本分开，试听只跟踪原任务和用户反馈。专业不能读取main资源；不新增调度状态、生成器、自动重派或视听能力。
+
+0.2.149增加source-reading-workbook、reference-planning-workbook、prompt-craft-workbook、artifact-handoff-workbook四份资源，仍按capabilities原矩阵读取；main/assets/shots各4，story/audio/review各3，voice2，executor仅成果1。正文和工作表绑定同一真实哈希，工作表不自动注入上下文，加载不增加工具。索引next与正文next分开、引用按本批实际UTF-16范围；派生参考按生成当时依赖，token/边同次保存；提示词区分一图状态和视频时序；已保存成果按独立ID/原回执复用，主级不读原文，executor不保存创作草稿，声音/认可/历史保持。
+
+检查工作表不可读取时核对当前角色、方法名、目录给出的精确path、安装版本和manifest哈希；不放开任意文件读取或重派旧任务。导演/序列/画面仍归shots，story保留因果/剧本；audio保持原生有声默认、真实TTS字段/授权，review区分计划/参数/回执/视听证据。样例和估时不是项目事实或模型实测；真实质量手验452–457。
+
+0.2.144按[ADR-0104](adr/0104-agent-skills-and-host-authority.md)将Agent角色、Skill与工具权限分层。28个随包方法在 `lib/agent-skills` 保留正文/资源及manifest，同时编入 `agent-preset.js`，离开源码目录可运行；Harness原生SkillRegistry由既有核心提供，预设显式inject skills。专业必备方法在启动前核验，主级可选skillNames限本角色；同名全局/作用域内容不符合provider/版本/哈希则拒绝。加载异常核对包及实际版本，不通过开放通用文件工具绕过，不重提旧任务。
+
+新增子Agent或能力同时更新 `src/host/agent/capabilities.ts`、角色提示词/预设、方法/默认组合/清单、宿主工具和资料授权、正反检查与ADR；执行治理[项目Skill](../.trae/skills/agent-capability-governance/SKILL.md)。角色增加不自动获得写权、视听或剪辑能力。
+
+视频模型支持开关时新节点/显式参数默认有声，只有最新真实用户明确无声或精确原生选择经canvas_confirm_video_mute绑定，才能在该root/canvas/epoch/目标写false；未获授权返回AGENT_VIDEO_MUTE_REQUIRED，伪造依据返回AGENT_VIDEO_MUTE_EVIDENCE。无固定音色/无音频参考/独立TTS不关闭声音；复杂自然语言范围需原生确认。旧false节点的无关编辑和历史任务不迁移。用户手验446–451。
 
 权威定义：[host/index.ts](../src/host/index.ts)。配置修改后重启生效；dataDir 在宿主解析为绝对路径，建议直接填写绝对路径。
 

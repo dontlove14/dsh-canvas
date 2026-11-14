@@ -10,6 +10,8 @@ export const CreativeTaskSchema = z.object({
   artifactIds: z.array(z.string().uuid()).max(100).default([]),
   nodeIds: z.array(z.string().uuid()).max(100).default([]),
   assetIds: z.array(z.string().uuid()).max(100).default([]),
+  skillNames: z.array(z.string().regex(/^canvas-[a-z0-9-]+$/)).max(12).optional(),
+  modelKinds: z.array(z.enum(['image', 'video'])).max(2).optional(),
 }).strict()
 export const ArtifactInputSchema = z.object({
   draft: CreativeDraftSchema, sources: z.array(SourceRangeSchema).max(100).default([]),

@@ -9,6 +9,8 @@ import { isGptImage25, builtinDefinition, bananaSizePresets, providerFor, seedre
 import { receive } from './media/files'
 import { ReviewAssetIdSchema } from '../shared/seedanceReview'
 import { klingReferenceId, klingRole, resolveKlingPrompt } from '../shared/kling'
+import { fetchWithExchange, type ProviderExchangeWriter } from './providerExchange'
+import type { ProviderExchangeStep } from '../shared/taskDiagnostics'
 
 export class ProviderFailure extends Error {
   constructor(message: string, readonly definitive: boolean) { super(message) }
@@ -16,7 +18,7 @@ export class ProviderFailure extends Error {
 export interface ProviderResult { id?: string; status: 'queued' | 'generating' | 'completed' | 'failed'; progress?: number; outputs?: Output[]; error?: string; errorCode?: string }
 export const DEFAULT_IMAGE_REQUEST_TIMEOUT_MS = 600000
 export interface ProviderOptions { requestTimeoutMs: number; imageRequestTimeoutMs?: number; maxMediaBytes: number; maxReferenceBytes: number }
-export interface MediaReader {
+export interface MediaReader extends ProviderExchangeWriter {
   readMedia(id: string, limit: number, taskId?: string): Promise<Buffer>; stagePath(name: string): string
   inspectReference?(taskId: string, assetId: string, signal: AbortSignal, protocol?: string): Promise<Asset>
   modelReferenceUrl?(taskId: string, assetId: string): Promise<string>
@@ -28,7 +30,7 @@ export type ReviewReferenceResolver = (taskId: string, snapshot: TaskSnapshot) =
 export function endpoint(base: string, path: string): string {
   return `${base.replace(/\/+$/, '')}/${path}`
 }
-async function jsonResponse(response: Response, limit: number): Promise<Record<string, any>> {
+async function responseText(response: Response, limit: number): Promise<string> {
   if (!response.body) throw new ProviderFailure('模型服务返回空响应', false)
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
@@ -41,12 +43,31 @@ async function jsonResponse(response: Response, limit: number): Promise<Record<s
       if (bytes > limit) throw new ProviderFailure('模型服务响应超过大小限制', false)
       chunks.push(next.value)
     }
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    return Buffer.concat(chunks).toString('utf8')
   } catch (error) { await reader.cancel().catch(() => {}); throw error }
+}
+async function jsonResponse(response: Response, limit: number): Promise<Record<string, any>> {
+  return JSON.parse(await responseText(response, limit))
+}
+async function providerError(response: Response, fallback: string): Promise<string> {
+  const text = await responseText(response, 1024 * 1024).catch(() => '')
+  try {
+    const body = JSON.parse(text)
+    return typeof body.error?.message === 'string' ? body.error.message
+      : typeof body.message === 'string' ? body.message
+        : typeof body.error === 'string' ? body.error : text.trim() ? text : fallback
+  } catch { return text.trim() ? text : fallback }
 }
 
 export class Providers {
-  constructor(private store: MediaReader, private options: ProviderOptions, private signal: AbortSignal, private reviewReferences?: ReviewReferenceResolver) {}
+  constructor(private store: MediaReader, private options: ProviderOptions, private signal: AbortSignal, private reviewReferences?: ReviewReferenceResolver,
+    private trace?: { taskId: string; step: ProviderExchangeStep }) {}
+  forTask(taskId: string, step: ProviderExchangeStep): Providers {
+    return new Providers(this.store, this.options, this.signal, this.reviewReferences, { taskId, step })
+  }
+  private fetch(url: string | URL, init: RequestInit, key: string): Promise<Response> {
+    return fetchWithExchange(this.store, this.trace, url, init, [key], Math.ceil(this.options.maxMediaBytes * 1.4) + 1024 * 1024)
+  }
   private get imageRequestTimeoutMs(): number { return this.options.imageRequestTimeoutMs ?? DEFAULT_IMAGE_REQUEST_TIMEOUT_MS }
   private imageRequest(url: string, key: string, init: RequestInit, auth: 'bearer' | 'google' = 'bearer'): Promise<Record<string, any>> {
     const timeoutMs = this.imageRequestTimeoutMs
@@ -57,15 +78,13 @@ export class Providers {
     return this.request(url, key, { ...init, dispatcher }, auth, timeoutMs)
   }
   private async request(url: string, key: string, init: RequestInit & { dispatcher?: Dispatcher } = {}, auth: 'bearer' | 'google' = 'bearer', timeoutMs = this.options.requestTimeoutMs): Promise<Record<string, any>> {
-    const response = await fetch(url, {
+    const response = await this.fetch(url, {
       ...init, headers: { ...init.headers, ...(key ? auth === 'google' ? { 'x-goog-api-key': key } : { Authorization: `Bearer ${key}` } : {}) },
       redirect: 'error',
       signal: AbortSignal.any([this.signal, AbortSignal.timeout(timeoutMs)]),
-    })
+    }, key)
     if (!response.ok) {
-      const body: Record<string, any> = await jsonResponse(response, 64 * 1024).catch(() => ({}))
-      const message = typeof body.error?.message === 'string' ? body.error.message
-        : typeof body.message === 'string' ? body.message : `模型服务返回 HTTP ${response.status}`
+      const message = await providerError(response, `模型服务返回 HTTP ${response.status}`)
       // A gateway/server failure may happen after the provider accepted the request.
       throw new ProviderFailure(message, response.status >= 400 && response.status < 500 && ![408, 409, 429].includes(response.status))
     }
@@ -518,14 +537,13 @@ export class Providers {
         return { audio: new Uint8Array(audio), text: reference_text!.trim() }
       }) } : reference_id ? { reference_id } : {}) }
     const cloning = snapshot.referenceIds.length > 0
-    const response = await fetch(snapshot.model.api_base, {
+    const response = await this.fetch(snapshot.model.api_base, {
       method: 'POST', redirect: 'error', signal,
       headers: { 'Content-Type': cloning ? 'application/msgpack' : 'application/json', model: FISH_TTS_MODEL, ...(key ? { Authorization: `Bearer ${key}` } : {}) },
       body: cloning ? new Uint8Array(encode(payload)) : JSON.stringify(payload),
-    })
+    }, key)
     if (!response.ok) {
-      const body: Record<string, any> = await jsonResponse(response, 64 * 1024).catch(() => ({}))
-      throw new ProviderFailure(typeof body.message === 'string' ? body.message : typeof body.error?.message === 'string' ? body.error.message : `FishTTS 返回 HTTP ${response.status}`, response.status >= 400 && response.status < 500 && ![408, 409, 429].includes(response.status))
+      throw new ProviderFailure(await providerError(response, `FishTTS 返回 HTTP ${response.status}`), response.status >= 400 && response.status < 500 && ![408, 409, 429].includes(response.status))
     }
     if (!response.body) throw new ProviderFailure('FishTTS 返回空音频', false)
     const id = randomUUID(); const stageFile = `${id}.raw`
@@ -591,12 +609,13 @@ export class Providers {
     const provider = new URL(snapshot.model.api_base)
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new CanvasError('结果地址无效')
     if (output.authenticated && url.origin !== provider.origin) throw new CanvasError('结果地址与模型服务不一致')
-    const response = await fetch(url, {
+    const response = await this.fetch(url, {
       headers: output.authenticated && key ? { Authorization: `Bearer ${key}` } : {},
       redirect: output.authenticated ? 'error' : 'follow',
       signal: AbortSignal.any([this.signal, AbortSignal.timeout(this.options.requestTimeoutMs)]),
-    })
-    if (!response.ok || !response.body) throw new CanvasError(`结果下载失败（HTTP ${response.status}）`, 502)
+    }, key)
+    if (!response.ok) throw new CanvasError(await providerError(response, `结果下载失败（HTTP ${response.status}）`), 502)
+    if (!response.body) throw new CanvasError('结果下载失败：服务返回空响应', 502)
     return Readable.fromWeb(response.body as import('node:stream/web').ReadableStream)
   }
 }

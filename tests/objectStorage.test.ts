@@ -189,7 +189,7 @@ describe('object storage invariants', () => {
     await service.store.saveModel({ ...BUILTIN_MODELS[0], api_key: 'model-key' })
     const node: CanvasNode = { id: randomUUID(), kind: 'image-generation', title: '生成', position: { x: 0, y: 0 }, modelId: BUILTIN_MODELS[0].id, params: defaultParams(BUILTIN_MODELS[0]), prompt: 'test', assetId: null, selectedResultId: null }
     await service.saveGraph('w', { ...emptyGraph(), nodes: [node] }, 0)
-    const providers = (service.runtime as any).providers
+    const providers = Object.getPrototypeOf((service.runtime as any).providers)
     const submit = vi.spyOn(providers, 'submit').mockResolvedValue({ status: 'completed', outputs: [{ id: randomUUID(), mime: 'image/png', filename: 'output.png', url: 'https://expired.invalid/result' }] })
     let downloads = 0
     vi.spyOn(providers, 'outputStream').mockImplementation(async () => {

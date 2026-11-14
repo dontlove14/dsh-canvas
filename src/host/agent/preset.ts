@@ -19,7 +19,10 @@ import { connectAssetReference } from '../../shared/referenceConnection'
 import { hash } from '../persistence/database'
 import { CanvasError, detectMedia } from '../store'
 import { submittedReferences } from './chatReferences'
-import { METHODS, MAIN_PROMPT, EXECUTOR_PROMPT } from './methods'
+import { MAIN_PROMPT, EXECUTOR_PROMPT, specialistPrompt } from './methods'
+import { capabilities, taskSkills } from './capabilities'
+import { CanvasSkills } from './skillLoader'
+import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import { EXECUTION_SCHEMAS, ReferenceExclusionsSchema, executionIntent, type ExecutionCommand } from '../../shared/execution'
 import { installCreativeTools } from './creativeTools'
 import { installDelegationTools } from './delegation'
@@ -38,12 +41,13 @@ import { promptReference, promptReferenceCatalog, referenceDependencyCatalog, re
 import { isMultimodalVideo } from '../../shared/modelCatalog'
 import { isTtsParams, validateGraph } from '../../shared/contracts'
 import { videoGenerationParams } from '../../shared/video'
+import { readTaskDiagnosis, taskDiagnosisTurn, isTaskDiagnosisText } from './taskDiagnosis'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap { 'canvas-agent': { kind: 'canvas-agent' } }
 }
 export const name = 'dsh-canvas-agent-preset'
-export const inject = ['canvasAgent', 'tools', 'systemPrompt', 'agents', 'llm', 'subagents', 'attachments', 'userQuestions', 'workingDirectory']
+export const inject = ['canvasAgent', 'tools', 'skills', 'systemPrompt', 'agents', 'llm', 'subagents', 'attachments', 'userQuestions', 'workingDirectory']
 export const Config = z.object({ role: AgentRoleSchema.default('main') })
 const Empty = z.object({}).strict()
 const Operation = { operationId: IdSchema, revision: z.number().int().nonnegative(),
@@ -57,10 +61,12 @@ type BoundExec = ToolRunContext & { readonly agent: Agent }
 
 export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) {
   const { role } = Config.parse(input), coordinator = ctx.canvasAgent, service = coordinator.canvas
+  const policy = capabilities(role), skills = new CanvasSkills(ctx, coordinator, role)
   const workspace = new AgentWorkspace(ctx)
   const rootAgent = (exec: BoundExec) => coordinator.rootAgent(exec.agent)
   const admission = (exec: BoundExec) => {
     exec.signal.throwIfAborted(); coordinator.member(exec.agent)
+    if (role !== 'main') coordinator.binding(exec.agent)
     const c = coordinator.session(rootAgent(exec).id).canvas
     if (c) coordinator.assert(exec.agent, c, role === 'main')
   }
@@ -88,6 +94,7 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
   const configured = new WeakMap<Agent, () => void>()
   const configure = (agent: Agent) => {
     if (configured.has(agent)) return
+    // SDK structured_output is a child-owned tool, not an inherited global name.
     const restriction = agent.ctx.tools.restrict({ allow: [...tools, ...(role === 'main' ? ['ask_user_question'] : [])] })
     const dispose = () => { restriction(); configured.delete(agent) }
     configured.set(agent, dispose)
@@ -95,15 +102,27 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
     ctx.effect(() => dispose)
   }
   const tool = <T extends z.ZodType>(name: string, description: string, schema: T, run: (args: z.infer<T>, exec: BoundExec) => Promise<unknown>) => {
+    if (!policy.tools.includes(name)) throw new CanvasError(`工具未声明角色权限：${role}/${name}`, 403, 'AGENT_CAPABILITY_MISSING')
+    // Providers require an explicit object root, even when all union branches are objects.
+    const parameters = JSON.parse(JSON.stringify(z.toJSONSchema(schema)))
+    if (parameters.type !== 'object') throw new CanvasError(`工具参数必须是对象：${name}`, 409, 'AGENT_TOOL_SCHEMA_INVALID')
     tools.push(name)
     ctx.tools.register({
       // Zod attaches non-enumerable ~standard metadata; Harness requires plain lossless JSON.
-      name, description, parameters: JSON.parse(JSON.stringify(z.toJSONSchema(schema))),
+      name, description, parameters,
       output: { schema: { type: 'object', properties: {}, additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
       execute: async (raw, exec) => {
         if (!exec.agent) throw new CanvasError('画布工具需要真实 Agent 身份', 403, 'AGENT_FORBIDDEN')
         coordinator.session(exec.agent.id)
-        coordinator.member(exec.agent); exec.signal.throwIfAborted()
+        if (coordinator.member(exec.agent).role !== role) throw new CanvasError('工具与真实角色不匹配', 403, 'AGENT_FORBIDDEN')
+        exec.signal.throwIfAborted()
+        if (role === 'main') {
+          const required = { canvas_execute: 'canvas-execution-manifest-planning', canvas_execute_parallel: 'canvas-execution-manifest-planning',
+            canvas_specialist: 'canvas-production-orchestration', canvas_review_plan: 'canvas-plan-review-and-handoff',
+            canvas_handoff_generation: 'canvas-plan-review-and-handoff', canvas_show_audio: 'canvas-voice-choice-and-audition',
+            canvas_task_diagnose: 'canvas-task-failure-diagnosis' }[name as string]
+          if (required) await skills.load(exec.agent, required, exec.signal)
+        } else await skills.required(exec.agent, exec.signal)
         const parsed = schema.parse(raw)
         // A different narration must not change the identity of the same business operation.
         if (parsed && typeof parsed === 'object') Reflect.deleteProperty(parsed, 'note')
@@ -227,8 +246,13 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
     coordinator.register(agent, role, parent?.id ?? agent.id)
     configure(agent)
   }
-  ctx.on('agent/created', ({ agent }) => {
+  ctx.on('agent/created', async ({ agent }) => {
     register(agent)
+    if (role !== 'main') {
+      let bound = false
+      try { coordinator.binding(agent); bound = true } catch {}
+      if (bound) await skills.required(agent, new AbortController().signal)
+    }
     return undefined
   })
   ctx.on('agent/disposed', ({ agent }) => { coordinator.unregister(agent) })
@@ -236,32 +260,43 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
     const config = await next()
     await coordinator.qualified(config.provider, config.model, signal)
     coordinator.setRoute(agent, config)
-    if (role === 'main' && coordinator.session(agent.id).canvas) read(agent)
+    if (role === 'main' && !taskDiagnosisTurn(agent) && coordinator.session(agent.id).canvas) read(agent)
+    await skills.required(agent, signal)
     return config
   })
   ctx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
     register(agent)
     // A fresh root-user message is a new delegation, not a replay of the
     // cancelled step. Restore before assembly/request guards inspect control.
-    if (role === 'main') await coordinator.resumeForUserInput(agent, messages, signal)
-    if (role === 'main' && coordinator.session(agent.id).canvas) read(agent)
+    const diagnosing = role === 'main' && (taskDiagnosisTurn(agent) || messages.some((message) => message.source.kind === 'user' &&
+      isTaskDiagnosisText(message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n'))))
+    if (role === 'main' && !diagnosing) await coordinator.resumeForUserInput(agent, messages, signal)
+    if (role === 'main' && !diagnosing && coordinator.session(agent.id).canvas) read(agent)
+    await skills.required(agent, signal)
+    if (diagnosing) await skills.load(agent, 'canvas-task-failure-diagnosis', signal)
     return next()
   })
   ctx.systemPrompt.suppressRuntimeContext()
   ctx.systemPrompt.section({
     name: 'deployment:persona-prefix', order: 0, interpolate: false,
-    text: role === 'main' ? MAIN_PROMPT : role === 'executor' ? EXECUTOR_PROMPT : `你是无限画布的 ${role} 专业子 Agent，只处理主 Agent 给定任务。独立上下文，不写画布、不生成付费任务、不再委派、不向用户提问。用 creative_source_index / creative_source_read 分页读取授权原文，用 creative_artifact_read 读取必要成果，分批用 creative_artifact_save 保存原文定位、依赖和进度；不把未读章节当成已分析。需要用户决定时在成果中标明缺口。taskId仅标识批次，不能作为新成果artifactId；每份新成果使用独立UUID，重试同一内容沿用原artifactId。完成后调用 structured_output({"result":{"artifactId":"最终成果保存回执中的ID","summary":"简短交接说明"}})，只交接本批次已保存的最终成果，不重复输出全文。尚未保存时才返回result内完整草稿kind/title/content/dependencies/assetIds。\n${METHODS[role]}`,
+    text: role === 'main' ? MAIN_PROMPT : role === 'executor' ? EXECUTOR_PROMPT : specialistPrompt(role),
   })
+  ctx.systemPrompt.section({ name: 'canvas:skill-catalog', order: 5, interpolate: false,
+    text: `当前角色可用方法：${policy.skills.join('、')}。完整方法用canvas_skill加载，专业任务必备方法由宿主注入。` })
+  ctx.systemPrompt.context({ name: 'canvas:skills', order: 45, required: true, interpolate: false,
+    text: ({ agent }) => agent ? skills.context(agent) : '' })
   ctx.systemPrompt.context({
     name: 'canvas:control', order: 50, required: true, interpolate: false,
     text: ({ agent }) => {
       if (!agent) return ''
       const modelContext = { models: coordinator.generationModels.catalog(),
-        ...(['main', 'executor'].includes(role) ? { modelSelections: coordinator.generationModels.selections(coordinator.rootAgent(agent)) } : {}) }
+        modelSelections: coordinator.generationModels.selections(coordinator.rootAgent(agent)),
+        ...(role !== 'main' ? { planningModels: coordinator.binding(agent).planningModels ?? [] } : {}) }
       try {
         const c = coordinator.attached(agent), snapshot = service.store.state(c.canvasId)
         return JSON.stringify({ ...modelContext, control: c, revision: snapshot.graphRevision, handoff: coordinator.ledger.handoff(c.canvasId)?.summary,
-          ...(role === 'main' ? { userMedia: attachmentCatalog(agent), userReferences: submittedReferences(agent), workspace: ctx.workingDirectory.get(agent.session) } : {}),
+          ...(role === 'main' ? { userMedia: attachmentCatalog(agent), userReferences: submittedReferences(agent), workspace: ctx.workingDirectory.get(agent.session),
+            videoSound: { defaultEnabled: true, latestUserMessageId: coordinator.videoSound.latestUserMessageId(agent) } } : {}),
           ...(role === 'main' ? { drafts: coordinator.ledger.drafts(c.canvasId).slice(-12).map(({ id, kind, title, version }) => ({ id, kind, title, version })) } : { binding: coordinator.binding(agent) }) })
       } catch { return JSON.stringify({ ...modelContext, hint: '尚未打开画布，请使用 canvas_open。',
         ...(role === 'main' ? { userMedia: attachmentCatalog(agent), userReferences: submittedReferences(agent), workspace: ctx.workingDirectory.get(agent.session) } : {}) }) }
@@ -275,7 +310,8 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
     const userReferences = role === 'main' ? submittedReferences(exec.agent) : []
     const cwd = role === 'main' ? await workspace.root(exec.agent, exec.signal) : undefined
     const modelContext = { models: coordinator.generationModels.catalog(),
-      ...(['main', 'executor'].includes(role) ? { modelSelections: coordinator.generationModels.selections(rootAgent(exec)) } : {}) }
+      modelSelections: coordinator.generationModels.selections(rootAgent(exec)),
+      ...(role !== 'main' ? { planningModels: coordinator.binding(exec.agent).planningModels ?? [] } : {}) }
     if (!coordinator.session(root).canvas) return { catalog: await service.store.catalog(), ...modelContext, userMedia, userReferences, ...(cwd ? { workspace: cwd } : {}) }
     const c = read(exec.agent), state = await service.store.snapshot(c.canvasId)
     const raw = service.store.state(c.canvasId)
@@ -308,7 +344,30 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
       control: c, presentation: coordinator.presentation.current(c.canvasId) ?? null, view: coordinator.presentation.view(c) ?? null,
       ...modelContext, tts: service.store.ttsSettings(), drafts: coordinator.ledger.drafts(c.canvasId).slice(-30), userMedia, userReferences, ...(cwd ? { workspace: cwd } : {}) }
   })
-  tool('canvas_method', '按需读取专业制作方法；不向全局安装任何技能。', z.object({ role: SpecialistRoleSchema }).strict(), async ({ role }) => ({ method: METHODS[role] }))
+  tool('canvas_skill', '列出或加载真实角色的随包Skill。只提供专业方法，不增加工具/资源权限；加载后的正文进入当前实例上下文。', z.object({
+    action: z.enum(['list', 'load']),
+    name: z.string().min(1).max(100).optional().describe('action=load时必填；action=list时省略'),
+  }).strict().superRefine((args, context) => {
+    // Keep the original per-action contract in host validation without a root oneOf on the wire.
+    if (args.action === 'load' && args.name === undefined)
+      context.addIssue({ code: 'custom', path: ['name'], message: '加载Skill必须提供name' })
+    if (args.action === 'list' && args.name !== undefined)
+      context.addIssue({ code: 'custom', path: ['name'], message: '列出Skill不接受name' })
+  }), async (args, exec) => {
+    admission(exec)
+    if (args.action === 'list') return skills.list(exec.agent, exec.signal)
+    const skill = await skills.load(exec.agent, args.name!, exec.signal)
+    return { name: skill.name, ...skill.metadata, content: renderSkillContent(skill) }
+  })
+  tool('canvas_skill_resource', '只读该角色Skill已列入清单的随包辅助文本。拒绝任意路径/URL、目录穿越与可执行资源。', z.object({
+    name: z.string().min(1).max(100), path: z.string().min(1).max(200),
+  }).strict(), async (args, exec) => { admission(exec); return skills.resource(exec.agent, args.name, args.path, exec.signal) })
+  tool('canvas_method', '兼容方法查询，仅本角色默认Skill；主级不可查询其他角色正文，请canvas_specialist委派。', z.object({ role: SpecialistRoleSchema }).strict(), async (args, exec) => {
+    if (args.role !== role) throw new CanvasError('兼容查询不能跨角色加载', 403, 'AGENT_SKILL_FORBIDDEN')
+    const definitions = []
+    for (const name of taskSkills(role)) definitions.push(await skills.load(exec.agent, name, exec.signal))
+    return { role, method: definitions.map(renderSkillContent).join('\n\n'), skills: definitions.map((skill) => ({ name: skill.name, ...skill.metadata })) }
+  })
   const admitImage = async (canvasId: string, asset: Asset | undefined, exec: BoundExec, valid: () => Promise<void>, present?: () => Promise<unknown>) => {
     if (!asset || asset.kind !== 'image' || !['image/png', 'image/jpeg', 'image/webp'].includes(asset.mime)) throw new CanvasError('请选择 PNG、JPEG 或 WebP 图片')
     exec.signal.throwIfAborted()
@@ -350,6 +409,33 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
   installVoiceTools(creativeTools)
   if (role === 'main') installDelegationTools(creativeTools)
   if (role === 'main') {
+    tool('canvas_task_diagnose', '只读诊断用户本轮指定的完整失败任务ID；无需接管画布。返回脱敏证据和三类结论，不读密钥/提示词、不联网、不重试或改任务。', z.object({
+      taskId: IdSchema,
+    }).strict(), async ({ taskId }, exec) => readTaskDiagnosis(coordinator, exec.agent, taskId, exec.signal))
+    tool('canvas_confirm_video_mute', '仅在用户明确要求无声时绑定精确节点/新建operationId。messageId可复用最新原始用户的明确要求；无法核验时显示原生确认卡。不会写图或生成。', z.object({
+      targets: z.array(IdSchema).min(1).max(100), messageId: z.string().min(1).max(200).optional(),
+    }).strict(), async (args, exec) => {
+      const c = read(exec.agent), targets = [...new Set(args.targets)]
+      const valid = () => { exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c) }
+      if (args.messageId) {
+        if (!coordinator.videoSound.fromUser(exec.agent, c, targets, args.messageId))
+          throw new CanvasError('无法将该依据核验为最新用户对这些目标的明确无声要求', 403, 'AGENT_VIDEO_MUTE_EVIDENCE')
+        return { approved: true, targets, canvasId: c.canvasId, epoch: c.epoch, source: 'user-message' }
+      }
+      coordinator.videoSound.revoke(exec.agent, targets)
+      const titles = targets.map((id) => service.store.state(c.canvasId).graph.nodes.find((node) => node.id === id)?.title ?? `待创建视频 ${id}`)
+      const id = 'canvas-video-mute', label = '这些视频生成无声'
+      const result = await ctx.userQuestions.ask({ agent: exec.agent, signal: exec.signal, wait: { callId: exec.callId },
+        questions: [{ id, header: '视频声音', question: `这些视频是否需要无声？${titles.join('、')}。默认生成声音；缺音色或独立配音不会关闭原生声音。`,
+          multiSelect: false, options: [{ label: '保持有声', description: '按镜头生成环境声、动作音效等适用声音' },
+            { label, description: '明确仅上述目标关闭声音生成' }] }] })
+      valid()
+      const answer = result.answers.find((answer) => answer.id === id)
+      if (result.answers.length !== 1 || answer?.custom?.trim() || answer?.selected.length !== 1 || answer.selected[0] !== label)
+        return { approved: false, targets }
+      coordinator.videoSound.confirm(exec.agent, c, targets)
+      return { approved: true, targets, canvasId: c.canvasId, epoch: c.epoch, source: 'native-answer' }
+    })
     tool('canvas_show_audio', '将当前画布的实际音频成果或已提交 FishTTS 任务展示为对话内播放器；只读，不生成、不下载官网样例、不自动播放。未完成任务的卡片只跟踪原任务。', z.object({
       taskId: IdSchema.optional(), assetId: IdSchema.optional(), title: z.string().min(1).max(160), ...StepNote,
     }).strict().refine((value) => !!value.taskId || !!value.assetId, '需要实际任务或音频素材ID'), async (args, exec) => {
@@ -550,13 +636,15 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
         args.placement ?? { group: args.kind === 'video-generation' ? 'shots' : args.kind === 'tts-generation' ? 'audio' : 'assets' }, exec.signal, false)
       if (args.kind === 'tts-generation' && args.modelId) throw new CanvasError('FishTTS 节点不使用图片或视频模型')
       const model = args.modelId ? coordinator.generationModels.require(rootAgent(exec), args.kind === 'video-generation' ? 'video' : 'image', args.modelId) : undefined
-      const input = { ...nodeFor(state.graph, args.kind, placement.position, model), id: args.operationId, title: args.title, prompt: args.prompt, ...(args.params !== undefined ? { params: args.params } : {}) }
+      const input = coordinator.videoSound.node(rootAgent(exec), c,
+        { ...nodeFor(state.graph, args.kind, placement.position, model), id: args.operationId, title: args.title, prompt: args.prompt, ...(args.params !== undefined ? { params: args.params } : {}) }, model, true)
       const { node, edges, references, referenceCoverage } = referencedNode(state, input, args.references, service.store.listModels(), (index) => uuid({ operationId: args.operationId, reference: index }), true, args.referenceExclusions)
       coordinator.presentation.operation(exec.agent.id, { operationId: args.operationId, action: 'create', phase: 'started',
         point: { x: node.position.x + 36, y: node.position.y + 28 }, text: false, nodeIds: [node.id], graphRevision: state.graphRevision })
       await service.mutateGraph(c.canvasId, { mutationId: args.operationId, baseRevision: args.revision, nodes: [{ value: node, hash: hash(node) }], edges: edges.map((value) => ({ value, hash: hash(value) })), deleteNodes: [], deleteEdges: [] }, () => {
         exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c)
         coordinator.executionRevision(exec.agent, 'canvas_create_node', args)
+        coordinator.videoSound.node(rootAgent(exec), c, node, model, true)
         if (model) coordinator.generationModels.require(rootAgent(exec), model.kind as 'image' | 'video', model.id)
       })
       return { nodeId: node.id, revision: service.store.state(c.canvasId).graphRevision, placement, references, referenceCoverage }
@@ -577,12 +665,16 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
       checkModel()
       if (args.patch.modelId && args.patch.params === undefined && (node.modelId !== current.modelId || !node.params))
         node.params = defaultParams(coordinator.generationModels.require(rootAgent(exec), node.kind === 'video-generation' ? 'video' : 'image', node.modelId))
+      const soundModel = service.store.listModels().find((model) => model.id === node.modelId)
+      if (args.patch.params !== undefined || args.patch.modelId !== undefined)
+        node = coordinator.videoSound.node(rootAgent(exec), c, node, soundModel, true)
       const edit = referencedNode(state, node, args.references, service.store.listModels(), (index) => uuid({ operationId: args.operationId, reference: index }),
         args.patch.prompt !== undefined || args.patch.params !== undefined || args.patch.modelId !== undefined || args.references !== undefined || args.referenceExclusions !== undefined,
         args.referenceExclusions)
       node = edit.node
       await service.mutateGraph(c.canvasId, { mutationId: args.operationId, baseRevision: args.revision, nodes: [{ value: node, hash: hash(node) }], edges: edit.edges.map((value) => ({ value, hash: hash(value) })), deleteNodes: [], deleteEdges: [] }, () => {
         exec.signal.throwIfAborted(); coordinator.assert(exec.agent, c); coordinator.executionRevision(exec.agent, 'canvas_update_node', args); checkModel()
+        if (args.patch.params !== undefined || args.patch.modelId !== undefined) coordinator.videoSound.node(rootAgent(exec), c, node, soundModel, true)
       })
       return { nodeId: node.id, revision: service.store.state(c.canvasId).graphRevision, references: edit.references, referenceCoverage: edit.referenceCoverage }
     }, 'update'))
@@ -706,3 +798,4 @@ export function apply(ctx: Context, input: { role?: AgentMember['role'] } = {}) 
   const allowed = new Set([...tools, ...(role === 'main' ? ['ask_user_question'] : ['structured_output'])])
   ctx.tools.guard((exec) => allowed.has(exec.name) ? undefined : '当前创作预设不开放此能力')
 }
+export { CanvasSkills }

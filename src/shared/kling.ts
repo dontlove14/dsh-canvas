@@ -1,6 +1,7 @@
 import type { Asset, GenerationParams } from './contracts'
 import { promptParts } from './promptMentions'
 import { KLING_VIDEO_LIMITS } from './modelCatalog'
+import { videoReferenceDurations } from './videoConstraints'
 
 export const KLING_IMAGE_ROLES = [
   { value: 'refer_image', label: '参考图片' }, { value: 'first_frame', label: '首帧' },
@@ -70,8 +71,9 @@ export function validateKlingInputs(params: GenerationParams, assets: readonly A
       || !image && (asset.width > 4553 || asset.height > 4553 || asset.width * asset.height > 8294400)))
       throw new Error(image ? 'Kling 参考图片宽高需至少300像素、比例在2:5至5:2之间'
         : 'Kling 参考视频宽高需在700至4553像素、总像素不超过8294400、比例在2:5至5:2之间')
-    if (!image && asset.duration !== undefined && (asset.duration < 3 || asset.duration > 30)) throw new Error('Kling 参考视频时长需在3至30秒之间')
+    const duration = videoReferenceDurations({ protocol: 'kling-video', model_id: 'kling-4.0' }).perVideo!
+    if (!image && asset.duration !== undefined && (asset.duration < duration.min || asset.duration > duration.max)) throw new Error('Kling 参考视频时长需在3至30秒之间')
   }
-  if (assets.filter((asset) => asset.kind === 'video').reduce((total, asset) => total + (asset.duration ?? 0), 0) > 30)
+  if (assets.filter((asset) => asset.kind === 'video').reduce((total, asset) => total + (asset.duration ?? 0), 0) > KLING_VIDEO_LIMITS.totalDuration)
     throw new Error('Kling 参考视频总时长不能超过30秒')
 }

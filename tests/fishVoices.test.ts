@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { fishPageUrl, parseFishListing, parseFishVoice, readFishPage } from '../src/host/agent/fishVoices'
 import { installVoiceTools, validateVoiceDraft } from '../src/host/agent/voiceTools'
-import { MAIN_PROMPT, METHODS } from '../src/host/agent/methods'
+import { MAIN_PROMPT, specialistPrompt } from '../src/host/agent/methods'
+import { PACKAGED_SKILLS } from '../src/host/agent/skills/manifest'
 import { FISH_VOICE_MANUAL_GUIDANCE, INTERNAL_CANVAS_PRESETS } from '../src/shared/agent'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -57,10 +58,10 @@ it('limits website reads to the voice child, eight requests, and requires real b
 })
 it('skips discovery for fixed ID/audio and delegates real auditions through the executor and read-only chat card', () => {
   expect(INTERNAL_CANVAS_PRESETS).toContain('canvas-voice')
-  expect(METHODS.voice).toContain('candidates=[]')
-  expect(METHODS.voice).toContain(FISH_VOICE_MANUAL_GUIDANCE)
+  expect(PACKAGED_SKILLS.get('canvas-fish-voice-discovery')!.content).toContain('candidates=[]')
+  expect(specialistPrompt('voice')).toContain(FISH_VOICE_MANUAL_GUIDANCE)
   expect(MAIN_PROMPT).toContain(FISH_VOICE_MANUAL_GUIDANCE)
-  expect(MAIN_PROMPT).toContain('不能把安装电脑再次访问官网核验当作前置条件')
-  for (const text of ['role="voice"', 'canvas_show_audio', 'allowTts=true', '不重复询问', 'reference_text', '刷新、重连或失败重新合成'])
+  expect(MAIN_PROMPT).toContain('用户已有voice ID直接使用，不再次查找/官网核验')
+  for (const text of ['voice候选', 'canvas_show_audio', '本轮明确音色/数量授权', '不重复询问', 'reference_text', '不自动播放或重生成'])
     expect(MAIN_PROMPT).toContain(text)
 })

@@ -7,7 +7,7 @@ import { UiPagination, paginationPages } from '../src/client/UiPagination'
 import { calendarDays, parseLocalDateTime, rangeFromFields, type DateTimeRange } from '../src/client/dateTimeRange'
 import { TaskCatalog, TaskDialog } from '../src/client/TaskDialog'
 import { CanvasApi } from '../src/client/api'
-import type { TaskRow, TaskPage, TaskSearchQuery } from '../src/shared/v2'
+import type { TaskRow, TaskPage, TaskSearchQuery, TaskDetail } from '../src/shared/v2'
 
 const roots: Root[] = []
 beforeEach(() => {
@@ -99,7 +99,82 @@ describe('shared date/time range and pagination', () => {
     act(() => { select.value = '50'; select.dispatchEvent(new Event('change', { bubbles: true })) }); expect(size).toHaveBeenLastCalledWith(50)
   })
 })
+
+describe('failed task Agent entry points', () => {
+  it.each(['failed', 'save_failed'] as const)('shows the list and detail entry only for %s and shares one click guard', async (status) => {
+    const api = new CanvasApi()
+    api.searchTasks = vi.fn(async () => ({ ...result(), items: [{ ...row, status }] }))
+    api.taskDetail = vi.fn(async () => ({ task: { status } as any, kind: 'generation', phase: 'failed', externalTaskId: null, externalCompletedAt: null, successAt: null, failureStage: 'submit', failureCode: null, failureMessage: '失败原因', attempts: [] }))
+    let finish!: () => void
+    const ask = vi.fn(async () => new Promise<void>((resolve) => { finish = resolve }))
+    const box = mount(<TaskDialog api={api} onClose={vi.fn()} onAskAgent={ask} />)
+    await act(async () => {})
+    await click(button(box, '询问 Agent'))
+    expect(ask).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: row.id, canvasId: row.canvasId }), expect.any(Function), expect.any(AbortSignal))
+    await click(button(box, '查看详情'))
+    const detail = box.querySelector('.dc-task-detail-view')!
+    expect(button(detail, '询问 Agent').disabled).toBe(true)
+    await click(button(detail, '询问 Agent'))
+    expect(ask).toHaveBeenCalledOnce()
+    await act(async () => finish())
+  })
+  it.each(['completed', 'unknown', 'generating', 'abandoned'] as const)('does not show either entry for %s', async (status) => {
+    const api = new CanvasApi()
+    api.searchTasks = vi.fn(async () => ({ ...result(), items: [{ ...row, status }] }))
+    api.taskDetail = vi.fn(async () => ({ task: { status } as any, kind: 'generation', phase: status, externalTaskId: null, externalCompletedAt: null, successAt: null, failureStage: null, failureCode: null, failureMessage: null, attempts: [] }))
+    const box = mount(<TaskDialog api={api} onClose={vi.fn()} />)
+    await act(async () => {})
+    expect(box.textContent).not.toContain('询问 Agent')
+    await click(button(box, '查看详情'))
+    expect(box.textContent).not.toContain('询问 Agent')
+  })
+})
 describe('task table search, request lifecycle and detail navigation', () => {
+  it('opens the exact task directly, shows only the failure reason and copies each original exchange', async () => {
+    const api = new CanvasApi(); api.searchTasks = vi.fn(async () => result())
+    const reason = 'user [445] quota [18684] preConsumedQuota [100000] is not enough'
+    api.taskDetail = vi.fn(async (): Promise<TaskDetail> => ({
+      modelName: row.modelName, providerName: row.providerName, task: null, kind: 'generation', phase: 'submit',
+      externalTaskId: null, externalCompletedAt: null, successAt: null, failureStage: 'submit', failureCode: 'PROVIDER_ERROR',
+      failureMessage: reason, attempts: [{ step: 'submit', issued_at: 1, finished_at: 2, outcome: 'failed', error: reason }],
+      providerExchange: { request: true, response: true },
+    }))
+    api.taskExchange = vi.fn(async (_canvas, _id, part) => ({ text: part === 'request' ? '请求头：\nauthorization: Bearer abcd…wxyz\n请求体：\n{"prompt":"原始参数"}' : '响应头：\nx-request-id: 123\n响应体：\n{"error":"额度不足"}' }))
+    const writeText = vi.fn(async () => {}); vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const box = mount(<TaskDialog api={api} initialTask={{ id: row.id, canvasId: row.canvasId }} onClose={vi.fn()} readOnly />)
+    await act(async () => {})
+    expect(api.taskDetail).toHaveBeenCalledWith(row.canvasId, row.id, expect.any(AbortSignal))
+    const view = box.querySelector('.dc-task-detail-view')!
+    expect(view.textContent).toContain('失败原因'); expect(view.querySelector('.dc-task-error')?.textContent).toBe(reason)
+    expect(view.textContent).not.toContain('提交内容'); expect(view.textContent).not.toContain('执行步骤')
+    expect(view.textContent).not.toContain('submit · PROVIDER_ERROR')
+    await click(button(view, '复制原始请求'))
+    expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('请求体：'))
+    expect(api.taskExchange).toHaveBeenLastCalledWith(row.canvasId, row.id, 'request', expect.any(AbortSignal))
+    await click(button(view, '复制原始响应'))
+    expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('响应体：'))
+    expect(view.textContent).toContain('原始响应已复制')
+    await click(button(view, '‹ 返回列表'))
+    expect(box.querySelector('.dc-task-detail-view')).toBeNull()
+  })
+  it('does not fabricate provider payloads for historical tasks and reports clipboard failure', async () => {
+    const api = new CanvasApi(); api.searchTasks = vi.fn(async () => result())
+    const detail: TaskDetail = { modelName: row.modelName, providerName: row.providerName, task: null, kind: 'generation',
+      phase: 'failed', externalTaskId: null, externalCompletedAt: null, successAt: null, failureStage: 'storage',
+      failureCode: 'LOCAL_ERROR', failureMessage: '本地磁盘空间不足', attempts: [] }
+    api.taskDetail = vi.fn(async () => detail)
+    api.taskExchange = vi.fn(async () => ({ text: '响应正文' }))
+    vi.stubGlobal('navigator', {}); document.execCommand = vi.fn(() => false)
+    const box = mount(<TaskDialog api={api} initialTask={row} onClose={vi.fn()} />); await act(async () => {})
+    expect(button(box, '复制原始请求').disabled).toBe(true)
+    expect(box.textContent).toContain('该任务未记录原始接口内容')
+    expect(box.querySelector('.dc-task-error')?.textContent).toBe('本地磁盘空间不足')
+    detail.providerExchange = { request: true, response: true }
+    // Reload through the catalog to prove failure feedback belongs to the detail being viewed.
+    await click(button(box, '‹ 返回列表')); await click(button(box, '查看详情'))
+    await click(button(box, '复制原始响应'))
+    expect(box.querySelector('.dc-task-detail-view [role="alert"]')?.textContent).toBe('复制失败，请重试')
+  })
   it('shows a shortened ID, copies the full value, and reports success without opening detail or querying again', async () => {
     const api = new CanvasApi(); api.searchTasks = vi.fn(async () => result())
     const writeText = vi.fn(async () => {}); vi.stubGlobal('navigator', { clipboard: { writeText } })

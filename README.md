@@ -1,5 +1,7 @@
 # 无限画布 · DeepSeek Harness 插件
 
+0.2.153：Agent在正式分镜/生图规格前确认对应模型，按当前型号能力规划生成片段，并自动加载GPT Image、Banana、Seedream、Seedance、MiniMax、Wan或Kling提示词方法。详见[模型创作流程](docs/adr/0108-model-first-planning-and-family-prompt-skills.md)。
+
 <!-- 文档类型：说明；负责人：项目维护者；最近核对：2026-11-12。 -->
 
 <p align="center">
@@ -7,29 +9,15 @@
 </p>
 
 <div align="center">
-  <video src="docs/files/agent%20%E5%9B%A2%E9%98%9F%E5%87%BA%E9%95%9C.mp4" autoplay muted playsinline controls width="800" style="max-width: 100%; height: auto;">
-    <a href="docs/files/agent%20%E5%9B%A2%E9%98%9F%E5%87%BA%E9%95%9C.mp4">观看 Agent 团队出镜视频</a>
+  <video src="docs/files/agent-team.mp4" autoplay muted playsinline controls width="800" style="max-width: 100%; height: auto;">
+    <a href="docs/files/agent-team.mp4">观看 Agent 团队出镜视频</a>
   </video>
 </div>
 
 
 无限画布是一款 AI 创作插件。你可以在同一张画布里生成图片、视频和语音，整理参考素材，也可以通过对话让 Agent 帮你准备创作内容。
 
-0.2.143让 Agent 空间在展开办公室和缩小站台中，同角色并行实例只显示一个形象；任一实例仍工作就保持工作动画，不同角色分别保留。实际并行、日志与各实例画布光标保持，见[展示规则](docs/adr/0103-agent-space-one-figure-per-role.md)。多个已确定的独立新建节点仍默认分给最多4个实际画布操作子 Agent，指定箭头13×15、四实例四色；顺序、本批依赖或混合操作规则见[默认派发规则](docs/adr/0102-independent-create-default-dispatch-and-small-cursors.md)与[调度边界](docs/adr/0101-parallel-canvas-executors-and-observed-cursors.md)。
-
-0.2.134让堆叠卡片按最上层图片 / 视频展示大小，解码后与单张尺寸一致，历史编辑框也跟随实际卡片位置。详见[堆叠尺寸规则](docs/adr/0097-stack-size-from-top-media.md)。
-
-0.2.133修复节点反复移出 / 移入视野时的可见性通知顺序，避免旧离屏状态留下随机加载占位。详见[可见性规则](docs/adr/0096-latest-element-visibility-notifications.md)。
-
-0.2.132补齐长时间停留画布的资源链接刷新：移入其他区域、恢复页面或网络后自动检查，加载失败可以恢复；换签保留已显示图片并恢复音视频进度。详见[媒体恢复规则](docs/adr/0095-long-lived-media-url-recovery.md)。
-
-它希望让创作过程更清楚：用了什么参考、改过哪些提示词、尝试过哪些结果，都能在画布上找到。你可以随时调整方向，把满意的素材继续用到下一步。
-
-Agent由主级统筹，专业子Agent负责内容，同级画布执行子Agent负责落地。上传或工作区@指定的TXT/Markdown资料可以按单元分析，保存原文位置、版本、成果依赖和进度，之后继续创作；图片与视频仍由你检查参数并点击生成。
-
-对话左上的“Agent 空间”浮卡显示实际工作的角色，缩小时并排显示正面站台，主级最终回复完成后自动缩小待机；原派发卡片保留任务和成果详情。画布操作光标显示在画布内，其他专业角色继续在 Agent 空间展示。
-
-FishTTS可填写音色ID，或连接一份音频并填写该音频原文来复刻音色。没有固定音色时，主智能体可委派“音色查找”读取官网候选供你选择；官网访问失败或没有可用候选时，会指导你在能访问官网的设备上选择音色，从详情地址`/m/`后复制ID发回对话。提供ID后可继续使用，插件电脑无需再次访问官网。要求试听后会合成短音频，在对话中自行播放、暂停或拖动进度，刷新不会重新合成。
+失败任务可在任务中心列表或详情点击“询问 Agent”，打开对话自动诊断；也可直接发送完整任务 ID。Agent只读脱敏记录，区分模型服务原因、插件程序问题与暂无法确定，不自动重试。插件问题可通过固定按钮反馈作者。见[诊断边界](docs/adr/0107-scoped-task-diagnosis-and-fresh-conversation.md)。
 
 ![无限画布首页：Agent 对话与素材创作画布](docs/files/image.png)
 
